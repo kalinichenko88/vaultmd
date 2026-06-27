@@ -1,6 +1,6 @@
 export type { MdVaultCode } from './errors.ts';
 export { MdVaultError } from './errors.ts';
-export type { Sig } from './fs-atomic.ts';
+export type { Sig } from './fs-atomic/index.ts';
 export type {
   Access,
   VaultIo,

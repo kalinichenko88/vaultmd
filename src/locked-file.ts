@@ -5,9 +5,8 @@ import {
   readConsistent,
   statSig,
   unlinkIfUnchanged,
-  withCrossProcessLock,
-  withFileLock,
-} from './fs-atomic.ts';
+} from './fs-atomic/index.ts';
+import { withCrossProcessLock, withFileLock } from './locks/index.ts';
 
 export type CommitEvent =
   | { op: 'create' | 'update'; path: string; content: string }

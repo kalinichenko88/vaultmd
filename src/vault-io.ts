@@ -23,7 +23,7 @@ import {
   unlinkIfUnchanged as fsUnlinkIfUnchanged,
   readConsistent,
   statSig,
-} from './fs-atomic.ts';
+} from './fs-atomic/index.ts';
 
 export type Access = 'read' | 'write';
 export type VaultPrefixes = { read: string[]; write: string[] };

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { MdVaultError } from '../errors.ts';
-import * as fsAtomic from '../fs-atomic.ts';
+import * as fsSig from '../fs-atomic/sig.ts';
 import { withFileDelete, withFileTransform } from '../locked-file.ts';
 
 let dir: string;
@@ -32,7 +32,7 @@ describe('withFileTransform', () => {
     }
     expect(err).toBeInstanceOf(MdVaultError);
     expect((err as MdVaultError).code).toBe('REFUSE_CREATE');
-    expect(await fsAtomic.statSig(file)).toBeNull();
+    expect(await fsSig.statSig(file)).toBeNull();
   });
 
   test('missing file + allowCreate:true → created, on disk, onCommit create event', async () => {
@@ -50,17 +50,17 @@ describe('withFileTransform', () => {
 
   test('transform returns null on a present file → unchanged, untouched', async () => {
     await writeFile(file, 'orig');
-    const before = await fsAtomic.statSig(file);
+    const before = await fsSig.statSig(file);
     const res = await withFileTransform(file, KEY, REL, () => null);
     expect(res).toEqual({ content: 'orig', outcome: 'unchanged' });
     expect(await readFile(file, 'utf8')).toBe('orig');
-    expect(await fsAtomic.statSig(file)).toEqual(before);
+    expect(await fsSig.statSig(file)).toEqual(before);
   });
 
   test('transform returns null on a missing file → unchanged with null content (no REFUSE_CREATE)', async () => {
     const res = await withFileTransform(file, KEY, REL, () => null);
     expect(res).toEqual({ content: null, outcome: 'unchanged' });
-    expect(await fsAtomic.statSig(file)).toBeNull();
+    expect(await fsSig.statSig(file)).toBeNull();
   });
 
   test('present file changed → updated, disk updated, onCommit update event', async () => {
@@ -148,7 +148,7 @@ describe('withFileDelete', () => {
     });
     expect(res).toEqual({ deleted: true });
     expect(events).toEqual([{ op: 'delete', path: REL }]);
-    expect(await fsAtomic.statSig(file)).toBeNull();
+    expect(await fsSig.statSig(file)).toBeNull();
   });
 
   test('signature changed under us → MTIME_CONFLICT, file not deleted', async () => {
@@ -156,9 +156,9 @@ describe('withFileDelete', () => {
     // Bun ESM live-binding + spyOn (the repo-blessed pattern): make ONLY the
     // first statSig call (the one inside withFileDelete) return a stale sig;
     // unlinkIfUnchanged then re-stats the real file -> size mismatch -> conflict.
-    const realStatSig = fsAtomic.statSig;
+    const realStatSig = fsSig.statSig;
     let n = 0;
-    const spy = spyOn(fsAtomic, 'statSig').mockImplementation(
+    const spy = spyOn(fsSig, 'statSig').mockImplementation(
       async (p: string) => {
         n++;
         const real = await realStatSig(p);
