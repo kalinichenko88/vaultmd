@@ -19,12 +19,12 @@ export type {
   EditOutcome,
   FrontmatterValidity,
   ParsedFrontmatter,
-} from './frontmatter.ts';
+} from './frontmatter/index.ts';
 export {
   deriveTags,
   editFrontmatter,
   isFlatFrontmatter,
   parseFrontmatter,
-} from './frontmatter.ts';
+} from './frontmatter/index.ts';
 export type { ExtractedLinks, LinkResolution, StoredLink } from './links.ts';
 export { extractLinks, storedLinksFor } from './links.ts';
