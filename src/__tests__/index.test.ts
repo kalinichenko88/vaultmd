@@ -1,16 +1,65 @@
-import { expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 
 import * as mdvault from '../index.ts';
 
-test('barrel exposes the Plan 1 public surface', () => {
-  expect(typeof mdvault.MdVaultError).toBe('function');
-  expect(typeof mdvault.createVaultIo).toBe('function');
-  expect(typeof mdvault.withFileTransform).toBe('function');
-  expect(typeof mdvault.withFileDelete).toBe('function');
-  expect(typeof mdvault.parseFrontmatter).toBe('function');
-  expect(typeof mdvault.editFrontmatter).toBe('function');
-  expect(typeof mdvault.deriveTags).toBe('function');
-  expect(typeof mdvault.isFlatFrontmatter).toBe('function');
-  expect(typeof mdvault.extractLinks).toBe('function');
-  expect(typeof mdvault.storedLinksFor).toBe('function');
+// The frozen Plan 1 package public API. Changing this set must be deliberate:
+// adding/removing/renaming any export fails these tests.
+const VALUE_EXPORTS = [
+  'MdVaultError',
+  'createVaultIo',
+  'deriveTags',
+  'editFrontmatter',
+  'extractLinks',
+  'isFlatFrontmatter',
+  'parseFrontmatter',
+  'storedLinksFor',
+  'withFileDelete',
+  'withFileTransform',
+].sort();
+
+const ALL_EXPORTS = [
+  ...VALUE_EXPORTS,
+  'Access',
+  'CommitEvent',
+  'CrossLock',
+  'EditOutcome',
+  'ExtractedLinks',
+  'FrontmatterValidity',
+  'LinkResolution',
+  'MdVaultCode',
+  'ParsedFrontmatter',
+  'Sig',
+  'StoredLink',
+  'TransformOpts',
+  'TransformResult',
+  'VaultIo',
+  'VaultIoConfig',
+  'VaultPrefixes',
+].sort();
+
+function exportedNames(source: string): string[] {
+  const names = new Set<string>();
+  for (const m of source.matchAll(/export\s+(?:type\s+)?\{([^}]*)\}/g)) {
+    for (const raw of m[1].split(',')) {
+      const name = raw
+        .trim()
+        .split(/\s+as\s+/)[0]
+        .trim();
+      if (name) names.add(name);
+    }
+  }
+
+  return [...names].sort();
+}
+
+describe('package public API freeze', () => {
+  test('src/index.ts exports exactly the frozen 26 names (value + type)', () => {
+    const src = readFileSync(new URL('../index.ts', import.meta.url), 'utf8');
+    expect(exportedNames(src)).toEqual(ALL_EXPORTS);
+  });
+
+  test('runtime value exports are exactly the 10 live values', () => {
+    expect(Object.keys(mdvault).sort()).toEqual(VALUE_EXPORTS);
+  });
 });
