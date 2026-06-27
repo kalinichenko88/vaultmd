@@ -1,7 +1,7 @@
 # mdvault — foundation design
 
 **Date:** 2026-06-27
-**Status:** draft — revised after three review rounds (pending user review)
+**Status:** draft — revised after four review rounds (pending user review)
 **Package:** `mdvault` (npm, MIT)
 **Repo home:** `/Users/ivan_kalinichenko/Dev/Personal/mdvault`
 
@@ -41,6 +41,8 @@ consuming projects, not here.
   the interface is extracted on the second implementation.
 - **Node runtime support** / a SQLite-driver abstraction. v1 targets
   `bun:sqlite`; both consumers are Bun.
+- **Custom `LinkResolver`** (a third link-resolution strategy). v1 ships the
+  two built-ins (`'wikilink'`, `'relative'`).
 
 ## Concurrency model (the honest contract)
 
@@ -62,10 +64,12 @@ This is load-bearing, so it is stated plainly:
   canonical path key, §vault-io) serializes mdvault's writers **within one
   process**.
 - **Cross-process** coordination (multiple mdvault *writer processes* on the
-  same vault — e.g. machine-spirit's CLI and `serve` daemon): an **optional**
-  advisory file lock (`crossProcessWriterLock`, default `false`) serializes
-  them via an `O_EXCL` lockfile with stale-lock recovery. It does **nothing**
-  for the external syncer.
+  same vault — e.g. machine-spirit's CLI and `serve` daemon): an advisory file
+  lock (`crossProcessWriterLock`, **default `true`** — the named CLI+daemon
+  topology can have two writers, so safe-by-default) serializes them via an
+  `O_EXCL` lockfile with stale-lock recovery. A single-writer deployment may
+  set it `false` to skip the per-write lockfile. It does **nothing** for the
+  external syncer (uncooperative).
 - **Claim:** mdvault *tolerates* an external concurrent writer (best-effort
   detect-and-retry + eventual index reconcile); it does **not** *prevent*
   lost updates against an uncooperative syncer. Consumers needing a hard
@@ -131,12 +135,12 @@ async createVault({
   root: string,                      // vault root abs path
   prefixes: { read: string[]; write: string[] },
   indexPath: string,                 // bun:sqlite db in DATA_DIR (NOT in vault)
-  linkResolution?: 'wikilink' | 'relative' | LinkResolver,  // default 'wikilink'
+  linkResolution?: 'wikilink' | 'relative',  // default 'wikilink' (custom resolver: v1.1)
   lazyReconcile?: boolean,           // default true; selgeo sets false
   reconcileTtlMs?: number,           // default 2000 — lazy-reconcile throttle
   sqliteBusyTimeoutMs?: number,      // default 5000 — SQLite contention (independent knob)
   caseSensitive?: boolean,           // default: auto-detect the volume
-  crossProcessWriterLock?: boolean,  // default false (see Concurrency model)
+  crossProcessWriterLock?: boolean,  // default true (Concurrency model); set false only if single writer process
   onCommit?: (e: CommitEvent) => void | Promise<void>,
   ignore?: string[],
 }): Promise<Vault>
@@ -240,9 +244,11 @@ read → decide → `rewriteIfUnchanged` with **stat→read→stat read-consiste
   'edited' | 'unchanged' | 'unverifiable' }`. **Multi-field, body-preserving**
   via the YAML **Document/CST API** (`parseDocument` → mutate nodes →
   `String(doc)`) — preserves comments, key order, numeric literals (`1.0`),
-  empty values (`aliases:`). Fail-**closed** (`unverifiable`, no write) on
-  non-flat / malformed. Subsumes selgeo's `editFrontmatter`; the
-  `demoteApprovedOnEdit` *policy* stays in selgeo.
+  empty values (`aliases:`). **Absent frontmatter** (`valid:'none'`) → a new
+  YAML block is **created** at the top of the note (outcome `edited`).
+  **Present-but-invalid** (`valid:'present-but-invalid'`) or any non-flat
+  result → fail-**closed** (`unverifiable`, no write). Subsumes selgeo's
+  `editFrontmatter`; the `demoteApprovedOnEdit` *policy* stays in selgeo.
 - `assertFlatFrontmatter(fields)` — flat = top-level keys; values scalar or
   array-of-scalar; nested maps rejected.
 - `tags` derivation (pinned): frontmatter `tags` (and `tag`); coerce
@@ -267,7 +273,11 @@ read → decide → `rewriteIfUnchanged` with **stat→read→stat read-consiste
     preserves Obsidian's explicit path disambiguation **and** lets a target
     appearing/disappearing/renamed **self-heal** with no reindex of unrelated
     source notes.
-  - Custom `LinkResolver(target, srcDir, kind) => { stored: string }`.
+  - A **custom `LinkResolver` is deferred to v1.1.** After the move to
+    query-time wikilink resolution, a third resolver must participate in both
+    *storage* and *query-time backlink/outbound resolution* — a larger
+    interface than `{ stored }`. v1 ships only the two fully-implemented
+    built-ins (`'wikilink'`, `'relative'`), which cover both consumers.
 
 ### `notes` (CRUD)
 
@@ -278,8 +288,12 @@ SQLite transaction**, then call `onCommit`.
 - `readNote(path, { withLinks? })` → `{ frontmatter, tags, body, valid }`;
   `withLinks` adds `{ outbound, backlinks }` (from the index). Missing →
   `NOT_FOUND`.
-- `createNote(path, { frontmatter?, body })` — `allowCreate`; **`ALREADY_EXISTS`**
-  if present (no clobber); full index INSERT in-lock.
+- `createNote(path, { frontmatter?, body })` — **exclusive create** for a
+  **true** no-clobber guarantee: write a temp file, then `link()` it onto the
+  target (atomic; fails `EEXIST` if the target exists) and unlink the temp —
+  so an external writer creating the file between check and commit yields
+  **`ALREADY_EXISTS`**, never a clobber. (This is the one write that *can* be
+  made race-free, unlike update/delete.) Full index INSERT in-lock.
 - `updateNote(path, op)` — exactly one of:
   - `{ editByMatch: { old, new } }` — **literal substring**, **non-overlapping**
     count over exact bytes; `NO_MATCH` (0) / `AMBIGUOUS_MATCH` (>1);
@@ -352,8 +366,11 @@ post-filter backstop.
 - `queryNotes({ tag?, where?, folder?, orderBy?, limit?, offset? })`:
   - `where` = equality map `Record<string, string|number|boolean>`; **values
     always bound (`?`)**; **keys validated** to `[A-Za-z0-9_.-]` and emitted as
-    a quoted JSON path `$."key"` (reject/skip invalid keys). All conditions
-    plus `tag`/`folder` are AND-ed; missing key = no match. Operators deferred.
+    a quoted JSON path `$."key"`. An invalid key (or unknown `orderBy` field,
+    or any malformed query shape) **throws `VALIDATION_ERROR`** — it is
+    **never** silently skipped, because dropping a filter would broaden a
+    model-facing result set. All conditions plus `tag`/`folder` are AND-ed;
+    missing key = no match. Operators deferred.
     (Frontmatter `where` is an opaque-JSON table scan — fine at low thousands;
     hot fields can get an expression index later.)
   - `folder` = recursive prefix match on `folder + '/'`.
@@ -397,14 +414,25 @@ resources is the reconcile backstop, not a two-phase commit.
 
 Detected by comparing on-disk `(mtime_ms, size)` against stored values.
 
+**Scope-bounding (security).** All destructive index ops are bounded to the
+instance's `prefixes.read`: `reconcile()` only inspects / drops rows whose
+`path_key` is inside the read scope, and `rebuild()` deletes only rows within
+the read scope before reinserting. A restricted Vault instance therefore can
+**never** delete another scope's rows, so a shared index DB stays consistent
+across multiple scoped instances. **Recommended default:** give each
+allowlist-scope its **own** `indexPath` (simplest — destructive ops then own
+the whole DB); share one index only when you want a single cross-persona
+store, where the scope-bounding above is what keeps it safe.
+
 - **`reconcile()`** — recursive sweep, **parallel/batched `stat`**
   (sequential `await stat` is ~10ms/1000 notes; `Promise.all` ~1ms/1000 — the
   latency claim needs batching). Per changed file, **stat→read→stat**
   read-consistency so the stored signature always matches parsed content.
 - **`reconcilePaths(paths)`** — targeted reindex of a known changeset.
 - **`rebuild()`** — public: **parse all files first** (enumerate via
-  `listMarkdown`, no DB writes yet), then apply `DELETE`-all + bulk-`INSERT`
-  in **one SQLite transaction**, so WAL readers (same or other process) keep
+  `listMarkdown`, no DB writes yet), then apply `DELETE` **within the read
+  scope** + bulk-`INSERT` in **one SQLite transaction**, so WAL readers (same
+  or other process) keep
   seeing the **pre-rebuild snapshot** until COMMIT and **never observe an
   empty / partial index**. (Large-vault alternative: build a replacement DB
   file and atomically rename it under a maintenance flag in `meta`.) Used for
@@ -455,7 +483,8 @@ The library **throws typed errors** (`MdVaultError` subclasses) with stable
 `code`s and English messages; consumers map codes → Russian. Codes:
 `ALLOWLIST_VIOLATION`, `NOT_MARKDOWN`, `NOT_FOUND`, `ALREADY_EXISTS`,
 `NO_MATCH`, `AMBIGUOUS_MATCH`, `MTIME_CONFLICT`, `REFUSE_CREATE`,
-`FRONTMATTER_INVALID`, `INDEX_UNAVAILABLE` (FTS5/JSON1 probe / open failure).
+`FRONTMATTER_INVALID`, `VALIDATION_ERROR` (bad query shape / `where` key /
+`orderBy` field), `INDEX_UNAVAILABLE` (FTS5/JSON1 probe / open failure).
 
 ## Runtime & packaging
 
@@ -498,10 +527,11 @@ The library **throws typed errors** (`MdVaultError` subclasses) with stable
   `onCommit` in-lock for create/update/**delete**; **delete CAS** raises
   `MTIME_CONFLICT` when the file changed under us; cross-process lock (when
   enabled) serializes two processes.
-- **CRUD:** edit-by-match literal 0/1/>1; append newline rule; create-clobber
-  refusal; `editFrontmatter` preserves comments/order/`1.0`/empty
-  `aliases:`/unknown keys, fail-closed on nested; delete idempotent on
-  missing.
+- **CRUD:** edit-by-match literal 0/1/>1; append newline rule; **`createNote`
+  exclusive create** (concurrent external create → `ALREADY_EXISTS`, no
+  clobber); `editFrontmatter` preserves comments/order/`1.0`/empty
+  `aliases:`/unknown keys, **creates a block when frontmatter absent**,
+  fail-closed on present-but-invalid/nested; delete idempotent on missing.
 - **Index/reconcile:** write-through one transaction; stored mtime not
   advanced on index-write failure; `reconcile()` detects add/modify/delete
   with read-consistency; **wikilink self-heal** (dangling `[[Foo]]` resolves
@@ -511,13 +541,15 @@ The library **throws typed errors** (`MdVaultError` subclasses) with stable
   **`rebuild()` never exposes a partial index** to a concurrent reader
   (single-transaction swap); **`onCommit` throw propagates, file+index stay
   changed, no rollback**; `rebuild()` from empty; golden invariant at
-  quiescence; WAL + `busy_timeout` set; **FTS5 + JSON1 probe**.
-- **Query:** tag / `where` (AND, missing-key, **key validation + bound
-  values**) / folder (recursive) / backlinks (wikilink tie-break + dangling) /
-  outbound / FTS5 with **adversarial input** (`+ - : *`, trailing `AND`,
-  unbalanced quote → empty, never throw); **`orderBy` allowlist** rejects
-  unknown fields; default order + limit/offset determinism; index in
-  `DATA_DIR`, not vault.
+  quiescence; **scope-bounded destructive ops** (a restricted instance's
+  `reconcile()`/`rebuild()` never drops another scope's rows); WAL +
+  `busy_timeout` set; **FTS5 + JSON1 probe**.
+- **Query:** tag / `where` (AND, missing-key, **invalid key throws
+  `VALIDATION_ERROR`**, bound values) / folder (recursive) / backlinks
+  (wikilink tie-break + dangling) / outbound / FTS5 with **adversarial input**
+  (`+ - : *`, trailing `AND`, unbalanced quote → empty, never throw);
+  **`orderBy` allowlist** rejects unknown fields (`VALIDATION_ERROR`); default
+  order + limit/offset determinism; index in `DATA_DIR`, not vault.
 
 ## Open source & licensing
 
@@ -546,6 +578,13 @@ Same model as `telegram-agent-kit` (the user's published package that
   `base`); `rebuild()` atomic single-transaction swap (no partial-index
   reads); `onCommit` failure pinned (propagate, no rollback, consumer
   recovers).
+- **4th round:** destructive ops (`reconcile`/`rebuild`) **scope-bounded** to
+  `prefixes.read` (a restricted instance can't drop another scope's rows) +
+  per-scope `indexPath` recommended; `createNote` exclusive (`link()`-based)
+  true no-clobber; `crossProcessWriterLock` **defaults `true`**; invalid query
+  shape **throws `VALIDATION_ERROR`** (no silent broadening); custom
+  `LinkResolver` deferred to v1.1; `editFrontmatter` on absent frontmatter
+  creates a block.
 
 ## Open questions (remaining)
 
