@@ -1,7 +1,7 @@
 # mdvault — module-folder reorganization design
 
 **Date:** 2026-06-27
-**Status:** draft — revised after review round 1 + test-layout decision (pending user review)
+**Status:** draft — revised after review round 2 (pending user review)
 **Package:** `mdvault` (npm, MIT)
 **Scope:** internal source + test layout only — a behavior-preserving refactor of
 the Plan 1 foundation primitives. No package public API change, no logic change,
@@ -59,8 +59,11 @@ flagged; pinning them is part of the design.
    tomorrow Plan 2's `notes` / `index` / `query` / `createVault`) import a module
    through. Intentionally **broader** than the package API — e.g. the `fs-atomic`
    barrel exports `statSig` / `atomicWrite` / `readConsistent`, none of which are
-   package-public (only `Sig` is). Barrels are **not** published, **not** in
-   `exports`, curated by hand (named re-exports only, never `export *`). Plan 2
+   package-public (only `Sig` is). Barrels are **not package-exported** — they are
+   physically present in the published tarball (the package ships `src`), but
+   `exports` declares only `"."`, which **encapsulates** every other subpath, so
+   no barrel is reachable as a public import (`mdvault/fs-atomic` does not
+   resolve). Curated by hand (named re-exports only, never `export *`). Plan 2
    will depend on a barrel's shape — treat it as a real internal contract.
 3. **Leaf files — `<module>/<part>.ts`.** Module-private implementation. A leaf
    `export` exists so **same-module siblings** and **white-box tests** can import
@@ -99,7 +102,7 @@ src/
 ├── errors.ts                 # unchanged (2 exports → stays a flat non-barrel file)
 ├── __tests__/
 │   ├── index.test.ts         # STRENGTHENED: exact key set + type-only compile fixture
-│   ├── errors.test.ts        # relocated, unchanged content
+│   ├── errors.test.ts        # stays here, unchanged content
 │   └── scaffold.test.ts      # smoke test (kept)
 │
 ├── fs-atomic/                # AREA: race-aware single-file fs operations
@@ -145,7 +148,7 @@ src/
 │   ├── delete.ts             # withFileDelete
 │   └── __tests__/
 │       ├── transform.test.ts
-│       └── delete.test.ts                 # statSig spy = symmetric barrel seam
+│       └── delete.test.ts                 # statSig spy = definition-leaf seam (sig.ts)
 │
 ├── frontmatter/              # AREA: frontmatter parse / edit
 │   ├── index.ts              # barrel
@@ -332,14 +335,19 @@ Existing tests are the safety net; they stay green at every step.
    (they share the source file) → `vault-io` → `locked-file` → `frontmatter` →
    `links` → strengthen `src/index.ts` + `src/__tests__/index.test.ts` → packaging.
 2. For each: create the folder + files (cut/paste symbols, fix imports, curated
-   barrel), move/split that module's tests into `<module>/__tests__/`, update
-   importers, then run `bun test <module>` and `bun run check`
-   (Biome + `tsc --noEmit`).
+   barrel), move/split that module's tests into `<module>/__tests__/`, and — in
+   the **same step** — rewrite **every repo-wide importer** of the moved module
+   (production *and* still-flat tests) to its new barrel path. This is required,
+   not optional: `tsconfig.include` is `["src"]`, so a single dangling
+   `./fs-atomic.ts` import left anywhere fails `tsc --noEmit`. Because barrels
+   preserve the same exported names, importers only change the path. Then run
+   `bun test <module>` and `bun run check` (Biome + `tsc --noEmit`). No temporary
+   shim / `export *` re-export files at any point.
 3. Only after a module is green move to the next.
 4. Final gate: full `bun test` + `bun run check` green; strengthened
    `index.test.ts` proves the package API name-set; `git diff src/index.ts`
-   path-only; `npm pack --dry-run` (or `bun pm pack`) shows **no** `*.test.ts`
-   in the tarball.
+   path-only; `npm pack --dry-run` (or `bun pm pack`) shows **no** `__tests__/`
+   path in the tarball.
 
 No algorithm changes. The single extraction (`canonicalizeRelative`) and the
 `sigsEqual` reuse are covered by existing tests.
@@ -360,7 +368,8 @@ Additive units are marked NEW.
     (`type _Sig = mdvault.Sig;` …, erased at runtime, so `import * as mdvault`
     stays a real value import). Dropping/renaming a type fails `tsc --noEmit`.
     This is the only guard for type-only exports.
-- **`errors.test.ts`** — relocated, content unchanged. **`scaffold.test.ts`** — kept.
+- **`errors.test.ts`** — stays in `src/__tests__/`, content unchanged (root-level
+  module test, not relocated). **`scaffold.test.ts`** — kept.
 
 **`fs-atomic/__tests__/`**
 - `sig.test.ts` — `statSig` (null on missing; sig shape). Split from today's
@@ -368,7 +377,13 @@ Additive units are marked NEW.
 - `atomic-write.test.ts` — `atomicWrite` / `atomicWriteIfUnchanged` /
   `exclusiveCreate` / `unlinkIfUnchanged` (relocated).
 - `read-consistent.test.ts` (**NEW**) — `readConsistent`: missing → null;
-  stat→read→stat returns content+sig; converges when the file changes mid-read.
+  stat→read→stat returns content+sig (stable file, no spy). The **retry path is
+  made deterministic** (no production DI, no fs race): spy the definition module
+  `statSig` (`import * as sig from '../sig.ts'; spyOn(sig, 'statSig')`) with a
+  call counter so iteration 1 yields mismatched `sig1 ≠ sig2` (forces one retry)
+  and later calls return the real sig — then assert the returned content/sig and
+  that it looped. `read-consistent.ts` imports `statSig` from `./sig.ts` (same
+  module), so this is the proven definition-module spy, not a re-export view.
 
 **`locks/__tests__/`**
 - `in-process.test.ts` — `withFileLock` (serialize same key; different keys
@@ -397,13 +412,18 @@ Additive units are marked NEW.
   `MTIME_CONFLICT` retry + `onCommit` create/update + `COMMIT_FAILED`). Covers
   `emitCommit`.
 - `delete.test.ts` — `withFileDelete` incl. the `MTIME_CONFLICT` **statSig spy**
-  via the **symmetric-barrel seam**: production (`delete.ts`) imports `statSig`
-  through `../fs-atomic/index.ts`, and the test spies that same barrel
-  (`import * as fsAtomic from '../../fs-atomic/index.ts'; spyOn(fsAtomic, 'statSig')`).
-  This is today's proven "production and test reference the same module
-  namespace" pattern, module now = barrel. **Verified empirically** (Bun 1.3.13):
-  a `spyOn` on a re-export barrel namespace intercepts a consumer importing
-  through it. The test run remains the gate.
+  via the **definition-leaf seam**: production (`delete.ts`) imports `statSig`
+  through the `fs-atomic` barrel (cross-module discipline), and the test spies
+  the **definition module** —
+  `import * as sig from '../../fs-atomic/sig.ts'; spyOn(sig, 'statSig')`. This is
+  the **same mechanism the current suite already uses** (today it spies the
+  definition module `fs-atomic.ts`; the definition is now `sig.ts`): `spyOn`
+  replaces the canonical export binding, which every importer — direct or via the
+  barrel re-export — statically resolves to. It does **not** rely on spying a
+  re-export *view* of a barrel namespace (the version-sensitive behavior flagged
+  against the `engines.bun >=1.1.0` floor), so it needs **no** engine bump.
+  (Both seams work on Bun 1.3.13; the definition-leaf one is chosen because it
+  carries no new Bun-version assumption.) The test run remains the gate.
 
 **`frontmatter/__tests__/`** — `validate.test.ts`, `tags.test.ts`,
 `parse.test.ts`, `edit.test.ts` (today's `frontmatter.test.ts` split per file).
@@ -430,8 +450,9 @@ files. (The package already publishes source `.ts`, since `exports` points at
   hand, not `export *`. Still internal (not in `exports`).
 - **May tests import private leaf modules?** → **Yes** — a unit test in
   `<module>/__tests__/` imports its leaf directly (`../paths.ts`) for white-box
-  testing. Production stays barrel-only across modules. The `statSig` spy uses
-  the symmetric-barrel seam, not a leaf import.
+  testing, and the `statSig` spies (`delete.test.ts`, `read-consistent.test.ts`)
+  target the definition leaf `fs-atomic/sig.ts`. Production stays barrel-only
+  across modules.
 
 ## Out of scope
 
@@ -453,6 +474,6 @@ files. (The package already publishes source `.ts`, since `exports` points at
 - `bun test` and `bun run check` are green.
 - `index.test.ts` asserts the exact value-export key set **and** type-checks all
   16 type exports; `git diff src/index.ts` is path-only.
-- `npm pack --dry-run` lists no `*.test.ts`.
+- `npm pack --dry-run` lists no `__tests__/` path (no `*.test.ts`, no test fixtures).
 - No `export *`; no import cycle; every file is single-purpose and reads in one
   pass.
