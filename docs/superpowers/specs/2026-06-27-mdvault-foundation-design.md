@@ -1,7 +1,7 @@
 # mdvault — foundation design
 
 **Date:** 2026-06-27
-**Status:** draft — revised after four review rounds (pending user review)
+**Status:** draft — revised after five review rounds (pending user review)
 **Package:** `mdvault` (npm, MIT)
 **Repo home:** `/Users/ivan_kalinichenko/Dev/Personal/mdvault`
 
@@ -67,9 +67,13 @@ This is load-bearing, so it is stated plainly:
   same vault — e.g. machine-spirit's CLI and `serve` daemon): an advisory file
   lock (`crossProcessWriterLock`, **default `true`** — the named CLI+daemon
   topology can have two writers, so safe-by-default) serializes them via an
-  `O_EXCL` lockfile with stale-lock recovery. A single-writer deployment may
-  set it `false` to skip the per-write lockfile. It does **nothing** for the
-  external syncer (uncooperative).
+  `O_EXCL` lockfile. A single-writer deployment may set it `false` to skip the
+  per-write lockfile. It does **nothing** for the external syncer
+  (uncooperative). **Stale-lock recovery (conservative):** the lockfile records
+  `{ pid, host, created_at }`; a held lock is reclaimed **only** when it is
+  **same-host and the PID is dead** (`kill(pid, 0)` → `ESRCH`). Otherwise (live
+  PID, or a different host) a contender **waits up to `sqliteBusyTimeoutMs`**
+  then throws `MTIME_CONFLICT` — it never breaks a lock it cannot prove dead.
 - **Claim:** mdvault *tolerates* an external concurrent writer (best-effort
   detect-and-retry + eventual index reconcile); it does **not** *prevent*
   lost updates against an uncooperative syncer. Consumers needing a hard
@@ -158,6 +162,14 @@ async createVault({
 - On open: a **capability probe covering BOTH FTS5 and JSON1** (the `where`
   predicate needs `json_extract`); fail fast with a message pointing at
   `Database.setCustomSQLite()` if the platform `libsqlite3` lacks either.
+- On open: compare **`meta.config_fingerprint`** — a hash of the
+  **row-semantics-affecting** config (`linkResolution`, `caseSensitive`, the
+  normalized `ignore` set, and the link/tag **parser version**), **not**
+  `prefixes` (those are per-scope). On mismatch (or `schema_version`
+  mismatch): if this instance owns the whole index (its read scope covers it —
+  the recommended per-scope `indexPath`) → `rebuild()`; otherwise (a shared
+  index it does not own) → fail fast with `INDEX_UNAVAILABLE` (config
+  mismatch).
 - `engines` pins a minimum Bun version.
 
 `CommitEvent` (the write-seam, covers delete):
@@ -169,9 +181,10 @@ type CommitEvent =
 Runs **inside the per-file lock**, after the fs mutation + the in-lock index
 update, before lock release. selgeo hooks git add/rm + commit here
 (commit-before-return); machine-spirit no-ops. **Failure semantics (pinned):**
-if `onCommit` throws (e.g. git commit fails), the error **propagates** to the
-CRUD caller; **no rollback is attempted** — the file write and the index
-update already happened and **stay**. The consumer surfaces/recovers; this is
+if `onCommit` throws (e.g. git commit fails), the error is **wrapped as
+`COMMIT_FAILED`** (original as `cause`, preserving the typed `MdVaultError`
+contract) and **propagates** to the CRUD caller; **no rollback is attempted**
+— the file write and the index update already happened and **stay**. The consumer surfaces/recovers; this is
 safe by construction because the change is on disk and the consumer's next
 sync/reconcile (e.g. selgeo's working-tree recovery on the next
 `syncOnce`/boot) picks up the still-uncommitted change. `onCommit` should
@@ -262,7 +275,10 @@ read → decide → `rewriteIfUnchanged` with **stat→read→stat read-consiste
 - **Resolution is asymmetric** (the key correctness point):
   - **`'relative'`** (selgeo, Wikilinks OFF): resolve `mdLinks` against the
     source dir → a path. **Stable** — depends only on `(srcDir, target)`, not
-    on other notes — so `note_links` stores the **resolved** path.
+    on other notes — so `note_links` stores the **resolved** path. **Only
+    vault-internal `.md` targets are indexed**; dropped: external URLs
+    (`http(s):`, `mailto:`, …), bare `#anchor`-only links, images / non-`.md`
+    files, absolute paths, and `../` targets that escape the vault root.
   - **`'wikilink'`** (machine-spirit): strip `#heading`/`#^block`/`|alias`;
     `note_links` stores the **normalized raw target** (path-qualification
     preserved — `[[Folder/Foo]]` stays `Folder/Foo`, **not** collapsed to
@@ -333,7 +349,7 @@ note_links(
 );                                        -- index on (target) AND (base) for backlinks
 -- standalone FTS5 (stores its own body copy); row addressed by rowid = notes.id:
 notes_fts USING fts5(body);               -- INSERT(rowid,body) / DELETE WHERE rowid=? / update=delete+insert
-meta(key TEXT PRIMARY KEY, value TEXT);   -- schema_version, last_reconcile_ms
+meta(key TEXT PRIMARY KEY, value TEXT);   -- schema_version, config_fingerprint, last_reconcile_ms
 ```
 
 - **Standalone FTS5 keyed by `rowid = notes.id`** (not external-content, which
@@ -385,10 +401,16 @@ post-filter backstop.
     **tie-break winner** for that basename among existing notes
     (same-folder-as-source first, then shortest path, then lexical). Dangling
     links yield no backlink and **self-heal** when the target appears.
+  - **Read-scoped resolution (security):** the `path` argument and **every
+    candidate target** in the tie-break are restricted to `prefixes.read`, so
+    an out-of-scope note neither appears as a backlink target nor influences
+    an in-scope tie-break (no existence leak; deterministic within scope).
   - **relative mode** — `note_links WHERE target = path_key` (already
     resolved).
 - `outboundLinks(path, …)` — `note_links WHERE src_key = ?`; targets resolved
-  for display (wikilink: resolve basename→note or mark dangling).
+  for display **within `prefixes.read`**: a target resolving to an
+  out-of-read-scope note is **not revealed** (shown as dangling/unresolved,
+  never as `Secret/Foo.md`). `path` must be in read scope.
 - `searchText(q, { tag?, folder?, limit?, offset? })` — FTS5 keyword. **Input
   sanitized**: tokenize and re-emit each term double-quoted, so raw model text
   (`C++ vs Rust:`, trailing `AND`, unbalanced quote) cannot throw an FTS5
@@ -484,7 +506,9 @@ The library **throws typed errors** (`MdVaultError` subclasses) with stable
 `ALLOWLIST_VIOLATION`, `NOT_MARKDOWN`, `NOT_FOUND`, `ALREADY_EXISTS`,
 `NO_MATCH`, `AMBIGUOUS_MATCH`, `MTIME_CONFLICT`, `REFUSE_CREATE`,
 `FRONTMATTER_INVALID`, `VALIDATION_ERROR` (bad query shape / `where` key /
-`orderBy` field), `INDEX_UNAVAILABLE` (FTS5/JSON1 probe / open failure).
+`orderBy` field), `COMMIT_FAILED` (wraps an `onCommit` throw, original as
+`cause`), `INDEX_UNAVAILABLE` (FTS5/JSON1 probe / config-fingerprint / open
+failure).
 
 ## Runtime & packaging
 
@@ -519,14 +543,19 @@ The library **throws typed errors** (`MdVaultError` subclasses) with stable
   prefix** (`foo` must NOT match `foobar.md`; `''` matches all; exact-file vs
   folder); **read-scope filter** — `queryNotes`/`searchText`/`backlinks`
   sources/`outboundLinks` targets never return a row outside `prefixes.read`,
-  even with an over-broad / shared index; `.md`-guard at `resolveVaultPath`;
+  even with an over-broad / shared index; **read-scoped wikilink resolution**
+  (an in-scope `[[Foo]]` never resolves to an out-of-scope `Secret/Foo.md`,
+  and an out-of-scope note never alters an in-scope tie-break); `.md`-guard at
+  `resolveVaultPath`;
   canonical key coincidence (`a/./b.md`); NFC; **case-fold key** on a
   case-insensitive volume (`Note.md`/`note.md` → one lock + one row).
 - **Concurrency:** mtime-retry + stat→read→stat under a simulated external
   writer; two concurrent appends → no lost update; `allowCreate` branches;
-  `onCommit` in-lock for create/update/**delete**; **delete CAS** raises
-  `MTIME_CONFLICT` when the file changed under us; cross-process lock (when
-  enabled) serializes two processes.
+  `onCommit` in-lock for create/update/**delete**; **`onCommit` throw →
+  `COMMIT_FAILED` with `cause`**; **delete CAS** raises `MTIME_CONFLICT` when
+  the file changed under us; cross-process lock serializes two processes and
+  **reclaims only a dead same-host PID** (live/foreign PID → wait then
+  `MTIME_CONFLICT`).
 - **CRUD:** edit-by-match literal 0/1/>1; append newline rule; **`createNote`
   exclusive create** (concurrent external create → `ALREADY_EXISTS`, no
   clobber); `editFrontmatter` preserves comments/order/`1.0`/empty
@@ -537,12 +566,16 @@ The library **throws typed errors** (`MdVaultError` subclasses) with stable
   with read-consistency; **wikilink self-heal** (dangling `[[Foo]]` resolves
   when `Foo.md` is added, with **no** source reindex); **path-qualified
   wikilink** (`[[Folder/Foo]]` resolves to `Folder/Foo`, not a basename
-  tie-break); FTS5 delete/update by rowid; PK dedup on note_tags/note_links;
+  tie-break); **relative-mode link filtering** (external URLs / bare
+  `#anchor` / images / non-`.md` / absolute / `..`-escape dropped); FTS5
+  delete/update by rowid; PK dedup on note_tags/note_links;
   **`rebuild()` never exposes a partial index** to a concurrent reader
   (single-transaction swap); **`onCommit` throw propagates, file+index stay
   changed, no rollback**; `rebuild()` from empty; golden invariant at
   quiescence; **scope-bounded destructive ops** (a restricted instance's
-  `reconcile()`/`rebuild()` never drops another scope's rows); WAL +
+  `reconcile()`/`rebuild()` never drops another scope's rows); **config
+  fingerprint mismatch** (different `linkResolution`/`caseSensitive`/parser
+  version) → owner rebuilds, shared non-owner fails `INDEX_UNAVAILABLE`; WAL +
   `busy_timeout` set; **FTS5 + JSON1 probe**.
 - **Query:** tag / `where` (AND, missing-key, **invalid key throws
   `VALIDATION_ERROR`**, bound values) / folder (recursive) / backlinks
@@ -585,6 +618,13 @@ Same model as `telegram-agent-kit` (the user's published package that
   shape **throws `VALIDATION_ERROR`** (no silent broadening); custom
   `LinkResolver` deferred to v1.1; `editFrontmatter` on absent frontmatter
   creates a block.
+- **5th round:** `meta.config_fingerprint` (linkResolution / caseSensitive /
+  ignore / parser version, **not** prefixes) → rebuild-or-fail on mismatch;
+  query-time wikilink resolution **read-scoped** (no resolve to / tie-break by
+  out-of-scope notes); `onCommit` throw wrapped as `COMMIT_FAILED` (typed,
+  with `cause`); relative-mode link filtering pinned (URLs / anchors / images
+  / non-`.md` / absolute / `..`-escape dropped); conservative cross-process
+  stale-lock criteria (reclaim only a dead same-host PID).
 
 ## Open questions (remaining)
 
