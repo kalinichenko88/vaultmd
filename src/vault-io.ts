@@ -282,7 +282,13 @@ function canonPrefix(p: string): string {
   const nfc = p.normalize('NFC').replaceAll('\\', '/');
   const out: string[] = [];
   for (const seg of nfc.split('/')) {
-    if (seg === '' || seg === '.' || seg === '..') continue;
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') {
+      throw new MdVaultError(
+        'ALLOWLIST_VIOLATION',
+        `vault prefix may not contain '..': ${p}`,
+      );
+    }
     out.push(seg);
   }
 

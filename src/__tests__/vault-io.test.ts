@@ -148,6 +148,30 @@ describe('can (per-access boundary-aware prefix match)', () => {
   });
 });
 
+describe('createVaultIo prefix validation', () => {
+  test("rejects a '..' segment in a read prefix with ALLOWLIST_VIOLATION at construction time", () => {
+    expect(
+      syncCode(() =>
+        createVaultIo({
+          root: vault,
+          prefixes: { read: ['../secret'], write: [] },
+        }),
+      ),
+    ).toBe('ALLOWLIST_VIOLATION');
+  });
+
+  test("rejects a '..' segment in a write prefix with ALLOWLIST_VIOLATION at construction time", () => {
+    expect(
+      syncCode(() =>
+        createVaultIo({
+          root: vault,
+          prefixes: { read: [], write: ['safe/../../../escape'] },
+        }),
+      ),
+    ).toBe('ALLOWLIST_VIOLATION');
+  });
+});
+
 describe('resolveVaultPath', () => {
   test('returns the lexical absolute path for an allowed .md target (need not exist)', () => {
     const io = createVaultIo({
