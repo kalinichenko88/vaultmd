@@ -53,7 +53,7 @@ describe('toVaultRelative / toKey', () => {
       root: vault,
       prefixes: { read: [''], write: [''] },
     });
-    expect(io.toVaultRelative('café/note.md')).toBe('café/note.md');
+    expect(io.toVaultRelative('cafe\u0301/note.md')).toBe('caf\u00e9/note.md');
   });
 
   test('rejects absolute paths and ..-escapes with ALLOWLIST_VIOLATION', () => {

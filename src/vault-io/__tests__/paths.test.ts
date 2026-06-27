@@ -22,7 +22,7 @@ describe('canonicalizeRelative', () => {
   });
 
   test('NFC-normalizes unicode segments', () => {
-    expect(canonicalizeRelative('café/n.md')).toBe('café/n.md');
+    expect(canonicalizeRelative('cafe\u0301/n.md')).toBe('caf\u00e9/n.md');
   });
 
   test('rejects absolute and ..-escape with ALLOWLIST_VIOLATION', () => {
