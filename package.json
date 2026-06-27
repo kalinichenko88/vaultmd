@@ -1,0 +1,24 @@
+{
+  "name": "mdvault",
+  "version": "0.1.0",
+  "description": "Headless markdown-vault data layer for Bun — CRUD + SQLite index, no Obsidian required",
+  "type": "module",
+  "license": "MIT",
+  "author": "Ivan Kalinichenko",
+  "engines": { "bun": ">=1.1.0" },
+  "exports": { ".": { "types": "./src/index.ts", "import": "./src/index.ts" } },
+  "files": ["src", "README.md", "LICENSE"],
+  "dependencies": { "yaml": "^2.5.0" },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  },
+  "scripts": {
+    "test": "bun test",
+    "check": "biome check . && tsc --noEmit",
+    "format": "biome format --write .",
+    "lint": "biome lint .",
+    "typecheck": "tsc --noEmit"
+  }
+}
