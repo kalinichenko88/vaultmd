@@ -51,9 +51,9 @@ flagged; pinning them is part of the design.
 
 1. **Package public API — `src/index.ts`.** The *only* thing listed in
    `package.json` `exports` (`"."`). Its set of exported names is **frozen** by
-   this refactor and **guarded** by a strengthened `index.test.ts` (exact key
-   set + type-only compile fixture — see Tests). Paths inside change; names do
-   not.
+   this refactor and **guarded** by a strengthened `index.test.ts` (exact 26-name
+   source-level set covering value *and* type exports, plus runtime liveness of
+   the values — see Tests). Paths inside change; names do not.
 2. **Module barrels — `<module>/index.ts`.** A **stable internal integration
    surface**: the seam in-package consumers (today `vault-io`, `locked-file`;
    tomorrow Plan 2's `notes` / `index` / `query` / `createVault`) import a module
@@ -101,7 +101,7 @@ src/
 ├── index.ts                  # package public API — only `from` paths change
 ├── errors.ts                 # unchanged (2 exports → stays a flat non-barrel file)
 ├── __tests__/
-│   ├── index.test.ts         # STRENGTHENED: exact key set + type-only compile fixture
+│   ├── index.test.ts         # STRENGTHENED: exact 26-name source set + runtime liveness
 │   ├── errors.test.ts        # stays here, unchanged content
 │   └── scaffold.test.ts      # smoke test (kept)
 │
@@ -340,9 +340,16 @@ Existing tests are the safety net; they stay green at every step.
    (production *and* still-flat tests) to its new barrel path. This is required,
    not optional: `tsconfig.include` is `["src"]`, so a single dangling
    `./fs-atomic.ts` import left anywhere fails `tsc --noEmit`. Because barrels
-   preserve the same exported names, importers only change the path. Then run
-   `bun test <module>` and `bun run check` (Biome + `tsc --noEmit`). No temporary
-   shim / `export *` re-export files at any point.
+   preserve the same exported names, importers only change the path. **A given
+   importer may be path-rewritten twice**, and that is expected: e.g. when
+   `fs-atomic` becomes a folder, still-flat `vault-io.ts` / `locked-file.ts`
+   import it as `./fs-atomic/index.ts`; later, when those files themselves move
+   into folders, the same import becomes `../fs-atomic/index.ts`. This transient
+   relative-path churn is only on the intermediate cross-module importers —
+   `src/index.ts` stays at the root throughout, so its paths change exactly once
+   and the path-only diff gate on it holds. Then run `bun test <module>` and
+   `bun run check` (Biome + `tsc --noEmit`). No temporary shim / `export *`
+   re-export files at any point.
 3. Only after a module is green move to the next.
 4. Final gate: full `bun test` + `bun run check` green; strengthened
    `index.test.ts` proves the package API name-set; `git diff src/index.ts`
@@ -359,15 +366,22 @@ assertions are preserved 1:1 — split out of today's central files and relocate
 Additive units are marked NEW.
 
 **Root — `src/__tests__/`**
-- **`index.test.ts` (strengthened — closes the API-freeze gap).** Replace the
-  `typeof === 'function'` spot-check with:
-  - **Runtime exact set:** `expect(Object.keys(mdvault).sort()).toEqual([...])`
-    over the 10 value exports — catches a **missing** *and* an **extra** runtime
-    export.
-  - **Compile-time:** module-level aliases for all 16 type exports
-    (`type _Sig = mdvault.Sig;` …, erased at runtime, so `import * as mdvault`
-    stays a real value import). Dropping/renaming a type fails `tsc --noEmit`.
-    This is the only guard for type-only exports.
+- **`index.test.ts` (strengthened — exact API freeze).** Replace the
+  `typeof === 'function'` spot-check with two complementary guards:
+  - **Exact name set (value *and* type) — the authoritative guard.** Read the
+    `src/index.ts` source, collect every identifier inside its `export { … }` /
+    `export type { … }` groups, and assert the sorted set `toEqual` the frozen
+    **26** names. This is what makes the freeze exact: it catches an **added**
+    type export (which no runtime check can see — types are erased) as well as
+    any add / remove / rename of a value or type. The barrel uses plain grouped
+    re-exports; the test owns that format assumption. `tsc` already rejects an
+    `export` of a name that does not exist, so every listed name is guaranteed to
+    resolve.
+  - **Runtime liveness (values).** `expect(Object.keys(mdvault).sort())
+    .toEqual([...])` over the 10 value exports — proves they are actually bound
+    at runtime, not merely textually re-exported.
+  The `git diff src/index.ts` path-only gate (Methodology) is the refactor-time
+  belt; this test is the permanent regression guard going forward.
 - **`errors.test.ts`** — stays in `src/__tests__/`, content unchanged (root-level
   module test, not relocated). **`scaffold.test.ts`** — kept.
 
@@ -472,8 +486,9 @@ files. (The package already publishes source `.ts`, since `exports` points at
   module; `src/index.ts` is the package-API barrel; every module folder has a
   `__tests__/` with a unit per testable file.
 - `bun test` and `bun run check` are green.
-- `index.test.ts` asserts the exact value-export key set **and** type-checks all
-  16 type exports; `git diff src/index.ts` is path-only.
+- `index.test.ts` asserts the exact 26-name export set (source-level, value
+  **and** type) and the 10 values' runtime liveness; `git diff src/index.ts` is
+  path-only.
 - `npm pack --dry-run` lists no `__tests__/` path (no `*.test.ts`, no test fixtures).
 - No `export *`; no import cycle; every file is single-purpose and reads in one
   pass.
