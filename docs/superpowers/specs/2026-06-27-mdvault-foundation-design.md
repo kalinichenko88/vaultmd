@@ -1,7 +1,7 @@
 # mdvault — foundation design
 
 **Date:** 2026-06-27
-**Status:** draft — revised after adversarial spec review (pending user review)
+**Status:** draft — revised after two review rounds (pending user review)
 **Package:** `mdvault` (npm, MIT)
 **Repo home:** `/Users/ivan_kalinichenko/Dev/Personal/mdvault`
 
@@ -13,9 +13,10 @@ Obsidian-*compatible* vault, but **not** Obsidian-*coupled* — no running
 Obsidian, no plugin, no Electron). It gives consumers:
 
 - **CRUD primitives** over `.md` files (read / create / update / delete /
-  append / edit-by-match / edit-frontmatter), with the
-  atomic-write + per-file-lock + mtime-retry discipline required to survive
-  an **external concurrent writer** (a vault syncer rewriting the same files).
+  append / edit-by-match / edit-frontmatter), with atomic-write +
+  per-file-lock + mtime-guard discipline that **tolerates** an external
+  concurrent writer (a vault syncer rewriting the same files) on a
+  **best-effort** basis — see §Concurrency model for the honest limits.
 - A **derived SQLite index** (notes / tags / links / full-text) that powers
   **collection queries** (filter by frontmatter / tags / folder),
   **backlinks**, and **keyword search**, kept fresh by a defined
@@ -33,480 +34,475 @@ consuming projects, not here.
 
 ### Deferred to v1.1+ (explicitly NOT in this spec)
 
-The adversarial review flagged three pieces as speculative generality with no
-v1 consumer. They are deferred and will get their own specs when a consumer
-actually needs them:
-
-- **Graph algorithms** (`graphology` adapter: pagerank / communities /
-  shortest-path). Degree-1 links + backlinks are served by SQL in v1; no
-  consumer asks for an algorithm yet.
+- **Graph algorithms** (`graphology`: pagerank / communities / shortest-path).
+  Degree-1 links + backlinks are served by SQL in v1.
 - **A pluggable `SearchBackend` interface** (and any semantic / `qmd`
-  backend). v1 ships **one concrete** keyword search (`searchText`, FTS5);
-  the interface is extracted on the second implementation, when qmd's real
-  contract is known.
-- **Node runtime support** / a SQLite-driver abstraction. v1 is written
-  directly against `bun:sqlite`; both consumers are Bun. The driver boundary
-  is extracted in the PR that actually adds Node support.
+  backend). v1 ships one concrete keyword search (`searchText`, FTS5);
+  the interface is extracted on the second implementation.
+- **Node runtime support** / a SQLite-driver abstraction. v1 targets
+  `bun:sqlite`; both consumers are Bun.
 
-## Why a separate library (build-vs-buy summary)
+## Concurrency model (the honest contract)
 
-A GitHub/npm sweep (45 candidates, 15 deep-verified) found **no turnkey
-embeddable Bun/TS read+write vault library** that fits the constraints:
+This is load-bearing, so it is stated plainly:
 
-- The Obsidian REST/MCP options require a **running Obsidian** app/CLI —
-  disqualified for headless servers.
-- Most TS-native libraries (`markdowndb`, `velite`, `content-collections`,
-  parsers) are **read/index-only** — no write CRUD.
-- The write-capable headless options are young MCP/HTTP sidecars that **own
-  the vault** (their own index + git auto-commit), which would **fight the
-  consumers' existing syncers** — exactly the external-writer race class the
-  projects already battle.
-- **None** respects the consumers' invariants: per-persona allowlist +
-  symlink-escape guard, atomic + mtime-guarded writes, isolation.
-
-Conclusion: **build the CRUD + index core** (where the value is precisely the
-invariants nobody else honours). `graphology` (graph algorithms) and `qmd`
-(semantic search) are adopted **later, behind seams**, when needed. This
-mirrors the `telegram-agent-kit` extraction precedent.
+- **There is no portable atomic compare-and-swap on a file.** Writes use
+  **detect-and-retry**: read the file's `(mtime, size)` signature, decide the
+  new content, then write via `temp-file + fsync + rename` **only if a final
+  re-stat shows the signature unchanged**; otherwise retry (bounded) or raise
+  `MTIME_CONFLICT`.
+- This closes the **common** race (an external write that lands before our
+  final stat is detected → retry). It does **not** close the residual
+  **TOCTOU window** between the final stat and the `rename`: an external write
+  landing in that microsecond window is silently clobbered. Against an
+  **uncooperative** syncer (`ob` / Obsidian-Sync, which does not take our
+  locks) this window is **irreducible**. The reconcile backstop re-syncs the
+  *index* afterward, but a *file* edit lost in that window is genuinely lost.
+- **In-process** coordination: a per-file in-memory lock (keyed by the
+  canonical path key, §vault-io) serializes mdvault's writers **within one
+  process**.
+- **Cross-process** coordination (multiple mdvault *writer processes* on the
+  same vault — e.g. machine-spirit's CLI and `serve` daemon): an **optional**
+  advisory file lock (`crossProcessWriterLock`, default `false`) serializes
+  them via an `O_EXCL` lockfile with stale-lock recovery. It does **nothing**
+  for the external syncer.
+- **Claim:** mdvault *tolerates* an external concurrent writer (best-effort
+  detect-and-retry + eventual index reconcile); it does **not** *prevent*
+  lost updates against an uncooperative syncer. Consumers needing a hard
+  guarantee must coordinate the syncer (out of scope).
 
 ## Scope (v1)
 
 ### In scope
 
-1. `VaultIo` — path resolution + **per-access allowlist enforcement** +
-   symlink-escape (realpath) guard.
+1. `VaultIo` — path resolution + **per-access, boundary-aware allowlist
+   enforcement** + symlink-escape (realpath) guard.
 2. `locked-file` — atomic write + per-file lock + mtime-guard + bounded
-   retry, with `allowCreate` and an `afterWrite` **write-seam** hook.
+   retry, with `allowCreate`, an `onCommit` **op-typed seam**, and a
+   CAS-like delete.
 3. `frontmatter` — parse (total / never-throws) + **multi-field
-   body-preserving edit** via the YAML Document/CST API (comment- and
-   format-preserving) + flat-frontmatter validation.
-4. `links` — link extraction + **pluggable resolution** (wikilink |
-   relative) to canonical paths.
-5. `notes` — CRUD primitives (read / create / update{edit-by-match | append}
-   / delete / edit-frontmatter); all **writes** write-through to the index.
-6. `index` — `bun:sqlite` (notes / note_tags / note_links / external-content
-   FTS5) with `indexNote` / `dropNote` / `reconcile` / `reconcilePaths` /
-   `rebuild`.
+   body-preserving edit** via the YAML Document/CST API + flat validation.
+4. `links` — extraction + **pluggable resolution** (wikilink resolved at
+   query time; relative resolved in place).
+5. `notes` — CRUD primitives; all mutations write-through to the index
+   in-lock.
+6. `index` — `bun:sqlite` (notes / note_tags / note_links / standalone FTS5
+   keyed by rowid) with `indexNote` / `dropNote` / `reconcile` /
+   `reconcilePaths` / `rebuild`, all constrained (PKs) and transactional.
 7. `query` — collection queries (frontmatter / tags / folder), backlinks +
-   outbound links, keyword full-text (sanitized FTS5). All list/search APIs
-   carry `limit` / `offset` and a defined default order.
-8. Reconcile model (write-through + lazy stat-sweep + boot build + explicit
-   rebuild).
-9. A **composition root** (`createVault(...)`) owning the SQLite handle and a
-   **typed error model** with stable codes.
+   outbound, keyword full-text (sanitized FTS5), with **typed `orderBy`
+   allowlist**, bound parameters, and `limit` / `offset`.
+8. Reconcile model (write-through + lazy stat-sweep + boot build + rebuild).
+9. An **async composition root** (`createVault(...)`) owning the SQLite
+   handle, plus a **typed error model** with stable codes.
 
 ### Out of scope (v1 — YAGNI)
 
-- The three deferred pieces above (graph algorithms, search-backend
-  interface, Node driver).
-- **Persona / policy logic** (deny-prefixes, read-only personas,
-  main-vs-subagent gating) — lives in the consuming projects.
-- **The sync layer** (`ob`, git-sync) — lives in the projects; the library
-  exposes the `afterWrite` seam + reconcile primitives the projects drive.
-- **Inline `#hashtags`** in note bodies — v1 reads tags from frontmatter only.
+- The three deferred pieces above.
+- **Persona / policy logic** (deny-prefixes, read-only personas, gating) —
+  consuming projects.
+- **The sync layer** (`ob`, git-sync) — projects; the library exposes the
+  `onCommit` seam + reconcile primitives.
+- **Inline `#hashtags`** in bodies — v1 reads tags from frontmatter only.
 - **Wikilink-integrity on rename/move** (rewriting inbound `[[links]]`).
-- **HTTP / MCP transport** — consumers wire their own.
-- **Typed frontmatter schemas (zod)** — the library returns raw parsed
-  frontmatter; per-note-type zod schemas remain a project concern.
-- **A file watcher** — a latency optimisation, not correctness; deferred.
+- **HTTP / MCP transport.**
+- **Typed frontmatter schemas (zod)** — projects layer their own.
+- **A file watcher.**
 
 ## Architecture — two layers
 
 | Concern | `mdvault` (library) | Consuming project |
 |---|---|---|
-| Path resolve + **per-access allowlist enforcement** | ✅ mechanism (`createVaultIo({ root, prefixes })`) | supplies the `{ read, write }` prefixes |
-| Atomic write + lock + mtime-retry + `afterWrite` seam | ✅ | hooks `afterWrite` (e.g. git commit) |
-| Frontmatter parse / edit (format-preserving) | ✅ | per-note-type zod schemas; demote-on-edit policy |
-| Link extraction + resolution (wikilink/relative) | ✅ mechanism | picks the resolver |
-| CRUD primitives | ✅ | binds them into model-facing **tools** |
+| Path resolve + **per-access boundary-aware allowlist** | ✅ mechanism (`createVaultIo({ root, prefixes })`) | supplies `{ read, write }` prefixes |
+| Atomic write + lock + mtime-guard + `onCommit` seam + CAS delete | ✅ | hooks `onCommit` (e.g. git commit) |
+| Frontmatter parse / edit (format-preserving) | ✅ | zod schemas; demote-on-edit policy |
+| Link extraction + resolution | ✅ mechanism | picks the resolver |
+| CRUD primitives | ✅ | binds into model-facing **tools** |
 | Index + query + reconcile primitives | ✅ | drives targeted `reconcilePaths`; may disable lazy reconcile |
 | Keyword search (FTS5) | ✅ | (semantic/qmd → v1.1) |
 | **Deny-policy / persona isolation** | ❌ | ✅ |
-| **Sync (ob / git) + commit-before-return** | ❌ (provides the seam) | ✅ |
-| **MCP / HTTP transport, Russian user messages** | ❌ (emits codes) | ✅ (maps codes → messages) |
-
-The **allowlist enforcement is in the library** (parameterised by prefixes);
-only the **policy** (which prefixes, deny rules, persona) is in the project.
+| **Sync + commit-before-return** | ❌ (provides the seam) | ✅ |
+| **MCP / HTTP, Russian user messages** | ❌ (emits codes) | ✅ (maps codes → messages) |
 
 ## Composition root & lifecycle
 
-A single factory owns the SQLite handle and wires the modules:
-
 ```
-createVault({
+async createVault({
   root: string,                      // vault root abs path
   prefixes: { read: string[]; write: string[] },
-  indexPath: string,                 // bun:sqlite db path in DATA_DIR (NOT in vault)
+  indexPath: string,                 // bun:sqlite db in DATA_DIR (NOT in vault)
   linkResolution?: 'wikilink' | 'relative' | LinkResolver,  // default 'wikilink'
   lazyReconcile?: boolean,           // default true; selgeo sets false
-  reconcileTtlMs?: number,           // default 2000
-  afterWrite?: (rel: string, content: string) => void | Promise<void>,
-  ignore?: string[],                 // extra ignore globs beyond defaults
-}) => {
-  io, notes, query,
-  reconcile, reconcilePaths, rebuild,
-  close(),                           // releases the bun:sqlite handle (tests/shutdown)
-}
+  reconcileTtlMs?: number,           // default 2000 — lazy-reconcile throttle
+  sqliteBusyTimeoutMs?: number,      // default 5000 — SQLite contention (independent knob)
+  caseSensitive?: boolean,           // default: auto-detect the volume
+  crossProcessWriterLock?: boolean,  // default false (see Concurrency model)
+  onCommit?: (e: CommitEvent) => void | Promise<void>,
+  ignore?: string[],
+}): Promise<Vault>
+
+// Vault = { io, notes, query, reconcile, reconcilePaths, rebuild, close }
 ```
 
-- Opens the `bun:sqlite` `Database` **once**; the single handle is shared by
-  the write-through path (`notes`) and reads (`query`).
-- On open: `PRAGMA journal_mode=WAL; PRAGMA busy_timeout=<reconcileTtlMs or
-  default>;` — the index is in local `DATA_DIR` (not the synced vault), so
-  WAL's `-wal`/`-shm` sidecars are safe.
-- On open: a one-time **FTS5 capability probe** (try `CREATE VIRTUAL TABLE …
-  fts5` in a savepoint); fail fast with a clear message pointing at
-  `Database.setCustomSQLite()` if the platform `libsqlite3` lacks FTS5.
-- `engines` pins a minimum Bun version (FTS5/json1 come from the platform
-  `libsqlite3`, which `bun:sqlite` links on macOS — version-dependent).
+- **Async** because it opens the DB, runs capability probes, and may
+  `rebuild()` by traversing the whole vault. `close()` releases the handle
+  (test isolation / shutdown).
+- Opens `bun:sqlite` **once**; the single handle is shared by write-through
+  (`notes`) and reads (`query`).
+- On open: `PRAGMA journal_mode=WAL; PRAGMA busy_timeout=<sqliteBusyTimeoutMs>;`
+  (index is in local `DATA_DIR`, so WAL `-wal`/`-shm` sidecars are safe).
+- On open: a **capability probe covering BOTH FTS5 and JSON1** (the `where`
+  predicate needs `json_extract`); fail fast with a message pointing at
+  `Database.setCustomSQLite()` if the platform `libsqlite3` lacks either.
+- `engines` pins a minimum Bun version.
+
+`CommitEvent` (the write-seam, covers delete):
+```
+type CommitEvent =
+  | { op: 'create' | 'update'; path: string; content: string }
+  | { op: 'delete'; path: string }
+```
+Runs **inside the per-file lock**, after the fs mutation + the in-lock index
+update, before lock release. selgeo hooks git add/rm + commit here
+(commit-before-return); machine-spirit no-ops.
 
 ## Core modules (public surface)
 
-Dependency direction: `vault-io`, `locked-file`, `frontmatter`, `links` are
-**leaf** modules (independently testable). `notes` depends on `index`
-(write-through + backlinks); `query` depends on `index`.
+Leaf (independently testable): `vault-io`, `locked-file`, `frontmatter`,
+`links`. `notes`/`query` depend on `index`.
 
 ### `vault-io`
 
 `createVaultIo({ root, prefixes })` →
-`{ resolveVaultPath, toVaultRelative, can, readVaultFile, writeVaultFile, rewriteIfUnchanged, stat, listMarkdown }`
+`{ resolveVaultPath, toVaultRelative, toKey, can, readVaultFile, writeVaultFile, rewriteIfUnchanged, unlinkIfUnchanged, stat, listMarkdown }`
 
 - `prefixes: { read: string[]; write: string[] }`. machine-spirit passes
-  `read === write ===` its single allowlist; selgeo passes
-  `read: ['']` (whole vault) and `write:` its direct∪PR write set (the
-  direct-vs-PR routing is selgeo sync policy, layered above).
-- `resolveVaultPath(rel, access = 'read')` and `can(rel, access)` — reject
-  absolute paths, `..` escapes, out-of-allowlist prefixes (per access), and
-  symlink escapes (realpath containment). Non-`.md` targets are rejected at
-  this chokepoint (single home for the `.md`-only guard).
-- `toVaultRelative(rel)` → the **canonical** vault-relative form used as the
-  lock key. Canonicalization: strip leading `./`, collapse `.` segments and
-  duplicate slashes, force `/` separators, **NFC** Unicode normalization,
-  **case-preserving** (documented caveat: on case-insensitive FS,
-  `Note.md`/`note.md` are the same file but distinct keys — consumers should
-  use consistent casing; v1 does not case-fold).
-- `rewriteIfUnchanged(rel, content, mtime)` — mtime-guarded write, exposed so
-  the consumer's sync decorator (selgeo) has a stable seam to wrap.
-- `listMarkdown(dir?)` — **recursive** over the allowlisted tree; skips
-  dotfolders (`.obsidian`, `.trash`, `.git`), non-`.md` files, and the
-  configured `ignore` globs. The machine-spirit `_`/`0`-prefix skip is **not
-  a default**; it is expressible via `ignore`.
+  `read === write ===` its allowlist; selgeo passes `read: ['']` and `write:`
+  its direct∪PR set (direct-vs-PR routing is selgeo policy, layered above).
+- **Boundary-aware prefix matching (security boundary, pinned):** prefix `P`
+  matches path `X` iff `X === P` (exact file) **or** `X` starts with
+  `(P with exactly one trailing '/')` (folder containment). `''` matches all.
+  Prefixes are canonicalized like paths (NFC, `/`-separated, trailing `/`
+  normalized). **`foo` does NOT match `foobar.md`.**
+- `resolveVaultPath(rel, access = 'read')` / `can(rel, access)` — reject
+  absolute paths, `..` escapes, out-of-allowlist (per access), symlink
+  escapes (realpath containment), and non-`.md` targets (the single `.md`
+  guard lives here).
+- `toVaultRelative(rel)` → canonical display path: strip leading `./`,
+  collapse `.`/dup-slashes, force `/`, **NFC**, **case-preserving**.
+- `toKey(rel)` → the **lock + index key**. On a **case-insensitive** volume
+  (`caseSensitive === false`, default auto-detected) this is the **case-folded**
+  (NFC + lowercased) form, so `Note.md` and `note.md` map to **one** lock key
+  and **one** index row; the real-cased `toVaultRelative` is kept for IO and
+  display. On case-sensitive volumes `toKey === toVaultRelative`.
+- `rewriteIfUnchanged(rel, content, sig)` / `unlinkIfUnchanged(rel, sig)` —
+  mtime-guarded write / delete, exposed so the consumer's sync decorator has a
+  stable seam.
+- `listMarkdown(dir?)` — **recursive**; skips dotfolders (`.obsidian`,
+  `.trash`, `.git`), non-`.md`, and configured `ignore` globs. The
+  machine-spirit `_`/`0`-prefix skip is expressible via `ignore`, not a
+  default.
 
 ### `locked-file`
 
 `withFileTransform(fullPath, lockKey, transform, opts)` — locked
-read → decide → `rewriteIfUnchanged` with **read-consistency double-stat**
-(stat → read → stat; re-read on change, bounded retries) + linear-backoff
-retry (`maxRetries = 3`, `50ms × (attempt+1)`).
+read → decide → `rewriteIfUnchanged` with **stat→read→stat read-consistency**
++ linear-backoff retry (`maxRetries = 3`, `50ms × (attempt+1)`).
 
-- `opts.allowCreate` (default `false`): false → a transform returning content
-  for a missing file throws `REFUSE_CREATE`; true → create via `atomicWrite`
-  (mkdir -p parent).
-- `opts.afterWrite(rel, content)` — runs **inside the lock**, after the write
-  and the in-lock index update, before lock release. selgeo hooks git
-  add+commit here (commit-before-return); machine-spirit no-ops.
+- `opts.allowCreate` (default `false`): false → content for a missing file
+  throws `REFUSE_CREATE`; true → create via `atomicWrite` (mkdir -p parent).
+- `opts.onCommit(e)` — runs in-lock after write + index update.
+- **CAS-like delete** (`withFileDelete(fullPath, lockKey, opts)`): under the
+  lock, stat the signature, `unlinkIfUnchanged`; signature mismatch (external
+  writer modified/recreated the file) → `MTIME_CONFLICT` (consumer decides);
+  missing file → no-op. Index rows dropped in the same lock/transaction;
+  `onCommit({op:'delete'})` after.
+- If `crossProcessWriterLock`, the in-process lock is wrapped by an `O_EXCL`
+  advisory lockfile (per key) with stale-lock recovery.
 
 ### `frontmatter`
 
 - `parseFrontmatter(content)` → `{ frontmatter, tags, body, valid }`
-  (`valid: 'flat' | 'present-but-invalid' | 'none'`). YAML read,
-  `uniqueKeys: false`, **never throws**; degrades to `{}`/`none` on garbage.
+  (`valid: 'flat' | 'present-but-invalid' | 'none'`). `uniqueKeys:false`,
+  **never throws**.
 - `editFrontmatter(content, mutate)` → `{ content, outcome:
-  'edited' | 'unchanged' | 'unverifiable' }`. **Multi-field, body-preserving**,
+  'edited' | 'unchanged' | 'unverifiable' }`. **Multi-field, body-preserving**
   via the YAML **Document/CST API** (`parseDocument` → mutate nodes →
-  `String(doc)`), which preserves comments, key order, numeric literals
-  (`1.0`), and empty values (`aliases:`). Fail-**closed** (`unverifiable`,
-  no write) on non-flat / malformed frontmatter. This subsumes selgeo's
-  `editFrontmatter` (e.g. its `demoteApprovedOnEdit` mutates 4 fields at once;
-  the demote *policy* stays in selgeo).
-- `assertFlatFrontmatter(fields)` — flat = **top-level keys only; values are
-  scalar or array-of-scalar**; nested maps are rejected (→ `unverifiable`).
-- `tags` derivation (pinned): read frontmatter `tags` (and `tag`); coerce
-  scalar | comma/space-string | YAML list → `string[]`; strip a leading `#`;
-  **case-preserving**; dedup. Inline `#hashtags` in the body are **out of
-  scope** in v1. The identical normalization is applied to query-side tag
-  input.
+  `String(doc)`) — preserves comments, key order, numeric literals (`1.0`),
+  empty values (`aliases:`). Fail-**closed** (`unverifiable`, no write) on
+  non-flat / malformed. Subsumes selgeo's `editFrontmatter`; the
+  `demoteApprovedOnEdit` *policy* stays in selgeo.
+- `assertFlatFrontmatter(fields)` — flat = top-level keys; values scalar or
+  array-of-scalar; nested maps rejected.
+- `tags` derivation (pinned): frontmatter `tags` (and `tag`); coerce
+  scalar | comma/space-string | list → `string[]`; strip leading `#`;
+  case-preserving; dedup. Inline `#hashtags` out of scope v1. Same
+  normalization applied to query-side tag input.
 
 ### `links`
 
 - `extractLinks(content)` → `{ wikilinks, embeds, mdLinks }` (raw targets).
-- **Resolution** (`linkResolution`) maps a raw target → canonical `dst` path,
-  pluggable per consumer:
-  - `'wikilink'` (machine-spirit): strip `#heading` / `#^block` / `|alias`;
-    match by exact vault-relative path, else by **basename, case-insensitive**;
-    `.md` optional; tie-break **same-folder first, then shortest path, then
-    lexical**; **dangling** target → row stored with `dst = raw target`
-    (sentinel-prefixed, never resolves as a real note).
-  - `'relative'` (selgeo, Wikilinks OFF): resolve `mdLinks` against the source
-    file's directory; must end in `.md`; out-of-vault → dropped.
-  - A custom `LinkResolver(target, srcDir) => string | null` is accepted.
-- `note_links.dst` stores **resolved canonical paths** (or the dangling
-  sentinel).
+- **Resolution is asymmetric** (the key correctness point):
+  - **`'relative'`** (selgeo, Wikilinks OFF): resolve `mdLinks` against the
+    source dir → a path. **Stable** — depends only on `(srcDir, target)`, not
+    on other notes — so `note_links` stores the **resolved** path.
+  - **`'wikilink'`** (machine-spirit): strip `#heading`/`#^block`/`|alias`;
+    `note_links` stores the **normalized target** (basename, case-folded),
+    **not** a resolved path. Resolution to a concrete note happens **at query
+    time** (§query), because it depends on vault state + the tie-break — so a
+    target appearing/disappearing/renamed **self-heals** with no need to
+    reindex unrelated source notes.
+  - Custom `LinkResolver(target, srcDir, kind) => { stored: string }`.
 
 ### `notes` (CRUD)
 
-All return typed results / throw typed errors (see Error model). All **writes**
-run inside `withFileTransform` keyed by `toVaultRelative`, perform the index
-update **in the same lock and the same SQLite transaction**, then call
-`afterWrite`.
+Typed results / typed errors. All **mutations** run inside `withFileTransform`
+/ `withFileDelete` keyed by `toKey`, update the index **in the same lock and
+SQLite transaction**, then call `onCommit`.
 
 - `readNote(path, { withLinks? })` → `{ frontmatter, tags, body, valid }`;
-  with `withLinks`, also `{ outbound, backlinks }` (from the index). Missing
-  file → throws `NOT_FOUND`. *(Renamed from `withGraph` to avoid implying the
-  deferred graph adapter.)*
-- `createNote(path, { frontmatter?, body })` — `allowCreate`; **errors
-  `ALREADY_EXISTS`** if the path exists (no clobber). Performs a full index
-  INSERT (all four tables) in-lock.
+  `withLinks` adds `{ outbound, backlinks }` (from the index). Missing →
+  `NOT_FOUND`.
+- `createNote(path, { frontmatter?, body })` — `allowCreate`; **`ALREADY_EXISTS`**
+  if present (no clobber); full index INSERT in-lock.
 - `updateNote(path, op)` — exactly one of:
-  - `{ editByMatch: { old, new } }` — **literal substring** match; counts
-    **non-overlapping** occurrences over exact bytes; error `NO_MATCH` (0) or
-    `AMBIGUOUS_MATCH` (>1); existing-file only.
-  - `{ append: string }` — append-to-end, create-if-missing (full index
-    INSERT on create); newline rule: insert one `\n` before the appended text
-    iff existing non-empty content lacks a trailing newline.
-- `editFrontmatter(path, mutate)` — multi-field body-preserving edit (above);
-  re-derives tags/index in-lock.
-- `deleteNote(path)` — removes the file + all index rows; missing → **no-op**
-  (idempotent).
-- **No full-overwrite mode** (the model must not truncate a whole note).
+  - `{ editByMatch: { old, new } }` — **literal substring**, **non-overlapping**
+    count over exact bytes; `NO_MATCH` (0) / `AMBIGUOUS_MATCH` (>1);
+    existing-file only.
+  - `{ append: string }` — append, create-if-missing (full index INSERT on
+    create); newline rule: insert one `\n` before the text iff existing
+    non-empty content lacks a trailing newline.
+- `editFrontmatter(path, mutate)` — multi-field body-preserving; re-derives
+  tags/index in-lock.
+- `deleteNote(path)` — **CAS-like** (`withFileDelete`): mtime-guarded unlink +
+  index-row drop in one lock/transaction; `MTIME_CONFLICT` if the file changed
+  under us; missing → idempotent no-op (no `onCommit`).
+- **No full-overwrite mode.**
 
 ### `index` (`bun:sqlite`)
 
-Schema:
-
 ```sql
 notes(
-  id          INTEGER PRIMARY KEY,        -- stable rowid for FTS addressing
-  path        TEXT UNIQUE NOT NULL,       -- canonical vault-relative
+  id          INTEGER PRIMARY KEY,        -- stable rowid; FTS docid
+  path        TEXT NOT NULL,              -- canonical display path (toVaultRelative)
+  path_key    TEXT NOT NULL UNIQUE,       -- toKey: case-folded on case-insensitive vols
   mtime_ms    INTEGER NOT NULL,           -- integer ms, exact-equality compare
   size        INTEGER NOT NULL,
-  title       TEXT NOT NULL,              -- derivation below (never NULL)
+  title       TEXT NOT NULL,              -- frontmatter.title → first # H1 → filename
   frontmatter TEXT NOT NULL               -- JSON
 );
-note_tags(path TEXT, tag TEXT);           -- index on (tag), (path)
-note_links(src TEXT, dst TEXT);           -- index on (dst) AND (src)
--- external-content FTS5 keyed by notes.id (O(1) per-note update/delete):
-notes_fts USING fts5(body, content='notes', content_rowid='id');
+note_tags(
+  path_key TEXT NOT NULL, tag TEXT NOT NULL,
+  PRIMARY KEY (path_key, tag)             -- dedup tags per note
+);                                        -- index on (tag)
+note_links(
+  src_key TEXT NOT NULL,                  -- source note key
+  target  TEXT NOT NULL,                  -- relative: resolved path_key; wikilink: normalized basename
+  kind    TEXT NOT NULL,                  -- 'wikilink' | 'embed' | 'mdlink'
+  PRIMARY KEY (src_key, target, kind)     -- distinct edges (no multiplicity)
+);                                        -- index on (target) for backlinks
+-- standalone FTS5 (stores its own body copy); row addressed by rowid = notes.id:
+notes_fts USING fts5(body);               -- INSERT(rowid,body) / DELETE WHERE rowid=? / update=delete+insert
 meta(key TEXT PRIMARY KEY, value TEXT);   -- schema_version, last_reconcile_ms
 ```
 
-- **`title`** (pinned precedence): frontmatter `title` → first `# H1` →
-  filename without extension. Never NULL.
-- **External-content FTS5** (`content_rowid='id'`) so a single note's FTS row
-  is addressed by rowid — avoids the O(N) virtual-table scan a standalone FTS
-  table pays on every per-note update/delete.
-- `indexNote` / `dropNote` each run in **one synchronous SQLite transaction**
-  (`db.transaction(...)()`, no awaits between BEGIN/COMMIT). `SQLITE_BUSY` is
-  absorbed by `busy_timeout`; the in-process per-file lock plus
-  single-statement transactions keep cross-note index writes consistent
-  (sqlite serializes writers; the per-file lock does **not** span the index).
-- **Multi-process topology is supported** (machine-spirit's CLI and `serve`
-  daemon both open the same `vault-index.db`): WAL + `busy_timeout` + small
-  transactions. Each process keeps its **own** lazy-reconcile TTL clock
-  (in-memory); there is no cross-process cache invalidation in v1 (a process
-  may serve a ≤TTL-stale view of the *other* process's writes until its next
-  reconcile — documented, acceptable).
+- **Standalone FTS5 keyed by `rowid = notes.id`** (not external-content, which
+  as previously drafted referenced a `notes.body` column that does not exist).
+  A standalone FTS5 table keeps its own copy of `body`, so per-note
+  update/delete is `DELETE FROM notes_fts WHERE rowid = ?` (O(1) by docid) —
+  no full-table scan, no content-table coupling. Storage grows by ~vault text
+  size (acceptable at personal scale).
+- `indexNote` / `dropNote` each run in **one synchronous transaction**
+  (`db.transaction(...)()`, no awaits inside). Cross-note consistency comes
+  from SQLite write-serialization + `busy_timeout`; the per-file lock does not
+  span the index.
+- **Multi-process** supported (CLI + daemon on one DB): WAL + `busy_timeout` +
+  small transactions. Each process keeps its **own** lazy-reconcile TTL clock;
+  no cross-process cache invalidation in v1 (a process may serve a ≤TTL-stale
+  view of the *other* process's writes — documented, acceptable).
 
 ### `query`
 
 - `queryNotes({ tag?, where?, folder?, orderBy?, limit?, offset? })`:
-  - `where` = **equality map** `Record<string, string | number | boolean>`
-    over top-level frontmatter keys (`json_extract`), all conditions plus
-    `tag`/`folder` **AND**ed; missing key = no match. Operators are deferred.
-  - `folder` = **recursive** prefix match on the normalized boundary
-    `folder + '/'` (matches nested subfolders).
-  - Default order **`mtime_ms DESC, path ASC`**; default `limit` capped
-    (documented, e.g. 100) so unbounded sets never reach a model context.
-  - Note: frontmatter `where` is a table scan (opaque JSON); fine at low
-    thousands. Hot fields can later get expression indexes
-    (`CREATE INDEX … json_extract(frontmatter,'$.x')`) — a documented scaling
-    lever, not v1 work.
-- `backlinks(path, { limit?, offset? })` / `outboundLinks(path, …)` —
-  indexed on `(dst)` / `(src)`; default order `src/dst ASC`; paginated.
-- `searchText(q, { tag?, folder?, limit?, offset? })` — FTS5 keyword.
-  **Input is sanitized**: tokenize and re-emit each term double-quoted (so
-  raw model text like `C++ vs Rust:` or a trailing `AND` cannot throw an
-  FTS5 syntax error); malformed input yields empty results, never a raw
-  SQLite throw. Default order FTS `rank`; paginated.
+  - `where` = equality map `Record<string, string|number|boolean>`; **values
+    always bound (`?`)**; **keys validated** to `[A-Za-z0-9_.-]` and emitted as
+    a quoted JSON path `$."key"` (reject/skip invalid keys). All conditions
+    plus `tag`/`folder` are AND-ed; missing key = no match. Operators deferred.
+    (Frontmatter `where` is an opaque-JSON table scan — fine at low thousands;
+    hot fields can get an expression index later.)
+  - `folder` = recursive prefix match on `folder + '/'`.
+  - `orderBy` = **typed allowlist** `{ field: 'mtime_ms' | 'path' | 'title',
+    dir: 'asc' | 'desc' }` (never raw SQL). Default `{ mtime_ms, desc }` then
+    `path asc`. Default `limit` capped (documented, ~100).
+- `backlinks(path, { limit?, offset? })`:
+  - **wikilink mode** — resolve at query time: candidates = `note_links` rows
+    whose `target = basename(path)`; a candidate's source is a backlink iff
+    `path` is the **tie-break winner** for that basename among existing notes
+    (same-folder-as-source first, then shortest path, then lexical). Dangling
+    links naturally yield no backlink and **self-heal** when the target note
+    appears.
+  - **relative mode** — `note_links WHERE target = path_key` (already
+    resolved).
+- `outboundLinks(path, …)` — `note_links WHERE src_key = ?`; targets resolved
+  for display (wikilink: resolve basename→note or mark dangling).
+- `searchText(q, { tag?, folder?, limit?, offset? })` — FTS5 keyword. **Input
+  sanitized**: tokenize and re-emit each term double-quoted, so raw model text
+  (`C++ vs Rust:`, trailing `AND`, unbalanced quote) cannot throw an FTS5
+  syntax error — malformed input → empty results, never a raw SQLite throw.
+  Default order FTS `rank`; paginated.
 
 ## Indexing & reconciliation
 
-Two branches keep the index consistent with the files. **The library owns the
-correctness schedule; the project may add a targeted fast-path.**
+The library **owns the correctness schedule**; the project may add a targeted
+fast-path.
 
-### ① Internal writes — write-through (in-lock, same transaction)
+### ① Internal writes — write-through (in-lock, one transaction)
 
-CRUD writes go through the library, so it updates the affected index rows
-inside the same per-file lock, in **one SQLite transaction**, using the
-already-parsed content. **Not claimed atomic across the two files**: the
-`.md` and the index DB are separate. Ordering & recovery: write the file
-first; **only advance the stored `(mtime, size)` if the index transaction
-commits** — so if the index write fails (busy/crash), the stored signature
-stays behind and the next reconcile re-syncs that note. The file is the
-source of truth; cross-file durability is the reconcile backstop, not a
-two-phase commit.
+Updates the affected index rows inside the per-file lock, in one SQLite
+transaction, from the already-parsed content. **Not atomic across the two
+files** (`.md` + index DB). Ordering & recovery: write the file first; **only
+advance the stored `(mtime, size)` if the index transaction commits** — so on
+index-write failure the stored signature stays behind and the next reconcile
+re-syncs that note. File is source of truth; durability across the two
+resources is the reconcile backstop, not a two-phase commit.
 
-### ② External writes — reconcile (the human via Obsidian / the syncer)
+### ② External writes — reconcile
 
-Edits arriving through the syncer bypass the library. Detected by comparing
-on-disk `(mtime_ms, size)` against stored values.
+Detected by comparing on-disk `(mtime_ms, size)` against stored values.
 
-- **`reconcile()`** — full sweep over the allowlisted tree (recursive, ignore
-  rules per `listMarkdown`), **parallel/batched `stat`** (sequential
-  `await stat` is ~10ms/1000 notes; `Promise.all` ~1ms/1000 — the latency
-  claim depends on batching). For each changed file, apply the **same
-  stat→read→stat read-consistency** as writes (re-read if it changed mid-read)
-  so the stored signature always matches the parsed content. Re-parse changed,
-  insert new, drop vanished.
+- **`reconcile()`** — recursive sweep, **parallel/batched `stat`**
+  (sequential `await stat` is ~10ms/1000 notes; `Promise.all` ~1ms/1000 — the
+  latency claim needs batching). Per changed file, **stat→read→stat**
+  read-consistency so the stored signature always matches parsed content.
 - **`reconcilePaths(paths)`** — targeted reindex of a known changeset.
 - **`rebuild()`** — public: drop all rows, enumerate via `listMarkdown`,
-  reindex from scratch. Used for first build, corruption, schema-version bump,
-  or after an out-of-band bulk edit / a normalization-logic fix.
+  reindex. First build, corruption, version bump, or post-bulk-edit.
 
-**Who drives it:**
-- machine-spirit (opaque `ob`/Obsidian-Sync): relies on the library's
-  **lazy reconcile** (`lazyReconcile: true`).
-- selgeo (git-sync): sets `lazyReconcile: false` and, after each `git pull`,
-  calls `reconcilePaths(git diff --name-only …)` from **inside its git
-  mutex** (avoids a query-triggered sweep reading a file mid-checkout).
+Because **wikilink links are resolved at query time**, adding/removing/renaming
+a *target* note does **not** require reindexing the *source* notes that point
+at it — only the changed file itself is reindexed, and backlinks re-resolve on
+the next query. (Relative-mode targets store resolved paths; a renamed target
+leaves the stored link pointing at the old path — that is link-rot in the
+source content, correctly reflected, not an index bug.)
+
+**Who drives it:** machine-spirit (opaque `ob`-sync) relies on **lazy
+reconcile** (`lazyReconcile:true`). selgeo (git-sync) sets `lazyReconcile:false`
+and calls `reconcilePaths(git diff --name-only …)` from **inside its git mutex**
+(avoids a sweep reading a file mid-checkout).
 
 ### Composition (v1)
 
-1. **Write-through** on every internal CRUD write (in-lock, transactional).
-2. **Lazy reconcile before queries**, gated by a per-instance TTL
-   (`reconcileTtlMs`, default 2000), **opt-out** via `lazyReconcile: false`.
-   Triggering entry points: `queryNotes`, `backlinks`, `outboundLinks`,
-   `searchText`, and `readNote({ withLinks })`. Runs outside any consumer
-   write mutex (relies on never-throws parse + next reconcile for torn reads).
-3. **Boot build-if-missing** — on `createVault`, if the index is absent /
-   corrupt (`PRAGMA integrity_check` on open / version mismatch in `meta`),
-   `rebuild()`. Cold build parses the whole vault (seconds on large vaults) —
-   documented latency budget; an async/background build mode is a future
-   option.
-4. **Watcher (chokidar): out of scope v1** — an optimisation, not correctness
-   (syncer atomic-renames / bulk checkouts defeat watchers; a sweep is
-   required regardless).
+1. Write-through on every mutation (in-lock, transactional).
+2. **Lazy reconcile before queries**, per-instance TTL (`reconcileTtlMs`),
+   **opt-out** via `lazyReconcile:false`. Triggers: `queryNotes`, `backlinks`,
+   `outboundLinks`, `searchText`, `readNote({withLinks})`. Runs outside any
+   consumer write mutex (relies on never-throws parse + next reconcile for
+   torn reads).
+3. **Boot build-if-missing** — on `createVault`, if absent / corrupt
+   (`integrity_check` / version mismatch) → `rebuild()`. Cold build parses the
+   whole vault (seconds on large vaults) — documented; async build is a
+   future option.
+4. **Watcher: out of scope v1.**
 
 ### Edge cases
 
-- **Delete:** drops `notes` + `note_tags` + `note_links` + `notes_fts` rows.
-- **Rename/move:** delete + add to the sweep (correct). Inbound
-  `[[wikilink]]` integrity is **out of scope** (future).
-- **Detection precision:** `mtime_ms` stored as integer ms, **exact-equality**
-  compare, plus `size`. A same-`(mtime, size)` content edit is undetectable;
-  a `content_hash` column is the documented upgrade. **Assumption to verify
-  before relying on it:** `ob`/Obsidian-Sync **bumps** mtime on synced writes
-  (some sync tools preserve source mtime across devices). If empirically it
-  preserves mtime, promote `content_hash` into v1 for machine-spirit.
-- **Golden invariant** (testing): a full `rebuild()` equals the incrementally
-  maintained index **at quiescence, given every change bumps `(mtime, size)`** —
-  the property test exercises mtime/size-bumping changes only; the
+- **Delete:** drops `notes` + `note_tags` + `note_links` + the FTS row.
+- **Rename/move:** delete + add to the sweep.
+- **Detection precision:** `mtime_ms` integer, **exact-equality** + `size`. A
+  same-`(mtime,size)` content edit is undetectable; a `content_hash` column is
+  the documented upgrade. **Assumption to verify:** `ob`/Obsidian-Sync **bumps**
+  mtime on synced writes; if it preserves source mtime, promote `content_hash`
+  into v1 for machine-spirit.
+- **Golden invariant** (testing): a full `rebuild()` equals the incremental
+  index **at quiescence, given every change bumps `(mtime, size)`**; the
   mtime-preserving case is the documented gap.
-
-## Search (v1)
-
-Concrete `searchText` over the external-content FTS5 table (above), with input
-sanitization and `tag`/`folder` filters joined on `note_tags` / `path`-prefix.
-Semantic search (a `qmd` adapter) and the `SearchBackend` interface that would
-abstract them are **v1.1** (extract-on-second-implementation). A semantic
-engine is **not** a substitute for the structured index — collection/tag
-queries (exact `WHERE`) and content search (fuzzy/semantic) are different
-tiers, both needed.
 
 ## Error model
 
-The library **throws typed errors** (`MdVaultError` subclasses), each with a
-stable machine-readable `code`. The library emits **English messages + codes**;
-consumers map codes → their own (Russian) user-facing messages. Codes:
-
+The library **throws typed errors** (`MdVaultError` subclasses) with stable
+`code`s and English messages; consumers map codes → Russian. Codes:
 `ALLOWLIST_VIOLATION`, `NOT_MARKDOWN`, `NOT_FOUND`, `ALREADY_EXISTS`,
 `NO_MATCH`, `AMBIGUOUS_MATCH`, `MTIME_CONFLICT`, `REFUSE_CREATE`,
-`FRONTMATTER_INVALID` (edit fail-closed), `SEARCH_SYNTAX` (should be
-unreachable post-sanitization), `INDEX_UNAVAILABLE` (FTS5 probe failed / open
-error).
+`FRONTMATTER_INVALID`, `INDEX_UNAVAILABLE` (FTS5/JSON1 probe / open failure).
 
 ## Runtime & packaging
 
-- **Bun-first.** `bun:sqlite` (built-in), `Bun.file` I/O. ESM,
-  `"type": "module"`, `exports` + bundled `.d.ts`. No `bin` (library). MIT.
-  Package `mdvault`. `engines` pins a minimum Bun version.
-- **Dependencies:** runtime — `yaml` only (Document/CST API for
-  format-preserving frontmatter edits). No native addons. `graphology` etc.
-  arrive only with the v1.1 graph module (optional peer).
-- **Consumers must gitignore** the index DB **and** its `-wal` / `-shm`
-  sidecars.
-- **Conventions** (match both consuming repos): Biome single-quote / 2-space /
-  grouped imports; `type` not `interface`; lazy config; tests in `__tests__/`
-  using `spyOn` (**never** `mock.module`); blank line before `return`;
-  module-folder split when a file outgrows ~3 exports or one read.
+- **Bun-first.** `bun:sqlite`, `Bun.file`. ESM, `"type":"module"`, `exports` +
+  `.d.ts`. No `bin`. MIT. Package `mdvault`. `engines` min Bun.
+- **Dependencies:** runtime — `yaml` only. No native addons.
+- **Consumers must gitignore** the index DB **and** its `-wal`/`-shm` sidecars.
+- **Conventions** (match both repos): Biome single-quote/2-space/grouped
+  imports; `type` not `interface`; lazy config; tests in `__tests__/` with
+  `spyOn` (**never** `mock.module`); blank line before `return`; module-folder
+  split past ~3 exports / one read.
 
 ## How the two projects consume it (follow-up, separate specs)
 
-Each repo migrates **separately**, after `mdvault` v1 exists:
-
-- **machine-spirit:** replace `src/runtime/vault-io.ts`,
-  `domain/section-edit.ts`, `runtime/frontmatter-schema.ts`,
-  `runtime/markdown.ts` with `mdvault`. `linkResolution: 'wikilink'`,
-  `lazyReconcile: true`, no `afterWrite`. The in-flight `read_note` /
-  `update_note` cross-agent tools bind `mdvault` CRUD with the persona
-  allowlist + `denyPrefixes` policy; add `query_notes` + `search_notes`
-  tools. Frontmatter becomes writable (`editFrontmatter`).
-- **selgeo-brain:** replace its ported `vault-io` / `frontmatter` /
-  `markdown` with `mdvault`. `linkResolution: 'relative'`,
-  `lazyReconcile: false`; pass `afterWrite` = git add+commit (its existing
-  commit-before-return), and drive `reconcilePaths` from the pull changeset
-  inside its git mutex. `demoteApprovedOnEdit` / provenance stay as selgeo
-  policy layered over `editFrontmatter`.
+- **machine-spirit:** replace `runtime/vault-io.ts`, `domain/section-edit.ts`,
+  `runtime/frontmatter-schema.ts`, `runtime/markdown.ts`. `linkResolution:
+  'wikilink'`, `lazyReconcile:true`, no `onCommit`. The in-flight `read_note`/
+  `update_note` tools bind `mdvault` CRUD with the persona allowlist +
+  `denyPrefixes`; add `query_notes` + `search_notes`. Frontmatter becomes
+  writable.
+- **selgeo-brain:** replace its ported `vault-io`/`frontmatter`/`markdown`.
+  `linkResolution:'relative'`, `lazyReconcile:false`; `onCommit` = git
+  add/rm + commit (commit-before-return, now covering delete); drive
+  `reconcilePaths` from the pull changeset inside its git mutex. Provenance /
+  demote-on-edit stay as selgeo policy over `editFrontmatter`.
 
 ## Testing strategy
 
-- **Security:** allowlist escape (`..`, absolute, symlink-to-outside) per
-  access; `.md`-only guard at `resolveVaultPath`; canonical lock-key
-  coincidence (`a/./b.md`); NFC normalization.
-- **Concurrency:** `withFileTransform` mtime-retry + stat→read→stat under a
-  simulated external writer; two concurrent appends → no lost update (mirrors
-  machine-spirit's `h-create` race test); `allowCreate` branches; `afterWrite`
-  runs in-lock after write.
-- **CRUD:** edit-by-match literal 0/1/>1; append newline rule (both);
-  create-if-missing full index insert; `editFrontmatter` preserves comments /
-  order / `1.0` / empty `aliases:` / unknown keys, fail-closed on nested;
-  create-clobber refusal; delete idempotent.
-- **Index/reconcile:** write-through in one transaction; stored mtime not
-  advanced if index write fails; `reconcile()` detects external add/modify/
-  delete with read-consistency; `reconcilePaths` targets; `rebuild()` from
-  empty; WAL + `busy_timeout` set; **golden invariant** at quiescence.
-- **Query:** tag / frontmatter-`where` (AND, missing-key) / folder (recursive)
-  / backlinks / outbound / FTS5 keyword with **adversarial input** (`+`, `-`,
-  `:`, `*`, trailing `AND`, unbalanced quote → empty, never throw); default
-  order + limit/offset determinism; index lives in `DATA_DIR`, not the vault.
-- **Cross-process:** two handles on one index DB don't deadlock (WAL +
-  busy_timeout).
+- **Security:** per-access allowlist escape (`..`, absolute, symlink-out);
+  **boundary-aware prefix** (`foo` must NOT match `foobar.md`; `''` matches
+  all; exact-file vs folder); `.md`-guard at `resolveVaultPath`; canonical
+  key coincidence (`a/./b.md`); NFC; **case-fold key** on a case-insensitive
+  volume (`Note.md`/`note.md` → one lock + one row).
+- **Concurrency:** mtime-retry + stat→read→stat under a simulated external
+  writer; two concurrent appends → no lost update; `allowCreate` branches;
+  `onCommit` in-lock for create/update/**delete**; **delete CAS** raises
+  `MTIME_CONFLICT` when the file changed under us; cross-process lock (when
+  enabled) serializes two processes.
+- **CRUD:** edit-by-match literal 0/1/>1; append newline rule; create-clobber
+  refusal; `editFrontmatter` preserves comments/order/`1.0`/empty
+  `aliases:`/unknown keys, fail-closed on nested; delete idempotent on
+  missing.
+- **Index/reconcile:** write-through one transaction; stored mtime not
+  advanced on index-write failure; `reconcile()` detects add/modify/delete
+  with read-consistency; **wikilink self-heal** (dangling `[[Foo]]` resolves
+  when `Foo.md` is added, with **no** source reindex); FTS5 delete/update by
+  rowid; PK dedup on note_tags/note_links; `rebuild()` from empty; golden
+  invariant at quiescence; WAL + `busy_timeout` set; **FTS5 + JSON1 probe**.
+- **Query:** tag / `where` (AND, missing-key, **key validation + bound
+  values**) / folder (recursive) / backlinks (wikilink tie-break + dangling) /
+  outbound / FTS5 with **adversarial input** (`+ - : *`, trailing `AND`,
+  unbalanced quote → empty, never throw); **`orderBy` allowlist** rejects
+  unknown fields; default order + limit/offset determinism; index in
+  `DATA_DIR`, not vault.
 
 ## Open source & licensing
 
-MIT, generic-only (domain schemas, personas, sync stay in the consuming
-repos). Same model as `telegram-agent-kit` (the user's published package that
-`selgeo-brain` already depends on), so a personal OSS package consumed by a
-work repo is established precedent. Repo home:
+MIT, generic-only (domain schemas, personas, sync stay in consuming repos).
+Same model as `telegram-agent-kit` (the user's published package that
+`selgeo-brain` already depends on). Repo home:
 `/Users/ivan_kalinichenko/Dev/Personal/mdvault`.
 
-## Resolved by the adversarial review (was "open")
+## Resolved by review (was "open")
 
-- **Reconcile ownership:** library owns lazy + boot; project adds targeted
-  `reconcilePaths`; `lazyReconcile` is opt-out.
-- **vault-io signature:** per-access `{ read, write }` prefixes (covers both
-  repos); finer access classes are project policy.
-- **Link resolution:** pluggable `'wikilink' | 'relative' | LinkResolver`.
-- **Tags:** frontmatter-only in v1; `note_tags` join table (chosen over
-  `json_each`).
-- **Graph adapter, SearchBackend interface, Node driver:** deferred to v1.1+.
+- Reconcile ownership; per-access `{read,write}` prefixes; pluggable link
+  resolution; tags frontmatter-only + `note_tags` join with PK; graph /
+  SearchBackend / Node driver deferred.
+- **2nd round:** external-writer claim softened (no file CAS) + optional
+  cross-process writer lock; standalone FTS5 keyed by rowid (external-content
+  schema was broken); wikilink links stored raw + resolved at query time
+  (incremental staleness fix); `onCommit` op-typed (covers delete); delete
+  CAS-like; `createVault` async; case-folded key on case-insensitive volumes;
+  boundary-aware prefix semantics; `orderBy` allowlist + bound `where`;
+  `sqliteBusyTimeoutMs` split from TTL; probe FTS5 **and** JSON1; PKs on
+  `note_tags`/`note_links`.
 
 ## Open questions (remaining)
 
-1. **`ob`/Obsidian-Sync mtime semantics** — empirically confirm it bumps
-   mtime; if it preserves source mtime, `content_hash` moves into v1 for
-   machine-spirit. (Action during machine-spirit migration.)
-2. **qmd adapter location** (v1.1) — project-owned wiring vs a sibling
-   `mdvault-qmd` package.
-3. **Default `limit` value** for queries — pick the cap during implementation
-   (start ~100).
+1. **`ob`/Obsidian-Sync mtime semantics** — confirm it bumps mtime; if it
+   preserves source mtime, `content_hash` moves into v1 for machine-spirit.
+2. **qmd adapter location** (v1.1) — project-owned vs sibling `mdvault-qmd`.
+3. **Default query `limit`** — pick during implementation (~100).
