@@ -13,8 +13,8 @@ export type {
   CrossLock,
   TransformOpts,
   TransformResult,
-} from './locked-file.ts';
-export { withFileDelete, withFileTransform } from './locked-file.ts';
+} from './locked-file/index.ts';
+export { withFileDelete, withFileTransform } from './locked-file/index.ts';
 export type {
   EditOutcome,
   FrontmatterValidity,

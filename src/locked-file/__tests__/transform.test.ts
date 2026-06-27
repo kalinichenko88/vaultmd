@@ -1,12 +1,12 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { MdVaultError } from '../errors.ts';
-import * as fsSig from '../fs-atomic/sig.ts';
-import { withFileDelete, withFileTransform } from '../locked-file.ts';
+import { MdVaultError } from '../../errors.ts';
+import { statSig } from '../../fs-atomic/sig.ts';
+import { withFileTransform } from '../index.ts';
 
 let dir: string;
 let file: string;
@@ -32,7 +32,7 @@ describe('withFileTransform', () => {
     }
     expect(err).toBeInstanceOf(MdVaultError);
     expect((err as MdVaultError).code).toBe('REFUSE_CREATE');
-    expect(await fsSig.statSig(file)).toBeNull();
+    expect(await statSig(file)).toBeNull();
   });
 
   test('missing file + allowCreate:true → created, on disk, onCommit create event', async () => {
@@ -50,17 +50,17 @@ describe('withFileTransform', () => {
 
   test('transform returns null on a present file → unchanged, untouched', async () => {
     await writeFile(file, 'orig');
-    const before = await fsSig.statSig(file);
+    const before = await statSig(file);
     const res = await withFileTransform(file, KEY, REL, () => null);
     expect(res).toEqual({ content: 'orig', outcome: 'unchanged' });
     expect(await readFile(file, 'utf8')).toBe('orig');
-    expect(await fsSig.statSig(file)).toEqual(before);
+    expect(await statSig(file)).toEqual(before);
   });
 
   test('transform returns null on a missing file → unchanged with null content (no REFUSE_CREATE)', async () => {
     const res = await withFileTransform(file, KEY, REL, () => null);
     expect(res).toEqual({ content: null, outcome: 'unchanged' });
-    expect(await fsSig.statSig(file)).toBeNull();
+    expect(await statSig(file)).toBeNull();
   });
 
   test('present file changed → updated, disk updated, onCommit update event', async () => {
@@ -123,63 +123,6 @@ describe('withFileTransform', () => {
     });
     expect(res.outcome).toBe('updated');
     expect(await readFile(file, 'utf8')).toBe('base\nEXTERNAL\nA');
-  });
-});
-
-describe('withFileDelete', () => {
-  test('missing file → { deleted:false }, onCommit not called', async () => {
-    const events: CommitSpy[] = [];
-    const res = await withFileDelete(file, KEY, REL, {
-      onCommit: (e) => {
-        events.push(e);
-      },
-    });
-    expect(res).toEqual({ deleted: false });
-    expect(events).toEqual([]);
-  });
-
-  test('present file → unlink + onCommit delete event, { deleted:true }', async () => {
-    await writeFile(file, 'bye');
-    const events: CommitSpy[] = [];
-    const res = await withFileDelete(file, KEY, REL, {
-      onCommit: (e) => {
-        events.push(e);
-      },
-    });
-    expect(res).toEqual({ deleted: true });
-    expect(events).toEqual([{ op: 'delete', path: REL }]);
-    expect(await fsSig.statSig(file)).toBeNull();
-  });
-
-  test('signature changed under us → MTIME_CONFLICT, file not deleted', async () => {
-    await writeFile(file, 'bye');
-    // Bun ESM live-binding + spyOn (the repo-blessed pattern): make ONLY the
-    // first statSig call (the one inside withFileDelete) return a stale sig;
-    // unlinkIfUnchanged then re-stats the real file -> size mismatch -> conflict.
-    const realStatSig = fsSig.statSig;
-    let n = 0;
-    const spy = spyOn(fsSig, 'statSig').mockImplementation(
-      async (p: string) => {
-        n++;
-        const real = await realStatSig(p);
-        if (n === 1 && real) {
-          return { mtimeMs: real.mtimeMs, size: real.size + 7 };
-        }
-
-        return real;
-      },
-    );
-    let err: unknown;
-    try {
-      await withFileDelete(file, KEY, REL);
-    } catch (e) {
-      err = e;
-    } finally {
-      spy.mockRestore();
-    }
-    expect(err).toBeInstanceOf(MdVaultError);
-    expect((err as MdVaultError).code).toBe('MTIME_CONFLICT');
-    expect(await readFile(file, 'utf8')).toBe('bye');
   });
 });
 
