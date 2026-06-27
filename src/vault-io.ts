@@ -6,7 +6,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { readFile, readdir, stat as statEntry } from 'node:fs/promises';
+import { readdir, stat as statEntry } from 'node:fs/promises';
 import {
   dirname,
   isAbsolute,
@@ -21,6 +21,7 @@ import {
   atomicWrite,
   atomicWriteIfUnchanged,
   unlinkIfUnchanged as fsUnlinkIfUnchanged,
+  readConsistent,
   statSig,
 } from './fs-atomic.ts';
 
@@ -159,17 +160,12 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
     rel: string,
   ): Promise<{ content: string; sig: Sig } | null> {
     const full = resolveVaultPath(rel, 'read');
-    let content: string;
-    try {
-      content = await readFile(full, 'utf8');
-    } catch (e) {
-      if ((e as { code?: string }).code === 'ENOENT') return null;
-      throw e;
+    const result = await readConsistent(full);
+    if (result.content === null) {
+      return null;
     }
-    const sig = await statSig(full);
-    if (sig === null) return null;
 
-    return { content, sig };
+    return { content: result.content, sig: result.sig };
   }
 
   async function writeVaultFile(rel: string, content: string): Promise<Sig> {

@@ -1,10 +1,9 @@
-import { readFile } from 'node:fs/promises';
-
 import { MdVaultError } from './errors.ts';
 import {
   type Sig,
   atomicWrite,
   atomicWriteIfUnchanged,
+  readConsistent,
   statSig,
   unlinkIfUnchanged,
   withCrossProcessLock,
@@ -29,39 +28,6 @@ export type TransformResult = {
   outcome: 'created' | 'updated' | 'unchanged';
 };
 
-type ConsistentRead =
-  | { content: string; sig: Sig }
-  | { content: null; sig: null };
-
-// stat -> read -> stat: only return a (content, sig) pair captured while the
-// file did not change under us. Missing file -> { content: null, sig: null }.
-async function readConsistent(fullPath: string): Promise<ConsistentRead> {
-  for (;;) {
-    const sig1 = await statSig(fullPath);
-    if (sig1 === null) {
-      return { content: null, sig: null };
-    }
-    let content: string;
-    try {
-      content = await readFile(fullPath, 'utf8');
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        continue;
-      }
-
-      throw err;
-    }
-    const sig2 = await statSig(fullPath);
-    if (
-      sig2 !== null &&
-      sig2.mtimeMs === sig1.mtimeMs &&
-      sig2.size === sig1.size
-    ) {
-      return { content, sig: sig2 };
-    }
-  }
-}
-
 async function emitCommit(
   onCommit: ((e: CommitEvent) => void | Promise<void>) | undefined,
   event: CommitEvent,
@@ -80,6 +46,10 @@ async function emitCommit(
   }
 }
 
+/**
+ * @param lockKey      Canonical/case-folded serialization key — pass `VaultIo.toKey(rel)`.
+ * @param relForCommit Display path written to `CommitEvent.path` — pass `VaultIo.toVaultRelative(rel)`.
+ */
 export function withFileTransform(
   fullPath: string,
   lockKey: string,
@@ -154,6 +124,10 @@ export function withFileTransform(
   return locked();
 }
 
+/**
+ * @param lockKey      Canonical/case-folded serialization key — pass `VaultIo.toKey(rel)`.
+ * @param relForCommit Display path written to `CommitEvent.path` — pass `VaultIo.toVaultRelative(rel)`.
+ */
 export function withFileDelete(
   fullPath: string,
   lockKey: string,
