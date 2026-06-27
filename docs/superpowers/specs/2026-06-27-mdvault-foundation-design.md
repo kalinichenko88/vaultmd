@@ -1,7 +1,7 @@
 # mdvault — foundation design
 
 **Date:** 2026-06-27
-**Status:** draft — revised after five review rounds (pending user review)
+**Status:** draft — revised after six review rounds (pending user review)
 **Package:** `mdvault` (npm, MIT)
 **Repo home:** `/Users/ivan_kalinichenko/Dev/Personal/mdvault`
 
@@ -74,6 +74,9 @@ This is load-bearing, so it is stated plainly:
   **same-host and the PID is dead** (`kill(pid, 0)` → `ESRCH`). Otherwise (live
   PID, or a different host) a contender **waits up to `sqliteBusyTimeoutMs`**
   then throws `MTIME_CONFLICT` — it never breaks a lock it cannot prove dead.
+  **Location:** lockfiles live beside `indexPath` (in `DATA_DIR`), named by a
+  hash of the canonical key — **never inside the vault** (they must not be
+  synced by `ob`/git).
 - **Claim:** mdvault *tolerates* an external concurrent writer (best-effort
   detect-and-retry + eventual index reconcile); it does **not** *prevent*
   lost updates against an uncooperative syncer. Consumers needing a hard
@@ -227,9 +230,13 @@ Leaf (independently testable): `vault-io`, `locked-file`, `frontmatter`,
   mtime-guarded write / delete, exposed so the consumer's sync decorator has a
   stable seam.
 - `listMarkdown(dir?)` — **recursive**; skips dotfolders (`.obsidian`,
-  `.trash`, `.git`), non-`.md`, and configured `ignore` globs. The
-  machine-spirit `_`/`0`-prefix skip is expressible via `ignore`, not a
-  default.
+  `.trash`, `.git`), non-`.md`, and configured `ignore` globs. **Does not
+  follow symlinked directories that escape the vault root** (realpath-check
+  each dir before recursing), and **every discovered `.md` passes
+  `resolveVaultPath`** (realpath-containment) before indexing — so a
+  symlink-dir-to-outside can never enter the index via `reconcile`/`rebuild`
+  and leak through query/search. The machine-spirit `_`/`0`-prefix skip is
+  expressible via `ignore`, not a default.
 
 ### `locked-file`
 
@@ -362,6 +369,13 @@ meta(key TEXT PRIMARY KEY, value TEXT);   -- schema_version, config_fingerprint,
   (`db.transaction(...)()`, no awaits inside). Cross-note consistency comes
   from SQLite write-serialization + `busy_timeout`; the per-file lock does not
   span the index.
+- **`indexNote` keeps `notes.id` (the FTS docid) STABLE** — **never**
+  `INSERT OR REPLACE` on `notes` (it reassigns `id` and orphans the FTS row).
+  Algorithm: `SELECT id FROM notes WHERE path_key=?`; if present →
+  `UPDATE notes … WHERE id=?` (in place) + `DELETE FROM notes_fts WHERE
+  rowid=id` + `INSERT INTO notes_fts(rowid, body)`; if absent → `INSERT INTO
+  notes …` (new id) + FTS insert with that id. `note_tags` / `note_links` for
+  the note are replaced by delete-by-key + insert in the same transaction.
 - **Multi-process** supported (CLI + daemon on one DB): WAL + `busy_timeout` +
   small transactions. Each process keeps its **own** lazy-reconcile TTL clock;
   no cross-process cache invalidation in v1 (a process may serve a ≤TTL-stale
@@ -378,6 +392,13 @@ outside the read allowlist, even if the index DB was built with broader
 prefixes or is shared across Vault instances / personas. Implementation: a
 SQL prefix-range filter on `path_key` (efficient) with `can()` as the
 post-filter backstop.
+
+**Pagination contract (pinned, all list/search APIs).** `limit` / `offset`
+must be **non-negative integers** — otherwise `VALIDATION_ERROR` (non-integer,
+negative, NaN). `limit` omitted → a configured **default** (`~100`); `limit`
+above a configured **hard max** (`~1000`) is **clamped** to the max
+(documented, not an error). These bounds protect a model-facing surface from
+unbounded result sets.
 
 - `queryNotes({ tag?, where?, folder?, orderBy?, limit?, offset? })`:
   - `where` = equality map `Record<string, string|number|boolean>`; **values
@@ -450,7 +471,12 @@ store, where the scope-bounding above is what keeps it safe.
   (sequential `await stat` is ~10ms/1000 notes; `Promise.all` ~1ms/1000 — the
   latency claim needs batching). Per changed file, **stat→read→stat**
   read-consistency so the stored signature always matches parsed content.
-- **`reconcilePaths(paths)`** — targeted reindex of a known changeset.
+- **`reconcilePaths(paths)`** — targeted reindex of a known changeset
+  (selgeo's git-pull fast-path). For each path **within the read scope**: if it
+  exists on disk → `indexNote` (realpath-guarded); if it is **gone**
+  (deleted / renamed-away — cannot be realpath'd) → `dropNote` by its
+  **syntactic canonical key** (`toKey`) under a boundary-aware `can(_, 'read')`
+  check (a drop needs no realpath). Paths outside the read scope are ignored.
 - **`rebuild()`** — public: **parse all files first** (enumerate via
   `listMarkdown`, no DB writes yet), then apply `DELETE` **within the read
   scope** + bulk-`INSERT` in **one SQLite transaction**, so WAL readers (same
@@ -539,7 +565,9 @@ failure).
 
 - **Security:** per-access allowlist escape (`..`, absolute, symlink-out);
   **symlinked-parent on create** (`link/` → outside; creating `link/new.md`
-  is rejected via nearest-existing-ancestor realpath); **boundary-aware
+  is rejected via nearest-existing-ancestor realpath); **symlinked-dir in
+  enumeration** (a vault subdir symlinked outside is **not** followed by
+  `listMarkdown`, so its `.md` never enter the index); **boundary-aware
   prefix** (`foo` must NOT match `foobar.md`; `''` matches all; exact-file vs
   folder); **read-scope filter** — `queryNotes`/`searchText`/`backlinks`
   sources/`outboundLinks` targets never return a row outside `prefixes.read`,
@@ -555,7 +583,7 @@ failure).
   `COMMIT_FAILED` with `cause`**; **delete CAS** raises `MTIME_CONFLICT` when
   the file changed under us; cross-process lock serializes two processes and
   **reclaims only a dead same-host PID** (live/foreign PID → wait then
-  `MTIME_CONFLICT`).
+  `MTIME_CONFLICT`); **lockfiles live in `DATA_DIR`, never in the vault**.
 - **CRUD:** edit-by-match literal 0/1/>1; append newline rule; **`createNote`
   exclusive create** (concurrent external create → `ALREADY_EXISTS`, no
   clobber); `editFrontmatter` preserves comments/order/`1.0`/empty
@@ -568,7 +596,10 @@ failure).
   wikilink** (`[[Folder/Foo]]` resolves to `Folder/Foo`, not a basename
   tie-break); **relative-mode link filtering** (external URLs / bare
   `#anchor` / images / non-`.md` / absolute / `..`-escape dropped); FTS5
-  delete/update by rowid; PK dedup on note_tags/note_links;
+  delete/update by rowid; **`notes.id` stable across re-index** (no
+  `INSERT OR REPLACE`; FTS not orphaned after update); **`reconcilePaths`
+  drops a deleted in-scope path** by syntactic key; PK dedup on
+  note_tags/note_links;
   **`rebuild()` never exposes a partial index** to a concurrent reader
   (single-transaction swap); **`onCommit` throw propagates, file+index stay
   changed, no rollback**; `rebuild()` from empty; golden invariant at
@@ -581,8 +612,10 @@ failure).
   `VALIDATION_ERROR`**, bound values) / folder (recursive) / backlinks
   (wikilink tie-break + dangling) / outbound / FTS5 with **adversarial input**
   (`+ - : *`, trailing `AND`, unbalanced quote → empty, never throw);
-  **`orderBy` allowlist** rejects unknown fields (`VALIDATION_ERROR`); default
-  order + limit/offset determinism; index in `DATA_DIR`, not vault.
+  **`orderBy` allowlist** rejects unknown fields (`VALIDATION_ERROR`);
+  **pagination bounds** (negative / non-integer `limit`/`offset` →
+  `VALIDATION_ERROR`; oversized `limit` clamped to hard max); default order +
+  limit/offset determinism; index in `DATA_DIR`, not vault.
 
 ## Open source & licensing
 
@@ -625,6 +658,12 @@ Same model as `telegram-agent-kit` (the user's published package that
   with `cause`); relative-mode link filtering pinned (URLs / anchors / images
   / non-`.md` / absolute / `..`-escape dropped); conservative cross-process
   stale-lock criteria (reclaim only a dead same-host PID).
+- **6th round:** `listMarkdown` won't follow vault-escaping symlinked dirs +
+  every enumerated `.md` realpath-guarded; `reconcilePaths` deleted-path
+  handling (drop by syntactic key within read scope); FTS docid-stability
+  algorithm pinned (no `INSERT OR REPLACE`; select-id → update-in-place → FTS
+  delete+insert by same rowid); lockfiles in `DATA_DIR` not the vault;
+  pagination bounds (default + hard-max clamp; invalid → `VALIDATION_ERROR`).
 
 ## Open questions (remaining)
 
