@@ -1,6 +1,5 @@
 import { MdVaultError } from './errors.ts';
 import {
-  type Sig,
   atomicWrite,
   atomicWriteIfUnchanged,
   readConsistent,
