@@ -6,8 +6,8 @@ export type {
   VaultIo,
   VaultIoConfig,
   VaultPrefixes,
-} from './vault-io.ts';
-export { createVaultIo } from './vault-io.ts';
+} from './vault-io/index.ts';
+export { createVaultIo } from './vault-io/index.ts';
 export type {
   CommitEvent,
   CrossLock,

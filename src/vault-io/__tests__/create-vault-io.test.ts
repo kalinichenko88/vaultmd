@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { MdVaultError } from '../errors.ts';
-import { createVaultIo } from '../vault-io.ts';
+import { MdVaultError } from '../../errors.ts';
+import { createVaultIo } from '../index.ts';
 
 let vault: string;
 
@@ -53,7 +53,7 @@ describe('toVaultRelative / toKey', () => {
       root: vault,
       prefixes: { read: [''], write: [''] },
     });
-    expect(io.toVaultRelative('café/note.md')).toBe('café/note.md');
+    expect(io.toVaultRelative('café/note.md')).toBe('café/note.md');
   });
 
   test('rejects absolute paths and ..-escapes with ALLOWLIST_VIOLATION', () => {
