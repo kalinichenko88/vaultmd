@@ -1,7 +1,7 @@
 # mdvault — foundation design
 
 **Date:** 2026-06-27
-**Status:** draft — revised after two review rounds (pending user review)
+**Status:** draft — revised after three review rounds (pending user review)
 **Package:** `mdvault` (npm, MIT)
 **Repo home:** `/Users/ivan_kalinichenko/Dev/Personal/mdvault`
 
@@ -164,7 +164,14 @@ type CommitEvent =
 ```
 Runs **inside the per-file lock**, after the fs mutation + the in-lock index
 update, before lock release. selgeo hooks git add/rm + commit here
-(commit-before-return); machine-spirit no-ops.
+(commit-before-return); machine-spirit no-ops. **Failure semantics (pinned):**
+if `onCommit` throws (e.g. git commit fails), the error **propagates** to the
+CRUD caller; **no rollback is attempted** — the file write and the index
+update already happened and **stay**. The consumer surfaces/recovers; this is
+safe by construction because the change is on disk and the consumer's next
+sync/reconcile (e.g. selgeo's working-tree recovery on the next
+`syncOnce`/boot) picks up the still-uncommitted change. `onCommit` should
+therefore be retry-safe.
 
 ## Core modules (public surface)
 
@@ -187,7 +194,11 @@ Leaf (independently testable): `vault-io`, `locked-file`, `frontmatter`,
 - `resolveVaultPath(rel, access = 'read')` / `can(rel, access)` — reject
   absolute paths, `..` escapes, out-of-allowlist (per access), symlink
   escapes (realpath containment), and non-`.md` targets (the single `.md`
-  guard lives here).
+  guard lives here). **Create paths:** the target does not yet exist, so its
+  own realpath cannot be checked; instead realpath the **nearest existing
+  ancestor** and require **its** containment before allowing the write — this
+  closes the symlinked-parent escape (`link/` → outside the vault, then
+  creating `link/new.md`).
 - `toVaultRelative(rel)` → canonical display path: strip leading `./`,
   collapse `.`/dup-slashes, force `/`, **NFC**, **case-preserving**.
 - `toKey(rel)` → the **lock + index key**. On a **case-insensitive** volume
@@ -247,11 +258,15 @@ read → decide → `rewriteIfUnchanged` with **stat→read→stat read-consiste
     source dir → a path. **Stable** — depends only on `(srcDir, target)`, not
     on other notes — so `note_links` stores the **resolved** path.
   - **`'wikilink'`** (machine-spirit): strip `#heading`/`#^block`/`|alias`;
-    `note_links` stores the **normalized target** (basename, case-folded),
-    **not** a resolved path. Resolution to a concrete note happens **at query
-    time** (§query), because it depends on vault state + the tie-break — so a
-    target appearing/disappearing/renamed **self-heals** with no need to
-    reindex unrelated source notes.
+    `note_links` stores the **normalized raw target** (path-qualification
+    preserved — `[[Folder/Foo]]` stays `Folder/Foo`, **not** collapsed to
+    `Foo`) **plus** a derived case-folded `base` (basename). It does **not**
+    store a resolved path. Resolution happens **at query time** (§query): a
+    **path-like** target (contains `/`) resolves directly (exact / relative
+    path match); a **bare** target falls back to the basename tie-break. This
+    preserves Obsidian's explicit path disambiguation **and** lets a target
+    appearing/disappearing/renamed **self-heal** with no reindex of unrelated
+    source notes.
   - Custom `LinkResolver(target, srcDir, kind) => { stored: string }`.
 
 ### `notes` (CRUD)
@@ -297,10 +312,11 @@ note_tags(
 );                                        -- index on (tag)
 note_links(
   src_key TEXT NOT NULL,                  -- source note key
-  target  TEXT NOT NULL,                  -- relative: resolved path_key; wikilink: normalized basename
+  target  TEXT NOT NULL,                  -- relative: resolved path_key; wikilink: normalized raw target (path-qualified or bare)
+  base    TEXT,                           -- wikilink bare/tie-break basename (case-folded); NULL for relative
   kind    TEXT NOT NULL,                  -- 'wikilink' | 'embed' | 'mdlink'
   PRIMARY KEY (src_key, target, kind)     -- distinct edges (no multiplicity)
-);                                        -- index on (target) for backlinks
+);                                        -- index on (target) AND (base) for backlinks
 -- standalone FTS5 (stores its own body copy); row addressed by rowid = notes.id:
 notes_fts USING fts5(body);               -- INSERT(rowid,body) / DELETE WHERE rowid=? / update=delete+insert
 meta(key TEXT PRIMARY KEY, value TEXT);   -- schema_version, last_reconcile_ms
@@ -323,6 +339,16 @@ meta(key TEXT PRIMARY KEY, value TEXT);   -- schema_version, last_reconcile_ms
 
 ### `query`
 
+**Read-scope invariant (security boundary).** Every public read/query —
+`queryNotes`, `searchText`, `backlinks` (its **source** notes),
+`outboundLinks` (its **resolved target** notes), and `readNote` — returns
+**only** rows whose `path_key` is inside the Vault's current `prefixes.read`
+(boundary-aware `can(_, 'read')`). The library **guarantees** no result
+outside the read allowlist, even if the index DB was built with broader
+prefixes or is shared across Vault instances / personas. Implementation: a
+SQL prefix-range filter on `path_key` (efficient) with `can()` as the
+post-filter backstop.
+
 - `queryNotes({ tag?, where?, folder?, orderBy?, limit?, offset? })`:
   - `where` = equality map `Record<string, string|number|boolean>`; **values
     always bound (`?`)**; **keys validated** to `[A-Za-z0-9_.-]` and emitted as
@@ -335,12 +361,13 @@ meta(key TEXT PRIMARY KEY, value TEXT);   -- schema_version, last_reconcile_ms
     dir: 'asc' | 'desc' }` (never raw SQL). Default `{ mtime_ms, desc }` then
     `path asc`. Default `limit` capped (documented, ~100).
 - `backlinks(path, { limit?, offset? })`:
-  - **wikilink mode** — resolve at query time: candidates = `note_links` rows
-    whose `target = basename(path)`; a candidate's source is a backlink iff
-    `path` is the **tie-break winner** for that basename among existing notes
+  - **wikilink mode** — resolve at query time, honoring path-qualification
+    first: (a) **path-like** links (`target` contains `/`) are a backlink iff
+    that target resolves to `path` (exact / relative match); (b) **bare**
+    links (`base = basename(path)`) are a backlink iff `path` is the
+    **tie-break winner** for that basename among existing notes
     (same-folder-as-source first, then shortest path, then lexical). Dangling
-    links naturally yield no backlink and **self-heal** when the target note
-    appears.
+    links yield no backlink and **self-heal** when the target appears.
   - **relative mode** — `note_links WHERE target = path_key` (already
     resolved).
 - `outboundLinks(path, …)` — `note_links WHERE src_key = ?`; targets resolved
@@ -375,8 +402,13 @@ Detected by comparing on-disk `(mtime_ms, size)` against stored values.
   latency claim needs batching). Per changed file, **stat→read→stat**
   read-consistency so the stored signature always matches parsed content.
 - **`reconcilePaths(paths)`** — targeted reindex of a known changeset.
-- **`rebuild()`** — public: drop all rows, enumerate via `listMarkdown`,
-  reindex. First build, corruption, version bump, or post-bulk-edit.
+- **`rebuild()`** — public: **parse all files first** (enumerate via
+  `listMarkdown`, no DB writes yet), then apply `DELETE`-all + bulk-`INSERT`
+  in **one SQLite transaction**, so WAL readers (same or other process) keep
+  seeing the **pre-rebuild snapshot** until COMMIT and **never observe an
+  empty / partial index**. (Large-vault alternative: build a replacement DB
+  file and atomically rename it under a maintenance flag in `meta`.) Used for
+  first build, corruption, version bump, or post-bulk-edit.
 
 Because **wikilink links are resolved at query time**, adding/removing/renaming
 a *target* note does **not** require reindexing the *source* notes that point
@@ -453,10 +485,14 @@ The library **throws typed errors** (`MdVaultError` subclasses) with stable
 ## Testing strategy
 
 - **Security:** per-access allowlist escape (`..`, absolute, symlink-out);
-  **boundary-aware prefix** (`foo` must NOT match `foobar.md`; `''` matches
-  all; exact-file vs folder); `.md`-guard at `resolveVaultPath`; canonical
-  key coincidence (`a/./b.md`); NFC; **case-fold key** on a case-insensitive
-  volume (`Note.md`/`note.md` → one lock + one row).
+  **symlinked-parent on create** (`link/` → outside; creating `link/new.md`
+  is rejected via nearest-existing-ancestor realpath); **boundary-aware
+  prefix** (`foo` must NOT match `foobar.md`; `''` matches all; exact-file vs
+  folder); **read-scope filter** — `queryNotes`/`searchText`/`backlinks`
+  sources/`outboundLinks` targets never return a row outside `prefixes.read`,
+  even with an over-broad / shared index; `.md`-guard at `resolveVaultPath`;
+  canonical key coincidence (`a/./b.md`); NFC; **case-fold key** on a
+  case-insensitive volume (`Note.md`/`note.md` → one lock + one row).
 - **Concurrency:** mtime-retry + stat→read→stat under a simulated external
   writer; two concurrent appends → no lost update; `allowCreate` branches;
   `onCommit` in-lock for create/update/**delete**; **delete CAS** raises
@@ -469,9 +505,13 @@ The library **throws typed errors** (`MdVaultError` subclasses) with stable
 - **Index/reconcile:** write-through one transaction; stored mtime not
   advanced on index-write failure; `reconcile()` detects add/modify/delete
   with read-consistency; **wikilink self-heal** (dangling `[[Foo]]` resolves
-  when `Foo.md` is added, with **no** source reindex); FTS5 delete/update by
-  rowid; PK dedup on note_tags/note_links; `rebuild()` from empty; golden
-  invariant at quiescence; WAL + `busy_timeout` set; **FTS5 + JSON1 probe**.
+  when `Foo.md` is added, with **no** source reindex); **path-qualified
+  wikilink** (`[[Folder/Foo]]` resolves to `Folder/Foo`, not a basename
+  tie-break); FTS5 delete/update by rowid; PK dedup on note_tags/note_links;
+  **`rebuild()` never exposes a partial index** to a concurrent reader
+  (single-transaction swap); **`onCommit` throw propagates, file+index stay
+  changed, no rollback**; `rebuild()` from empty; golden invariant at
+  quiescence; WAL + `busy_timeout` set; **FTS5 + JSON1 probe**.
 - **Query:** tag / `where` (AND, missing-key, **key validation + bound
   values**) / folder (recursive) / backlinks (wikilink tie-break + dangling) /
   outbound / FTS5 with **adversarial input** (`+ - : *`, trailing `AND`,
@@ -499,6 +539,13 @@ Same model as `telegram-agent-kit` (the user's published package that
   boundary-aware prefix semantics; `orderBy` allowlist + bound `where`;
   `sqliteBusyTimeoutMs` split from TTL; probe FTS5 **and** JSON1; PKs on
   `note_tags`/`note_links`.
+- **3rd round:** read-scope invariant on all queries / backlink-sources /
+  outbound-targets (no cross-persona leak from an over-broad/shared index);
+  symlinked-parent escape closed on create (nearest-existing-ancestor
+  realpath); path-qualified wikilinks preserved (raw target + derived
+  `base`); `rebuild()` atomic single-transaction swap (no partial-index
+  reads); `onCommit` failure pinned (propagate, no rollback, consumer
+  recovers).
 
 ## Open questions (remaining)
 
