@@ -26,5 +26,9 @@ export {
   isFlatFrontmatter,
   parseFrontmatter,
 } from './frontmatter/index.ts';
-export type { ExtractedLinks, LinkResolution, StoredLink } from './links.ts';
-export { extractLinks, storedLinksFor } from './links.ts';
+export type {
+  ExtractedLinks,
+  LinkResolution,
+  StoredLink,
+} from './links/index.ts';
+export { extractLinks, storedLinksFor } from './links/index.ts';
