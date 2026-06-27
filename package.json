@@ -7,7 +7,13 @@
   "author": "Ivan Kalinichenko",
   "engines": { "bun": ">=1.1.0" },
   "exports": { ".": { "types": "./src/index.ts", "import": "./src/index.ts" } },
-  "files": ["src", "README.md", "LICENSE"],
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE",
+    "!src/**/*.test.ts",
+    "!src/**/__tests__/**"
+  ],
   "dependencies": { "yaml": "^2.5.0" },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
