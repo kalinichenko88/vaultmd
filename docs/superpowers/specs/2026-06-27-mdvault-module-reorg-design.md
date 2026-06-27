@@ -1,19 +1,19 @@
 # mdvault — module-folder reorganization design
 
 **Date:** 2026-06-27
-**Status:** draft — pending user review
+**Status:** draft — revised after review round 1 (pending user review)
 **Package:** `mdvault` (npm, MIT)
 **Scope:** internal source layout only — a behavior-preserving refactor of the
-Plan 1 foundation primitives. No public API change, no logic change, no new
-features.
+Plan 1 foundation primitives. No package public API change, no logic change, no
+new features (the one added piece is **tests**, not behavior — see Tests).
 
 ## Goal
 
 Reorganize `src/` from seven flat files into **one folder per responsibility**,
 so that before open-sourcing every module owns exactly **one area** and the
-files inside it are small, single-purpose, and readable in one pass. The public
-package surface (`src/index.ts`) stays **byte-identical in exported names**;
-only import paths move.
+files inside it are small, single-purpose, and readable in one pass. The
+**package** public surface (`src/index.ts`, the only `exports` entry in
+`package.json`) keeps its exact set of exported names; only import paths move.
 
 This is the "module-folder split past ~3 exports / one read" convention from the
 foundation design, applied across the codebase, plus the removal of two genuine
@@ -30,35 +30,65 @@ structural debts hiding in the two largest files.
    allowlist matching, realpath/symlink containment, atomic-IO delegation, and
    recursive enumeration all live in one factory, alongside two standalone
    utilities (volume case-sensitivity detection and glob→RegExp compilation).
-   The security-critical pure logic is invisible inside the closure and cannot
-   be read or unit-tested in isolation.
+   The security-critical pure logic is invisible inside the closure — neither
+   readable nor independently testable. After extraction it is both (and this
+   refactor adds the direct unit tests — see Tests).
 3. **Minor:** `readConsistent` re-inlines the signature comparison
    (`sig2.mtimeMs === sig1.mtimeMs && sig2.size === sig1.size`) instead of
    reusing `sigsEqual`. Folded into the move.
 
+## API surface — three layers (this refactor introduces a clear boundary)
+
+The reorg deliberately separates three surfaces. Conflating them is what the
+review flagged; pinning them is part of the design.
+
+1. **Package public API — `src/index.ts`.** The *only* thing listed in
+   `package.json` `exports` (`"."`). This is what external consumers (and the
+   two downstream projects) import. Its set of exported names is **frozen** by
+   this refactor and **guarded** by a strengthened `index.test.ts` (exact key
+   set + type-only compile fixture — see Tests). Paths inside change; names do
+   not.
+2. **Module barrels — `<module>/index.ts`.** A **stable internal integration
+   surface**: the seam that in-package consumers (today `vault-io`,
+   `locked-file`; tomorrow Plan 2's `notes` / `index` / `query` / `createVault`)
+   import a module through. Intentionally **broader** than the package API — e.g.
+   the `fs-atomic` barrel exports `statSig` / `atomicWrite` / `readConsistent`
+   etc., none of which are package-public (only `Sig` is). Barrels are **not**
+   published, **not** in `package.json` `exports`, and are curated by hand
+   (named re-exports only, never `export *`). Treat a barrel's shape as a real
+   internal contract — Plan 2 will depend on it.
+3. **Leaf files — `<module>/<part>.ts`.** Module-private implementation. A leaf
+   `export` exists so **same-module siblings** can import it (and white-box
+   **tests** may — see Conventions); it is **not** re-exported from the module
+   barrel and **no other module's production code** imports it. "Not on the
+   barrel" is the privacy boundary — not "unexported" (an exported leaf symbol
+   is reachable by path; the discipline is that only same-module code and tests
+   take that path).
+
 ## Principles
 
-- **One area per module.** Each top-level folder under `src/` is responsible
-  for a single area. If a file mixed two areas, the areas split into two
-  modules (this is why `locks/` leaves `fs-atomic/`).
-- **The barrel is the only door.** Each module folder has an `index.ts` that
-  **named-re-exports only its public surface** (never `export *`, so internal
-  helpers never leak). Cross-module imports target the barrel
-  (`../fs-atomic/index.ts`); files **within** a folder import siblings directly
-  (`./sig.ts`).
-- **Public API frozen.** The set of names re-exported by `src/index.ts` is
-  unchanged; only the `from` paths change.
+- **One area per module.** Each top-level folder under `src/` owns a single
+  area. A file that mixed two areas splits into two modules (this is why
+  `locks/` leaves `fs-atomic/`).
+- **The barrel is the module's only cross-module door.** Cross-module production
+  imports target the barrel (`../fs-atomic/index.ts`); files **within** a folder
+  import siblings directly (`./sig.ts`). Barrels named-re-export only the
+  module's intended integration surface (never `export *`).
+- **Package API frozen.** The set of names re-exported by `src/index.ts` is
+  unchanged; only the `from` paths change. (See the three-layer model above for
+  why barrels may expose more.)
 - **Behavior-preserving.** No control-flow or algorithm changes. The only
-  non-move edits are pure-function extractions already covered by existing
-  tests (e.g. `canonicalizeRelative`) and the `sigsEqual` reuse above.
+  non-move edits are pure-function extractions already covered by existing tests
+  (e.g. `canonicalizeRelative`) and the `sigsEqual` reuse above. New **tests**
+  are additive.
 - **Acyclic dependencies.** The module graph stays a DAG (see below).
 
 ## Target structure
 
 ```
 src/
-├── index.ts                  # public barrel — only `from` paths change
-├── errors.ts                 # unchanged (2 exports → stays a flat file)
+├── index.ts                  # package public API — only `from` paths change
+├── errors.ts                 # unchanged (2 exports → stays a flat non-barrel file)
 │
 ├── fs-atomic/                # AREA: race-aware single-file fs operations
 │   ├── index.ts              # barrel
@@ -106,22 +136,24 @@ src/
     ├── errors.test.ts        # imports unchanged
     ├── fs-atomic.test.ts     # keeps the 2 atomic describes; lock describes removed
     ├── locks.test.ts         # NEW: the withFileLock + withCrossProcessLock describes
-    ├── vault-io.test.ts      # import path → ../vault-io/index.ts
-    ├── locked-file.test.ts   # import paths updated; statSig spy retargeted (see Tests)
+    ├── vault-io.test.ts      # path → barrel; + direct describes for the pure security helpers
+    ├── locked-file.test.ts   # import paths updated; statSig spy = symmetric barrel seam (see Tests)
     ├── frontmatter.test.ts   # import path → ../frontmatter/index.ts
     ├── links.test.ts         # import path → ../links/index.ts
-    ├── index.test.ts         # imports unchanged (../index.ts)
+    ├── index.test.ts         # STRENGTHENED: exact key set + type-only compile fixture
     └── scaffold.test.ts      # unchanged
 ```
 
 ## Move map (symbol → destination)
 
-Every existing symbol lands in exactly one new file. "Barrel" = re-exported
-from the folder's `index.ts`; "internal" = folder-private (not in the barrel).
+Every existing symbol lands in exactly one new file. "Barrel" = named-re-exported
+from the folder's `index.ts` (integration surface); "internal" = leaf-only
+(reachable by same-module siblings and white-box tests, never another module's
+production code).
 
 ### `fs-atomic/`  (from `fs-atomic.ts`)
 
-| Symbol | File | Barrel? |
+| Symbol | File | On barrel? |
 |---|---|---|
 | `Sig` (type) | `sig.ts` | yes |
 | `makeSig`, `sigsEqual` | `sig.ts` | internal |
@@ -134,7 +166,7 @@ from the folder's `index.ts`; "internal" = folder-private (not in the barrel).
 
 ### `locks/`  (from `fs-atomic.ts`)
 
-| Symbol | File | Barrel? |
+| Symbol | File | On barrel? |
 |---|---|---|
 | `fileLocks` (map), `withFileLock` | `in-process.ts` | yes (`withFileLock`) |
 | `delay`, `tryReclaim` | `cross-process.ts` | internal |
@@ -144,7 +176,7 @@ from the folder's `index.ts`; "internal" = folder-private (not in the barrel).
 
 ### `vault-io/`  (from `vault-io.ts`)
 
-| Symbol | File | Barrel? |
+| Symbol | File | On barrel? |
 |---|---|---|
 | `canonicalizeRelative` (extracted from `toVaultRelative`'s body), `canonPrefix` | `paths.ts` | internal |
 | `matches` | `allowlist.ts` | internal |
@@ -155,22 +187,32 @@ from the folder's `index.ts`; "internal" = folder-private (not in the barrel).
 | `Access`, `VaultPrefixes`, `VaultIoConfig`, `VaultIo` (types) | `create-vault-io.ts` | yes |
 | `createVaultIo` (factory + closure methods) | `create-vault-io.ts` | yes |
 
-- `toVaultRelative` is already pure (uses only its argument); its body becomes
-  `canonicalizeRelative(rel)` in `paths.ts`, and the factory method delegates to
-  it. `toKey`, `can`, `resolveVaultPath`, the five IO methods, and `isIgnored`
-  stay as closure methods in `create-vault-io.ts` (they close over `root` /
-  `caseSensitive` / `canonPrefixes` / `ignoreRes`) and call the extracted pure
-  helpers.
-- `enumerate.ts` exposes `listMarkdown(root, dir, deps)` (it computes
-  `startRel` from `dir` via `deps.toVaultRelative`) where
-  `deps = { isIgnored, resolveVaultPath, toVaultRelative }`; `walk` is its
-  private helper and imports `realTargetWithinRoot` from `./realpath-guard.ts`
-  directly. The factory builds `ignoreRes` via `globToRegExp`, closes it into
-  `isIgnored`, and passes the deps object in.
+**De-closured helper signatures (pinned).** Three helpers currently close over
+factory state and must take it explicitly once extracted:
+
+- `realTargetWithinRoot(full: string, root: string): boolean` — gains `root`.
+  Callers pass it: `resolveVaultPath` (factory has `root`); `walk` / `listMarkdown`
+  (receive `root`, see below).
+- `matches(x: string, prefixes: string[]): boolean` — already pure; now a
+  standalone export in `allowlist.ts`.
+- `canonicalizeRelative(rel: string): string` — the body of today's
+  `toVaultRelative` (already uses only its argument); throws
+  `ALLOWLIST_VIOLATION` (imports `MdVaultError`).
+
+The factory's `toVaultRelative` method delegates to `canonicalizeRelative`;
+`toKey`, `can`, `resolveVaultPath`, the five IO methods, and `isIgnored` stay as
+closure methods in `create-vault-io.ts` (they close over `root` /
+`caseSensitive` / `canonPrefixes` / `ignoreRes`) and call the extracted pure
+helpers. `enumerate.ts` exposes `listMarkdown(root, dir, deps)` (it computes
+`startRel` from `dir` via `deps.toVaultRelative`) where
+`deps = { isIgnored, resolveVaultPath, toVaultRelative }`; `walk` is its private
+helper, receives `root`, and imports `realTargetWithinRoot` from
+`./realpath-guard.ts`. The factory builds `ignoreRes` via `globToRegExp`, closes
+it into `isIgnored`, and passes the deps object in.
 
 ### `locked-file/`  (from `locked-file.ts`)
 
-| Symbol | File | Barrel? |
+| Symbol | File | On barrel? |
 |---|---|---|
 | `CommitEvent`, `CrossLock`, `TransformOpts`, `TransformResult` | `types.ts` | yes |
 | `emitCommit` | `commit.ts` | internal |
@@ -181,7 +223,7 @@ from the folder's `index.ts`; "internal" = folder-private (not in the barrel).
 
 ### `frontmatter/`  (from `frontmatter.ts`)
 
-| Symbol | File | Barrel? |
+| Symbol | File | On barrel? |
 |---|---|---|
 | `FrontmatterValidity`, `ParsedFrontmatter`, `EditOutcome` | `types.ts` | yes |
 | `isScalar`, `isScalarOrArrayOfScalar` | `validate.ts` | internal |
@@ -196,7 +238,7 @@ from the folder's `index.ts`; "internal" = folder-private (not in the barrel).
 
 ### `links/`  (from `links.ts`)
 
-| Symbol | File | Barrel? |
+| Symbol | File | On barrel? |
 |---|---|---|
 | `ExtractedLinks`, `LinkResolution`, `StoredLink` | `types.ts` | yes |
 | `stripFencedCode`, `mdLinkUrl` | `extract.ts` | internal |
@@ -206,7 +248,7 @@ from the folder's `index.ts`; "internal" = folder-private (not in the barrel).
 
 `resolve.ts` imports `extractLinks` (`./extract.ts`), `posix` (`node:path`), and the types.
 
-## Public API freeze
+## Package public API freeze (Layer 1)
 
 `src/index.ts` re-exports exactly these names after the move (only `from` paths
 change to folder barrels):
@@ -218,8 +260,9 @@ change to folder barrels):
 - from `./frontmatter/index.ts`: `EditOutcome`, `FrontmatterValidity`, `ParsedFrontmatter` (types), `deriveTags`, `editFrontmatter`, `isFlatFrontmatter`, `parseFrontmatter`
 - from `./links/index.ts`: `ExtractedLinks`, `LinkResolution`, `StoredLink` (types), `extractLinks`, `storedLinksFor`
 
-`src/__tests__/index.test.ts` (imports `* as mdvault`) is the regression guard
-that this set is intact.
+That is **10 runtime value exports** and **16 type-only exports** (26 names).
+The freeze is guarded by a strengthened `index.test.ts` (see Tests) — not the
+current spot-check.
 
 ## Dependency graph (acyclic)
 
@@ -232,9 +275,9 @@ links       ← (node:path only)
 index       ← all module barrels
 ```
 
-No module imports `vault-io`, so its inward edges are only outward. Within
-`vault-io/`, `create-vault-io.ts` depends on the five helper files and
-`enumerate.ts` depends on `realpath-guard.ts` — a local DAG, no cycles.
+No module imports `vault-io`. Within `vault-io/`, `create-vault-io.ts` depends
+on the five helper files and `enumerate.ts` depends on `realpath-guard.ts` — a
+local DAG, no cycles.
 
 ## Conventions (applied to every new file)
 
@@ -244,7 +287,12 @@ No module imports `vault-io`, so its inward edges are only outward. Within
   value+type imports use the inline `type` modifier (`import { type Sig, statSig }`),
   matching the current code.
 - **Named barrel re-exports only.** No `export *`. Types re-exported with
-  `export type { … }`.
+  `export type { … }`. A barrel exposes the module's intended integration
+  surface (Layer 2), which may exceed the package API (Layer 1).
+- **Import discipline.** Production code imports **other** modules only through
+  their barrel; **within** a module, sibling leaf imports are normal. **Tests
+  may import leaf files** for white-box unit-testing of internal helpers (this
+  is the one sanctioned exception to "barrel-only").
 - **`type`, never `interface`.** Biome single-quote / 2-space. Blank line
   before `return` unless it is the first/only statement.
 - **Intra-file order:** imports → primary public export(s) → private helpers
@@ -256,13 +304,14 @@ Existing tests are the safety net; they stay green at every step.
 
 1. Refactor **one module at a time** in dependency order: `fs-atomic` + `locks`
    (together — they share the source file) → `vault-io` → `locked-file` →
-   `frontmatter` → `links` → update `src/index.ts`.
+   `frontmatter` → `links` → strengthen `src/index.ts` + `index.test.ts`.
 2. For each: create the folder + files (cut/paste symbols, fix imports, add the
-   barrel), update the importers and the matching test file, then run
+   curated barrel), update importers and the matching test file, then run
    `bun test` for that test file and `bun run check` (Biome + `tsc --noEmit`).
 3. Only after a module is green move to the next.
-4. Final gate: full `bun test` + `bun run check` green; `git diff` on the
-   exported-name set of `src/index.ts` shows **path-only** changes.
+4. Final gate: full `bun test` + `bun run check` green; the strengthened
+   `index.test.ts` proves the package API name-set is intact;
+   `git diff src/index.ts` shows **path-only** changes.
 
 No algorithm changes. The single extraction (`canonicalizeRelative`) and the
 `sigsEqual` reuse are covered by existing `vault-io` / `fs-atomic` tests.
@@ -271,6 +320,16 @@ No algorithm changes. The single extraction (`canonicalizeRelative`) and the
 
 One test file per module, kept in `src/__tests__/`:
 
+- **`index.test.ts` (strengthened — closes the API-freeze gap).** Replace the
+  `typeof === 'function'` spot-check with two guards:
+  - **Runtime, exact value set:** `expect(Object.keys(mdvault).sort())
+    .toEqual([...])` against the 10 value exports — this catches a **missing**
+    *and* an **extra** runtime export (the current test catches neither).
+  - **Compile-time, type exports:** module-level type aliases referencing every
+    one of the 16 type exports (`type _Sig = mdvault.Sig;` …, erased at runtime,
+    so the `import * as mdvault` stays a real value import). If any type export
+    is dropped or renamed, `tsc --noEmit` (in `bun run check`) fails. This is
+    the only way to guard type-only exports, which no runtime assertion can see.
 - **`fs-atomic.test.ts`** → keep the `statSig + atomicWrite` and
   `exclusiveCreate + unlinkIfUnchanged` describes; update the import to
   `../fs-atomic/index.ts`. Remove the two lock describes.
@@ -278,35 +337,61 @@ One test file per module, kept in `src/__tests__/`:
   `withCrossProcessLock` describes, importing from `../locks/index.ts`
   (plus `MdVaultError` from `../errors.ts` and the same node builtins).
 - **`locked-file.test.ts`** → import `withFileDelete`/`withFileTransform` from
-  `../locked-file/index.ts`. It spies **only** `statSig`
-  (`spyOn(fsAtomic, 'statSig')`, the repo-blessed live-binding pattern). Because
-  `statSig` now lives in `fs-atomic/sig.ts`, retarget the spy namespace import to
-  the module whose binding the production code resolves to — the **definition
-  module** `../fs-atomic/sig.ts` (recommended: closest to the current proven
-  same-module pattern), falling back to the `../fs-atomic/index.ts` barrel if
-  re-export live-binding does not propagate the spy. **Verify by
-  running `bun test src/__tests__/locked-file.test.ts`**: the
-  "statSig fails only on the verification re-stat" test must still observe the
-  mock. If the spy does not intercept, that test fails loudly — it is the gate,
-  not an afterthought.
-- **`vault-io.test.ts`, `frontmatter.test.ts`, `links.test.ts`** → update the
-  single import path to the folder barrel; content unchanged.
-- **`errors.test.ts`, `index.test.ts`, `scaffold.test.ts`** → unchanged.
+  `../locked-file/index.ts`. The `MTIME_CONFLICT` test spies **only** `statSig`.
+  Use the **symmetric-barrel seam**: production (`delete.ts`) imports `statSig`
+  through the `fs-atomic` barrel, and the test spies that **same** barrel —
+  `import * as fsAtomic from '../fs-atomic/index.ts'; spyOn(fsAtomic, 'statSig')`.
+  This is exactly today's proven "production and test reference the same module
+  namespace" pattern, with the module now being the barrel. **Verified
+  empirically** (Bun 1.3.13): a `spyOn` on a re-export barrel namespace
+  intercepts a consumer that imports the symbol through that barrel. (Spying the
+  definition leaf `sig.ts` also works, but the symmetric-barrel seam keeps both
+  production and test barrel-only — no leaf reach for this case.) The existing
+  test run is still the gate: the "statSig fails only on the verification
+  re-stat" assertion must observe the mock.
+- **`vault-io.test.ts`** → update the `createVaultIo` import to
+  `../vault-io/index.ts`; existing (black-box) describes unchanged. **Add direct
+  white-box describes** for the extracted **security-critical** pure helpers,
+  importing each leaf:
+  - `paths.ts` → `canonicalizeRelative`: rejects absolute / `..`-escape;
+    NFC-normalizes; collapses `.` and dup-slashes; case-preserving.
+  - `allowlist.ts` → `matches`: boundary-aware (`foo` ∌ `foobar.md`; `foo` ∋
+    `foo` and `foo/x`; `''` ∋ everything).
+  - `realpath-guard.ts` → `realTargetWithinRoot(full, root)`: in-root → true;
+    symlink-escape → false; nonexistent target inside root → true.
+  These make the motivation ("independently testable") real at the unit level
+  and pin the security contract per-helper, not only through `createVaultIo`.
+  (Keeping them in `vault-io.test.ts` preserves one-test-file-per-module; they
+  can split out later if the file grows unwieldy.)
+- **`frontmatter.test.ts`, `links.test.ts`** → update the single import path to
+  the folder barrel; content unchanged.
+- **`errors.test.ts`, `scaffold.test.ts`** → unchanged.
 
-The extracted pure helpers (`canonicalizeRelative`, `matches`,
-`realTargetWithinRoot`, `globToRegExp`) remain covered through the existing
-`vault-io` tests (canonicalization, boundary-aware allowlist, symlink-escape,
-ignore-glob). `readConsistent` keeps its current indirect coverage (via
-`readVaultFile` / `withFileTransform`). Adding direct unit tests for these is a
-**future** option, not part of this refactor.
+`readConsistent` keeps its current indirect coverage (via `readVaultFile` /
+`withFileTransform`); `globToRegExp` keeps its coverage via the `vault-io`
+ignore-glob tests. Direct tests for those two remain optional.
+
+## Open questions — resolved
+
+- **Are folder barrels stable internal APIs or just refactor convenience?**
+  → **Stable internal integration APIs** (Layer 2). Plan 2 modules will import
+  through them, so a barrel's shape is a real contract; it is curated by hand,
+  not auto-`export *`. It is still *internal* (not in `package.json` `exports`).
+- **May tests import private leaf modules, or only barrels?**
+  → **Tests may import leaf files** for white-box unit-testing of internal
+  helpers (e.g. the new `realpath-guard` / `matches` / `canonicalizeRelative`
+  describes). Production code stays barrel-only across modules. The `statSig`
+  spy specifically does **not** need a leaf import — it uses the symmetric-barrel
+  seam.
 
 ## Out of scope
 
-- Any public API change (names, signatures, types).
+- Any package public API change (names, signatures, types).
 - Any logic / behavior change beyond the two noted micro-edits.
-- Rewriting test assertions (only import paths and the lock-describe relocation).
-- Moving tests out of `src/__tests__/` (the central-`__tests__` convention is
-  kept).
+- Rewriting existing test assertions (only import paths, the lock-describe
+  relocation, the `index.test.ts` strengthening, and the additive `vault-io`
+  helper describes).
+- Moving tests out of `src/__tests__/` (the central convention is kept).
 - Plan 2 modules (`index`/SQLite, `query`, `notes`, `createVault`). Note for
   Plan 2: the SQLite "index" module should pick a folder name that does not
   collide with barrel `index.ts` files (e.g. `note-index/` or `db/`) — decided
@@ -316,9 +401,11 @@ ignore-glob). `readConsistent` keeps its current indirect coverage (via
 
 ## Done criteria
 
-- `src/` matches the target tree; `errors.ts` is the only remaining flat
-  source file.
+- `src/` matches the target tree; `errors.ts` and `src/index.ts` are the only
+  flat files (`errors.ts` the only flat **non-barrel source** module;
+  `src/index.ts` the package-API barrel).
 - `bun test` and `bun run check` are green.
-- `src/index.ts` exports the frozen name set, paths-only changed.
+- `index.test.ts` asserts the exact value-export key set **and** type-checks all
+  16 type exports; `git diff src/index.ts` is path-only.
 - No `export *`; no import cycle; every file is single-purpose and reads in one
   pass.
