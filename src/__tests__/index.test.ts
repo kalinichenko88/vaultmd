@@ -62,4 +62,9 @@ describe('package public API freeze', () => {
   test('runtime value exports are exactly the 10 live values', () => {
     expect(Object.keys(mdvault).sort()).toEqual(VALUE_EXPORTS);
   });
+
+  test('the barrel uses no `export *` (every export is named)', () => {
+    const src = readFileSync(new URL('../index.ts', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/export\s+\*/);
+  });
 });
