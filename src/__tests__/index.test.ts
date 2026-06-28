@@ -42,10 +42,10 @@ function exportedNames(source: string): string[] {
   const names = new Set<string>();
   for (const m of source.matchAll(/export\s+(?:type\s+)?\{([^}]*)\}/g)) {
     for (const raw of m[1].split(',')) {
-      const name = raw
-        .trim()
-        .split(/\s+as\s+/)[0]
-        .trim();
+      // For a re-export `internalName as PublicName`, freeze the PUBLIC
+      // (exported) name — the last segment — not the source-side name.
+      const parts = raw.trim().split(/\s+as\s+/);
+      const name = parts[parts.length - 1].trim();
       if (name) names.add(name);
     }
   }
