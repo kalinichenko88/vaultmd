@@ -8,7 +8,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 notes plus a derived `bun:sqlite` index (collection queries, backlinks, keyword
 search). The `.md` files on disk are the **source of truth**; the SQLite index is
 a **rebuildable cache**. No Obsidian, no Electron, no build step — the package
-ships TypeScript source directly (`exports` → `./src/index.ts`).
+ships TypeScript source directly (`exports` → `./src/index.ts`). The package is
+currently `private: true`: internal imports use `@/` tsconfig-path aliases that
+do **not** survive an unbundled publish, so publishing is intentionally blocked
+until a bundling / `tsc-alias` rewrite step is added — removing `private` and
+adding that step are one change.
 
 ## Commands
 
@@ -68,9 +72,14 @@ assembles.
    is the privacy boundary, not "unexported."
 
 **Import discipline:** production code imports *other* modules only through their
-barrel (`../fs-atomic/index.ts`); *within* a module, import siblings directly
-(`./sig.ts`). A test in `<module>/__tests__/` may import a leaf directly
-(`../paths.ts`) for white-box testing.
+barrel, via the `@/` alias (`@/fs-atomic/index.ts` — never a relative
+`../fs-atomic/index.ts`); *within* a module, import siblings with a relative path
+(`./sig.ts`, or `../sig.ts` from a `models/`/`__tests__/` subfolder). A test in
+`<module>/__tests__/` may import another module's leaf for white-box testing,
+also via the alias (`@/fs-atomic/sig.ts`), while importing its own module's files
+relatively. The package root barrel `@/index.ts` is **off-limits to production
+code** — only the API-freeze test (`src/__tests__/index.test.ts`) imports it.
+`@/*` maps to `./src/*` (`tsconfig.json`); keep the explicit `.ts` extension.
 
 ### Key invariants
 
