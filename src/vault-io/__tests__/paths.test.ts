@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { MdVaultError } from '../../errors.ts';
+import { MdVaultError } from '@/errors.ts';
 import { canonicalizeRelative, canonPrefix } from '../paths.ts';
 
 function code(fn: () => unknown): string {

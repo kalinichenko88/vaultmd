@@ -4,8 +4,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
 import * as path from 'node:path';
 
-import { MdVaultError } from '../../errors.ts';
-import { statSig } from '../../fs-atomic/sig.ts';
+import { MdVaultError } from '@/errors.ts';
+import { statSig } from '@/fs-atomic/sig.ts';
 import { withCrossProcessLock } from '../cross-process.ts';
 
 describe('withCrossProcessLock', () => {

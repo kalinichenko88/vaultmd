@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
-import * as mdvault from '../index.ts';
+import * as mdvault from '@/index.ts';
 
 // The frozen Plan 1 + Plan 2 package public API. Changing this set must be deliberate:
 // adding/removing/renaming any export fails these tests.

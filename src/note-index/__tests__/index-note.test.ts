@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createVaultIo, type VaultIo } from '../../vault-io/index.ts';
+import { createVaultIo, type VaultIo } from '@/vault-io/index.ts';
 import { dropNote, indexNote } from '../index-note.ts';
 import type { IndexConfig } from '../models/index-config.ts';
 import { applySchema } from '../schema.ts';

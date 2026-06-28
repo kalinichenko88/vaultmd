@@ -4,8 +4,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { MdVaultError } from '../../errors.ts';
-import { statSig } from '../../fs-atomic/sig.ts';
+import { MdVaultError } from '@/errors.ts';
+import { statSig } from '@/fs-atomic/sig.ts';
 import { withFileTransform } from '../index.ts';
 
 let dir: string;

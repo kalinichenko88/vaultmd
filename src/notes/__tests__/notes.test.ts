@@ -4,15 +4,15 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { MdVaultError } from '../../errors.ts';
+import { MdVaultError } from '@/errors.ts';
 import {
   applySchema,
   type IndexConfig,
   indexNote,
   openIndexDb,
-} from '../../note-index/index.ts';
-import { createQuery } from '../../query/index.ts';
-import { createVaultIo, type VaultIo } from '../../vault-io/index.ts';
+} from '@/note-index/index.ts';
+import { createQuery } from '@/query/index.ts';
+import { createVaultIo, type VaultIo } from '@/vault-io/index.ts';
 import { createNotes } from '../notes.ts';
 
 let base: string;

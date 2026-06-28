@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 
-import { MdVaultError } from '../../errors.ts';
+import { MdVaultError } from '@/errors.ts';
 import {
   atomicWrite,
   atomicWriteIfUnchanged,

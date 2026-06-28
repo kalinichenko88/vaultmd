@@ -4,8 +4,8 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import * as fsAtomic from '../../fs-atomic/index.ts';
-import { createVaultIo, type VaultIo } from '../../vault-io/index.ts';
+import * as fsAtomic from '@/fs-atomic/index.ts';
+import { createVaultIo, type VaultIo } from '@/vault-io/index.ts';
 
 import type { IndexConfig } from '../models/index-config.ts';
 import { configFingerprint, openIndexDb, readMeta } from '../open.ts';
