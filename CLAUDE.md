@@ -66,7 +66,7 @@ assembles.
 
 1. **Package public API — `src/index.ts`.** The *only* `exports` entry (`"."`).
    Its exact name set is **frozen** and guarded by `src/__tests__/index.test.ts`
-   (currently 36 names, value + type). Adding/removing/renaming an export means
+   (currently 40 names, value + type). Adding/removing/renaming an export means
    updating that test deliberately. No `vaultmd/<subpath>` is reachable — only
    `"."` is exported.
 2. **Module barrels — `<module>/index.ts`.** The stable *internal* integration
