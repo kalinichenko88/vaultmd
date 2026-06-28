@@ -11,3 +11,4 @@ jobs:
       - run: bun run check # biome + tsc — the gate
       - run: bun test
       - run: bun run smoke # build → pack → install into temp project → import + typecheck
+      - run: bun run docs:build # rot gate: strict TypeDoc validation + site build
