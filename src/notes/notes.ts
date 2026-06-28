@@ -157,20 +157,33 @@ export function createNotes(deps: NotesDeps): NotesApi {
     const key = vaultIo.toKey(path);
     const display = vaultIo.toVaultRelative(path);
     const transform = (current: string | null): string | null => {
+      // updateNote targets the note body only; any frontmatter block is left
+      // verbatim. parseFrontmatter's `body` is a byte-exact suffix of the raw
+      // content, so `prefix` is exactly the frontmatter (empty when absent).
+      const body = current === null ? null : parseFrontmatter(current).body;
+      const prefix =
+        current !== null && body !== null
+          ? current.slice(0, current.length - body.length)
+          : '';
       if ('append' in op) {
-        const baseText = current ?? '';
-        const needsNl = baseText.length > 0 && !baseText.endsWith('\n');
+        // Boundary newline is keyed off the FULL preserved content (frontmatter
+        // prefix + body), not the body alone: a frontmatter-only note with no
+        // trailing newline (`---\n...\n---`) has an empty body but a non-empty
+        // prefix ending in the closing fence. Counting only the body would weld
+        // the appended text onto `---`, corrupting the fence.
+        const existing = `${prefix}${body ?? ''}`;
+        const needsNl = existing.length > 0 && !existing.endsWith('\n');
 
-        return `${baseText}${needsNl ? '\n' : ''}${op.append}`;
+        return `${existing}${needsNl ? '\n' : ''}${op.append}`;
       }
       const { old, new: replacement } = op.editByMatch;
-      if (current === null) {
+      if (body === null) {
         throw new MdVaultError(
           'NO_MATCH',
           `no match in missing file: ${display}`,
         );
       }
-      const count = countOccurrences(current, old);
+      const count = countOccurrences(body, old);
       if (count === 0) {
         throw new MdVaultError(
           'NO_MATCH',
@@ -183,10 +196,10 @@ export function createNotes(deps: NotesDeps): NotesApi {
           `ambiguous match (${count}) in ${display}`,
         );
       }
-      const at = current.indexOf(old);
+      const at = body.indexOf(old);
 
       return (
-        current.slice(0, at) + replacement + current.slice(at + old.length)
+        prefix + body.slice(0, at) + replacement + body.slice(at + old.length)
       );
     };
     await withFileTransform(full, key, display, transform, {

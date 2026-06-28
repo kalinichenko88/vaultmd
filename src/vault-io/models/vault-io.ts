@@ -72,8 +72,10 @@ export type VaultIo = {
    * Unlink a file only if its current signature matches `expected`.
    * @param rel Vault-relative `.md` path.
    * @param expected Signature the file must currently have.
-   * @returns `true` if the file was deleted; `false` if the signature
-   * did not match (concurrent modification detected).
+   * @returns `true` if the file was deleted; `false` only if the file was
+   * already absent.
+   * @throws {@link MdVaultError} `MTIME_CONFLICT` if the file's current
+   * signature differs from `expected` (concurrent modification detected).
    */
   unlinkIfUnchanged(rel: string, expected: Sig): Promise<boolean>;
   /**

@@ -5,8 +5,10 @@
 export type UpdateOp =
   | {
       /**
-       * Find-and-replace a unique substring in the note body. The old text
-       * must match exactly once — zero matches throw `NO_MATCH`, multiple
+       * Find-and-replace a unique substring in the note body. The frontmatter
+       * block is excluded from the search and left untouched (use
+       * {@link NotesApi.editFrontmatter} for that). The old text must match
+       * exactly once within the body — zero matches throw `NO_MATCH`, multiple
        * matches throw `AMBIGUOUS_MATCH`.
        */
       editByMatch: {
