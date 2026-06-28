@@ -2,10 +2,10 @@
 
 > A headless markdown-vault data layer for [Bun](https://bun.sh) — CRUD over `.md` notes plus a derived SQLite index for collection queries, backlinks, and full-text search. No Obsidian, no Electron, no plugin.
 
-[![npm](https://img.shields.io/badge/npm-mdvault-cb3837?logo=npm)](#install)
+[![npm](https://img.shields.io/badge/npm-mdvault-cb3837?logo=npm)](https://www.npmjs.com/package/mdvault)
 [![runtime: Bun](https://img.shields.io/badge/runtime-Bun%20%E2%89%A5%201.1-f9f1e1?logo=bun)](https://bun.sh)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-[![status: pre-release](https://img.shields.io/badge/status-pre--release-orange.svg)](#status)
+[![status: published](https://img.shields.io/badge/status-published-brightgreen.svg)](#status)
 
 `mdvault` is an npm package that gives your Bun app a programmatic data layer
 over a folder of markdown notes. Your `.md` files on disk stay the **single
@@ -18,10 +18,10 @@ schemas, and sync logic live in whatever you build on top.
 
 ## Status
 
-Pre-release (`0.1.0`). The public API is frozen and tested, and the package now
-builds to a bundled `dist/` for npm — but the **first release hasn't been
-published yet**. The [install](#install) instructions below describe the workflow
-once `v0.1.0` ships. ⭐ / watch the repo for the first release.
+Released (`0.1.0`) — the first published version is live on npm. The public API
+is frozen and tested, and the package ships as a bundled `dist/` (ESM + types).
+Being `0.x`, the surface may still evolve before `1.0`; see
+[CHANGELOG.md](./CHANGELOG.md) for what changed.
 
 ## Features
 
@@ -53,9 +53,6 @@ once `v0.1.0` ships. ⭐ / watch the repo for the first release.
 ```bash
 bun add mdvault
 ```
-
-> Not yet on npm — see [Status](#status). To try it today, clone the repo and
-> reference it via a local path or workspace.
 
 ## Quick start
 
