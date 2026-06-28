@@ -58,6 +58,11 @@ const ALL_EXPORTS = [
   'Vault',
   'WhereMap',
   'createVault',
+  // — Plan 3 (docs API firming) (new 4) —
+  'Backlink',
+  'NotesApi',
+  'OutboundLink',
+  'QueryApi',
 ].sort();
 
 function exportedNames(source: string): string[] {
@@ -78,7 +83,7 @@ function exportedNames(source: string): string[] {
 }
 
 describe('package public API freeze', () => {
-  test('src/index.ts exports exactly the frozen 36 names (Plan 1 + Plan 2)', () => {
+  test('src/index.ts exports exactly the frozen 40 names (Plan 1 + Plan 2 + Plan 3)', () => {
     const src = readFileSync(new URL('../index.ts', import.meta.url), 'utf8');
     expect(exportedNames(src)).toEqual(ALL_EXPORTS);
   });

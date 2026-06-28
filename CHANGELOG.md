@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Public types** — `Backlink` and `OutboundLink` are now exported from the
+  package root, and the `vault.notes` / `vault.query` bundles have named
+  interfaces `NotesApi` / `QueryApi` (previously inferred). Additive and
+  non-breaking; enables the generated API reference.
+
 ## 0.1.0 — 2026-06-28
 
 First public release — a headless markdown-vault data layer for Bun. The `.md`

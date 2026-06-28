@@ -8,6 +8,7 @@ import type { Backlink } from './models/backlink.ts';
 import type { NoteHit } from './models/note-hit.ts';
 import type { QueryOrder } from './models/order.ts';
 import type { OutboundLink } from './models/outbound-link.ts';
+import type { QueryApi } from './models/query-api.ts';
 import type { SearchHit } from './models/search-hit.ts';
 import type { WhereMap } from './models/where-map.ts';
 
@@ -93,7 +94,11 @@ function tieBreakWinner(
   return sorted[0]?.path;
 }
 
-export function createQuery(db: Database, vaultIo: VaultIo, cfg: IndexConfig) {
+export function createQuery(
+  db: Database,
+  vaultIo: VaultIo,
+  cfg: IndexConfig,
+): QueryApi {
   function inScope(path: string): boolean {
     return vaultIo.can(path, 'read');
   }

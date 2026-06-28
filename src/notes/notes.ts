@@ -18,6 +18,7 @@ import { dropNote, type IndexConfig, indexNote } from '@/note-index/index.ts';
 import type { createQuery } from '@/query/index.ts';
 import type { VaultIo } from '@/vault-io/index.ts';
 
+import type { NotesApi } from './models/notes-api.ts';
 import type { ReadNoteResult } from './models/read-note-result.ts';
 import type { UpdateOp } from './models/update-op.ts';
 
@@ -44,7 +45,7 @@ function countOccurrences(haystack: string, needle: string): number {
   return count;
 }
 
-export function createNotes(deps: NotesDeps) {
+export function createNotes(deps: NotesDeps): NotesApi {
   const { db, vaultIo, cfg, query, onCommit, cross = false } = deps;
 
   async function readNote(
