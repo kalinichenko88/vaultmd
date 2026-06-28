@@ -25,6 +25,7 @@ export interface QueryApi {
   }): NoteHit[];
   /**
    * Notes that link to `path` via `[[wikilink]]` or relative-link resolution.
+   * Defaults to limit 100; hard cap 1000.
    */
   backlinks(
     path: string,
@@ -32,7 +33,7 @@ export interface QueryApi {
   ): Backlink[];
   /**
    * Links out of `path`, each with its `resolved` target (or `null` if the
-   * link dangles).
+   * link dangles). Defaults to limit 100; hard cap 1000.
    */
   outboundLinks(
     path: string,
@@ -40,6 +41,7 @@ export interface QueryApi {
   ): OutboundLink[];
   /**
    * FTS5 keyword search over note bodies, returning highlighted snippets.
+   * Defaults to limit 100; hard cap 1000.
    */
   searchText(
     q: string,

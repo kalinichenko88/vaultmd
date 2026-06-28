@@ -5,8 +5,10 @@ import type { UpdateOp } from './update-op.ts';
 
 /**
  * The notes CRUD surface, exposed as `vault.notes`. Every method takes a
- * vault-relative path and runs inside the per-file lock, so the `.md` file and
- * its index row never drift.
+ * vault-relative path; the four mutating methods (`createNote`, `updateNote`,
+ * `editFrontmatter`, `deleteNote`) run inside the per-file lock so the `.md`
+ * file and its index row never drift. `readNote` is a consistent read and
+ * does not acquire the lock.
  */
 export interface NotesApi {
   /**
@@ -14,7 +16,7 @@ export interface NotesApi {
    * @param path Vault-relative path to the `.md` file.
    * @param opts When `withLinks` is true, also resolve `outbound` and
    * `backlinks` for the note.
-   * @throws MdVaultError `NOT_FOUND` if the file does not exist.
+   * @throws {@link MdVaultError} `NOT_FOUND` if the file does not exist.
    */
   readNote(
     path: string,
@@ -23,7 +25,7 @@ export interface NotesApi {
   /**
    * Create a new note, writing frontmatter + body. Never clobbers an existing
    * file.
-   * @throws MdVaultError `ALREADY_EXISTS` if the path is taken.
+   * @throws {@link MdVaultError} `ALREADY_EXISTS` if the path is taken.
    */
   createNote(
     path: string,
@@ -31,7 +33,7 @@ export interface NotesApi {
   ): Promise<void>;
   /**
    * Mutate a note body — either append text or replace a single unique match.
-   * @throws MdVaultError `NO_MATCH` / `AMBIGUOUS_MATCH` for `editByMatch`.
+   * @throws {@link MdVaultError} `NO_MATCH` / `AMBIGUOUS_MATCH` for `editByMatch`.
    */
   updateNote(path: string, op: UpdateOp): Promise<void>;
   /**
