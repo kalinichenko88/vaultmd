@@ -1,6 +1,14 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.1/schema.json",
-  "files": { "includes": ["**", "!dist", "!website/api"] },
+  "files": {
+    "includes": [
+      "**",
+      "!dist",
+      "!website/api",
+      "!website/.vitepress/dist",
+      "!website/.vitepress/cache"
+    ]
+  },
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2 },
   "javascript": { "formatter": { "quoteStyle": "single" } },
   "linter": {

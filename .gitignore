@@ -12,3 +12,7 @@ docs/superpowers/
 
 # generated docs API reference
 website/api/
+
+# VitePress build output and cache
+website/.vitepress/dist/
+website/.vitepress/cache/
