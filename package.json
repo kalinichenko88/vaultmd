@@ -1,5 +1,6 @@
 {
   "name": "mdvault",
+  "private": true,
   "version": "0.1.0",
   "description": "Headless markdown-vault data layer for Bun — CRUD + SQLite index, no Obsidian required",
   "type": "module",
@@ -22,6 +23,7 @@
     "!src/**/__tests__/**"
   ],
   "scripts": {
+    "prepublishOnly": "echo 'mdvault is not publishable yet: @/ import aliases require a bundling/tsc-alias step first (see CLAUDE.md)'; exit 1",
     "test": "bun test",
     "check": "biome check . && tsc --noEmit",
     "format": "biome format --write .",
