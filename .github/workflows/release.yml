@@ -1,0 +1,38 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write # npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # full history for the on-main ancestry check
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22' # >= host Node (never pin CI below the dev machine)
+          registry-url: 'https://registry.npmjs.org'
+      - name: Guard — tag matches package.json version and is on main
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$GITHUB_REF_NAME" != "v$PKG_VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME != v$PKG_VERSION (package.json)"; exit 1
+          fi
+          git fetch origin +refs/heads/main:refs/remotes/origin/main --quiet
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::tagged commit $GITHUB_SHA is not on origin/main"; exit 1
+          fi
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun test
+      - run: bun run smoke # build + pack/install/import/typecheck before publishing
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

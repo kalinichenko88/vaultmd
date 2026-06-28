@@ -1,29 +1,50 @@
 {
   "name": "mdvault",
-  "private": true,
   "version": "0.1.0",
   "description": "Headless markdown-vault data layer for Bun — CRUD + SQLite index, no Obsidian required",
   "type": "module",
   "license": "MIT",
   "author": "Ivan Kalinichenko",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kalinichenko88/mdvault.git"
+  },
+  "homepage": "https://github.com/kalinichenko88/mdvault#readme",
+  "bugs": {
+    "url": "https://github.com/kalinichenko88/mdvault/issues"
+  },
+  "keywords": [
+    "markdown",
+    "vault",
+    "notes",
+    "bun",
+    "sqlite",
+    "backlinks",
+    "wikilinks",
+    "frontmatter",
+    "full-text-search",
+    "obsidian",
+    "headless",
+    "esm"
+  ],
   "engines": {
     "bun": ">=1.1.0"
   },
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
   },
   "files": [
-    "src",
+    "dist",
     "README.md",
-    "LICENSE",
-    "!src/**/*.test.ts",
-    "!src/**/__tests__/**"
+    "LICENSE"
   ],
   "scripts": {
-    "prepublishOnly": "echo 'mdvault is not publishable yet: @/ import aliases require a bundling/tsc-alias step first (see CLAUDE.md)'; exit 1",
+    "build": "tsup",
+    "prepack": "tsup",
+    "smoke": "bash scripts/smoke-pack.sh",
     "test": "bun test",
     "check": "biome check . && tsc --noEmit",
     "format": "biome format --write .",
@@ -36,6 +57,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.1",
     "@types/bun": "latest",
+    "tsup": "^8.3.0",
     "typescript": "^6.0.3"
   }
 }

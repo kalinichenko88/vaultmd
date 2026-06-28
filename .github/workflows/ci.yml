@@ -1,0 +1,13 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  bun:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run check # biome + tsc — the gate
+      - run: bun test
+      - run: bun run smoke # build → pack → install into temp project → import + typecheck

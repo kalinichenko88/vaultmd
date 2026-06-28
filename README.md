@@ -18,10 +18,10 @@ schemas, and sync logic live in whatever you build on top.
 
 ## Status
 
-Pre-release (`0.1.0`). The public API is frozen and tested, but the package is
-**not yet published to npm** — it ships unbundled TypeScript and a bundling step
-is still pending. The [install](#install) instructions below describe the
-intended workflow once it's live. ⭐ / watch the repo for the first release.
+Pre-release (`0.1.0`). The public API is frozen and tested, and the package now
+builds to a bundled `dist/` for npm — but the **first release hasn't been
+published yet**. The [install](#install) instructions below describe the workflow
+once `v0.1.0` ships. ⭐ / watch the repo for the first release.
 
 ## Features
 

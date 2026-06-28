@@ -598,6 +598,10 @@ describe('outboundLinks', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      // Match the query's caseSensitive:false (and insertNote's lowercased keys)
+      // so toKey lowercases on case-sensitive filesystems too (Linux CI). Mirrors
+      // createVault, which always threads one caseSensitive through both.
+      caseSensitive: false,
     });
     const { outboundLinks } = createQuery(db, io, {
       linkResolution: 'wikilink',
