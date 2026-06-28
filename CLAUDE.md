@@ -7,12 +7,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `mdvault` is a headless markdown-vault data layer for **Bun**: CRUD over `.md`
 notes plus a derived `bun:sqlite` index (collection queries, backlinks, keyword
 search). The `.md` files on disk are the **source of truth**; the SQLite index is
-a **rebuildable cache**. No Obsidian, no Electron, no build step — the package
-ships TypeScript source directly (`exports` → `./src/index.ts`). The package is
-currently `private: true`: internal imports use `@/` tsconfig-path aliases that
-do **not** survive an unbundled publish, so publishing is intentionally blocked
-until a bundling / `tsc-alias` rewrite step is added — removing `private` and
-adding that step are one change.
+a **rebuildable cache**. No Obsidian, no Electron. Internal imports use `@/`
+tsconfig-path aliases; **`tsup` bundles `src/index.ts` → `dist/`** (ESM `.js` +
+`.d.ts`, with `bun:sqlite` externalized), so the aliases are resolved in the
+shipped artifact. `exports` points at `./dist/index.js`. The package publishes to
+npm via a **tag-driven** GitHub Actions workflow (push a `v*` tag → `npm publish
+--provenance`); the local `release` skill drives the version/CHANGELOG/README/tag
+flow. It stays **Bun-only at runtime** (the bundle imports `bun:sqlite`).
 
 ## Commands
 
@@ -29,6 +30,8 @@ bun run check                     # biome check . && tsc --noEmit — the gate; 
 bun run typecheck                 # tsc --noEmit only
 bun run lint                      # biome lint only
 bun run format                    # biome format --write
+bun run build                     # tsup bundle src/index.ts → dist/
+bun run smoke                     # pack the tarball + install/import/typecheck it in a temp project
 ```
 
 `tsconfig.include` is `["src"]`, so a single dangling import anywhere fails
