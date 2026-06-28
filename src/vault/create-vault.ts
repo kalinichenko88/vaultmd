@@ -1,6 +1,6 @@
 import { dirname } from 'node:path';
 
-import { MdVaultError } from '../errors.ts';
+import { MdVaultError } from '@/errors.ts';
 import {
   applySchema,
   configFingerprint,
@@ -10,10 +10,10 @@ import {
   probeCapabilities,
   readMeta,
   SCHEMA_VERSION,
-} from '../note-index/index.ts';
-import { createNotes } from '../notes/index.ts';
-import { createQuery } from '../query/index.ts';
-import { createVaultIo } from '../vault-io/index.ts';
+} from '@/note-index/index.ts';
+import { createNotes } from '@/notes/index.ts';
+import { createQuery } from '@/query/index.ts';
+import { createVaultIo } from '@/vault-io/index.ts';
 import type { CreateVaultConfig } from './models/create-vault-config.ts';
 import type { Vault } from './models/vault.ts';
 

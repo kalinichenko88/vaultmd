@@ -1,5 +1,5 @@
-import { statSig, unlinkIfUnchanged } from '../fs-atomic/index.ts';
-import { withCrossProcessLock, withFileLock } from '../locks/index.ts';
+import { statSig, unlinkIfUnchanged } from '@/fs-atomic/index.ts';
+import { withCrossProcessLock, withFileLock } from '@/locks/index.ts';
 import { emitCommit } from './commit.ts';
 import type { CommitEvent } from './models/commit-event.ts';
 import type { CrossLock } from './models/cross-lock.ts';

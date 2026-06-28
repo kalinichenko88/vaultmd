@@ -1,6 +1,6 @@
 import { join, resolve as resolvePath } from 'node:path';
 
-import { MdVaultError } from '../errors.ts';
+import { MdVaultError } from '@/errors.ts';
 import {
   atomicWrite,
   atomicWriteIfUnchanged,
@@ -8,7 +8,7 @@ import {
   readConsistent,
   type Sig,
   statSig,
-} from '../fs-atomic/index.ts';
+} from '@/fs-atomic/index.ts';
 import { matches } from './allowlist.ts';
 import { resolveCaseSensitive } from './case-sensitivity.ts';
 import { listMarkdown as enumerateMarkdown } from './enumerate.ts';

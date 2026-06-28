@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { link, mkdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 
-import { MdVaultError } from '../errors.ts';
+import { MdVaultError } from '@/errors.ts';
 import type { Sig } from './models/sig.ts';
 import { makeSig, sigsEqual, statSig } from './sig.ts';
 

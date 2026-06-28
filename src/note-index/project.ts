@@ -1,8 +1,8 @@
 import { basename } from 'node:path';
 
-import { deriveTags, parseFrontmatter } from '../frontmatter/index.ts';
-import { type StoredLink, storedLinksFor } from '../links/index.ts';
-import type { VaultIo } from '../vault-io/index.ts';
+import { deriveTags, parseFrontmatter } from '@/frontmatter/index.ts';
+import { type StoredLink, storedLinksFor } from '@/links/index.ts';
+import type { VaultIo } from '@/vault-io/index.ts';
 import type { IndexConfig } from './models/index-config.ts';
 
 export function deriveTitle(

@@ -1,6 +1,6 @@
 import { isAbsolute } from 'node:path';
 
-import { MdVaultError } from '../errors.ts';
+import { MdVaultError } from '@/errors.ts';
 
 export function canonicalizeRelative(rel: string): string {
   if (isAbsolute(rel)) {

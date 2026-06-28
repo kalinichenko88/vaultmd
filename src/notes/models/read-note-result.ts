@@ -1,5 +1,5 @@
-import type { FrontmatterValidity } from '../../frontmatter/index.ts';
-import type { Backlink, OutboundLink } from '../../query/index.ts';
+import type { FrontmatterValidity } from '@/frontmatter/index.ts';
+import type { Backlink, OutboundLink } from '@/query/index.ts';
 
 export type ReadNoteResult = {
   frontmatter: Record<string, unknown>;

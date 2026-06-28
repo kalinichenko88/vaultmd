@@ -1,4 +1,4 @@
-import type { Sig } from '../../fs-atomic/index.ts';
+import type { Sig } from '@/fs-atomic/index.ts';
 import type { Access } from './access.ts';
 
 export type VaultIo = {

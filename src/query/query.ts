@@ -1,8 +1,8 @@
 import type { Database } from 'bun:sqlite';
 
-import { MdVaultError } from '../errors.ts';
-import type { IndexConfig } from '../note-index/index.ts';
-import type { VaultIo } from '../vault-io/index.ts';
+import { MdVaultError } from '@/errors.ts';
+import type { IndexConfig } from '@/note-index/index.ts';
+import type { VaultIo } from '@/vault-io/index.ts';
 import type { Backlink } from './models/backlink.ts';
 import type { NoteHit } from './models/note-hit.ts';
 import type { QueryOrder } from './models/order.ts';

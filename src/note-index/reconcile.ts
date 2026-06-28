@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite';
 
-import { readConsistent, type Sig, statSig } from '../fs-atomic/index.ts';
-import type { VaultIo } from '../vault-io/index.ts';
+import { readConsistent, type Sig, statSig } from '@/fs-atomic/index.ts';
+import type { VaultIo } from '@/vault-io/index.ts';
 
 import { dropNote, indexNote } from './index-note.ts';
 import type { IndexConfig } from './models/index-config.ts';

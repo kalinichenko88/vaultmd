@@ -1,6 +1,6 @@
-import type { createNotes } from '../../notes/index.ts';
-import type { createQuery } from '../../query/index.ts';
-import type { VaultIo } from '../../vault-io/index.ts';
+import type { createNotes } from '@/notes/index.ts';
+import type { createQuery } from '@/query/index.ts';
+import type { VaultIo } from '@/vault-io/index.ts';
 
 export type Vault = {
   io: VaultIo;

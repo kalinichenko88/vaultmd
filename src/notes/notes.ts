@@ -1,22 +1,22 @@
 import type { Database } from 'bun:sqlite';
 
-import { MdVaultError } from '../errors.ts';
+import { MdVaultError } from '@/errors.ts';
 import {
   type EditOutcome,
   editFrontmatter as fmEditFrontmatter,
   parseFrontmatter,
-} from '../frontmatter/index.ts';
-import { exclusiveCreate, statSig } from '../fs-atomic/index.ts';
+} from '@/frontmatter/index.ts';
+import { exclusiveCreate, statSig } from '@/fs-atomic/index.ts';
 import {
   type CommitEvent,
   type CrossLock,
   withFileDelete,
   withFileTransform,
-} from '../locked-file/index.ts';
-import { withCrossProcessLock, withFileLock } from '../locks/index.ts';
-import { dropNote, type IndexConfig, indexNote } from '../note-index/index.ts';
-import type { createQuery } from '../query/index.ts';
-import type { VaultIo } from '../vault-io/index.ts';
+} from '@/locked-file/index.ts';
+import { withCrossProcessLock, withFileLock } from '@/locks/index.ts';
+import { dropNote, type IndexConfig, indexNote } from '@/note-index/index.ts';
+import type { createQuery } from '@/query/index.ts';
+import type { VaultIo } from '@/vault-io/index.ts';
 import type { ReadNoteResult } from './models/read-note-result.ts';
 import type { UpdateOp } from './models/update-op.ts';
 

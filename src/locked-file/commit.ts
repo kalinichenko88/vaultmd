@@ -1,4 +1,4 @@
-import { MdVaultError } from '../errors.ts';
+import { MdVaultError } from '@/errors.ts';
 import type { CommitEvent } from './models/commit-event.ts';
 
 export async function emitCommit(
