@@ -1,15 +1,15 @@
-# mdvault
+# vaultmd
 
 > A headless markdown-vault data layer for [Bun](https://bun.sh) — CRUD over `.md` notes plus a derived SQLite index for collection queries, backlinks, and full-text search. No Obsidian, no Electron, no plugin.
 
-[![npm](https://img.shields.io/badge/npm-mdvault-cb3837?logo=npm)](https://www.npmjs.com/package/mdvault)
+[![npm](https://img.shields.io/badge/npm-vaultmd-cb3837?logo=npm)](https://www.npmjs.com/package/vaultmd)
 [![runtime: Bun](https://img.shields.io/badge/runtime-Bun%20%E2%89%A5%201.1-f9f1e1?logo=bun)](https://bun.sh)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![status: published](https://img.shields.io/badge/status-published-brightgreen.svg)](#status)
 
-`mdvault` is an npm package that gives your Bun app a programmatic data layer
+`vaultmd` is an npm package that gives your Bun app a programmatic data layer
 over a folder of markdown notes. Your `.md` files on disk stay the **single
-source of truth**; mdvault maintains a rebuildable `bun:sqlite` index alongside
+source of truth**; vaultmd maintains a rebuildable `bun:sqlite` index alongside
 them so you can query notes by tag or frontmatter, walk backlinks, and run
 keyword search — all without an editor, sync engine, or background daemon.
 

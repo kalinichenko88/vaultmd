@@ -1,5 +1,5 @@
 {
-  "name": "mdvault",
+  "name": "vaultmd",
   "version": "0.1.0",
   "description": "Headless markdown-vault data layer for Bun — CRUD + SQLite index, no Obsidian required",
   "type": "module",

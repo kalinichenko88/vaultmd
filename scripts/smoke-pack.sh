@@ -25,16 +25,16 @@ trap cleanup EXIT
 echo "==> installing tarball + TS toolchain into $SMOKE_DIR"
 cd "$SMOKE_DIR"
 cat > package.json <<'JSON'
-{ "name": "mdvault-smoke", "private": true, "type": "module" }
+{ "name": "vaultmd-smoke", "private": true, "type": "module" }
 JSON
 bun add "$TARBALL_ABS" typescript @types/bun
 
 echo "==> runtime import check"
 cat > index.ts <<'TS'
-import { createVault } from 'mdvault';
+import { createVault } from 'vaultmd';
 
 if (typeof createVault !== 'function') {
-  throw new Error('createVault is not exported from mdvault');
+  throw new Error('createVault is not exported from vaultmd');
 }
 console.log('runtime import OK');
 TS
