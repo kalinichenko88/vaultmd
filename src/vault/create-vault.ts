@@ -24,7 +24,7 @@ import type { Vault } from './models/vault.ts';
  * {@link Vault}. The `.md` files on disk remain the single source of truth;
  * the index is a rebuildable cache.
  *
- * @param config Vault configuration — at minimum `root` and `indexPath`.
+ * @param config Vault configuration — at minimum `root`, `indexPath`, and `prefixes`.
  * @returns A ready-to-use {@link Vault} handle. Call {@link Vault.close} when done.
  *
  * @example

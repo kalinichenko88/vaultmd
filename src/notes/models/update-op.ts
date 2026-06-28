@@ -6,7 +6,7 @@ export type UpdateOp =
   | {
       /**
        * Find-and-replace a unique substring in the note body. The old text
-       * must match exactly once — zero matches throw `NOT_FOUND`, multiple
+       * must match exactly once — zero matches throw `NO_MATCH`, multiple
        * matches throw `AMBIGUOUS_MATCH`.
        */
       editByMatch: {
