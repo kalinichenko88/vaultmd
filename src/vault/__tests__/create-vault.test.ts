@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { MdVaultError } from '@/errors.ts';
+
 import { type CreateVaultConfig, createVault, type Vault } from '../index.ts';
 
 const sleep = (ms: number): Promise<void> =>

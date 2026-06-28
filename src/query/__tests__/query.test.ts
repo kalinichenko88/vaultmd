@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createVaultIo } from '@/vault-io/index.ts';
+
 import { createQuery } from '../query.ts';
 
 // ── shared schema ────────────────────────────────────────────────────────────

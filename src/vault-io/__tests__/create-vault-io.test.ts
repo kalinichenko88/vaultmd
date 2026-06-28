@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { MdVaultError } from '@/errors.ts';
+
 import { createVaultIo } from '../index.ts';
 
 let vault: string;

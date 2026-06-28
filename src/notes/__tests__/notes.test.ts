@@ -13,6 +13,7 @@ import {
 } from '@/note-index/index.ts';
 import { createQuery } from '@/query/index.ts';
 import { createVaultIo, type VaultIo } from '@/vault-io/index.ts';
+
 import { createNotes } from '../notes.ts';
 
 let base: string;

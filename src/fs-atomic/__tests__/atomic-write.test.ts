@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 
 import { MdVaultError } from '@/errors.ts';
+
 import {
   atomicWrite,
   atomicWriteIfUnchanged,

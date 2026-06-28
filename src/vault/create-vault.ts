@@ -14,6 +14,7 @@ import {
 import { createNotes } from '@/notes/index.ts';
 import { createQuery } from '@/query/index.ts';
 import { createVaultIo } from '@/vault-io/index.ts';
+
 import type { CreateVaultConfig } from './models/create-vault-config.ts';
 import type { Vault } from './models/vault.ts';
 

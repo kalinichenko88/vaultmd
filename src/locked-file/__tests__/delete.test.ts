@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { MdVaultError } from '@/errors.ts';
 import * as fsSig from '@/fs-atomic/sig.ts';
+
 import { withFileDelete } from '../index.ts';
 
 let dir: string;

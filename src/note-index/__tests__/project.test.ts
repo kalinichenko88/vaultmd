@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createVaultIo, type VaultIo } from '@/vault-io/index.ts';
+
 import type { IndexConfig } from '../models/index-config.ts';
 import { deriveTitle, projectRow } from '../project.ts';
 

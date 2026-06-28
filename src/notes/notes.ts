@@ -17,6 +17,7 @@ import { withCrossProcessLock, withFileLock } from '@/locks/index.ts';
 import { dropNote, type IndexConfig, indexNote } from '@/note-index/index.ts';
 import type { createQuery } from '@/query/index.ts';
 import type { VaultIo } from '@/vault-io/index.ts';
+
 import type { ReadNoteResult } from './models/read-note-result.ts';
 import type { UpdateOp } from './models/update-op.ts';
 

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import { MdVaultError } from '@/errors.ts';
 import { statSig } from '@/fs-atomic/sig.ts';
+
 import { withFileTransform } from '../index.ts';
 
 let dir: string;

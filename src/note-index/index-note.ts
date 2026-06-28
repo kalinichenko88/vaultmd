@@ -3,6 +3,7 @@ import type { Database } from 'bun:sqlite';
 import { parseFrontmatter } from '@/frontmatter/index.ts';
 import type { Sig } from '@/fs-atomic/index.ts';
 import type { VaultIo } from '@/vault-io/index.ts';
+
 import type { IndexConfig } from './models/index-config.ts';
 import { projectRow } from './project.ts';
 

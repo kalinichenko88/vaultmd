@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 
 import { MdVaultError } from '@/errors.ts';
+
 import type { IndexConfig } from './models/index-config.ts';
 import { SCHEMA_VERSION } from './schema.ts';
 

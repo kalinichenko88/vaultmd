@@ -6,6 +6,7 @@ import * as path from 'node:path';
 
 import { MdVaultError } from '@/errors.ts';
 import { statSig } from '@/fs-atomic/sig.ts';
+
 import { withCrossProcessLock } from '../cross-process.ts';
 
 describe('withCrossProcessLock', () => {

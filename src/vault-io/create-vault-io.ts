@@ -9,6 +9,7 @@ import {
   type Sig,
   statSig,
 } from '@/fs-atomic/index.ts';
+
 import { matches } from './allowlist.ts';
 import { resolveCaseSensitive } from './case-sensitivity.ts';
 import { listMarkdown as enumerateMarkdown } from './enumerate.ts';

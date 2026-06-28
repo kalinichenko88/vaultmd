@@ -6,7 +6,52 @@
     "enabled": true,
     "rules": {
       "preset": "recommended",
-      "style": { "useBlockStatements": "error" }
+      "style": {
+        "useBlockStatements": "error",
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "patterns": [
+              {
+                "group": [
+                  "**/../frontmatter/**",
+                  "**/../fs-atomic/**",
+                  "**/../links/**",
+                  "**/../locked-file/**",
+                  "**/../locks/**",
+                  "**/../note-index/**",
+                  "**/../notes/**",
+                  "**/../query/**",
+                  "**/../vault/**",
+                  "**/../vault-io/**",
+                  "**/../errors.ts"
+                ],
+                "message": "Cross-module relative import: use the @/ alias instead (CLAUDE.md Import discipline)."
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": {
+          "level": "on",
+          "options": {
+            "groups": [
+              [":BUN:", ":NODE:"],
+              ":BLANK_LINE:",
+              [":PACKAGE_WITH_PROTOCOL:", ":URL:", ":PACKAGE:", "!@/**"],
+              ":BLANK_LINE:",
+              ["@/**"],
+              ":BLANK_LINE:",
+              [":PATH:", ":ALIAS:"]
+            ]
+          }
+        }
+      }
     }
   }
 }
