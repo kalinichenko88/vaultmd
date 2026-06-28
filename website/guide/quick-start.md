@@ -11,11 +11,17 @@ bun add vaultmd
 ```ts
 import { createVault } from 'vaultmd';
 
-const vault = await createVault({ root: './notes' });
+const vault = await createVault({
+  root: '/path/to/vault',
+  // Read everything, but only write under Notes/.
+  prefixes: { read: [''], write: ['Notes/'] },
+  // Keep the index db outside the synced vault.
+  indexPath: './data/vault-index.db',
+});
 
-await vault.notes.createNote('ideas/first.md', {
+await vault.notes.createNote('Notes/ideas/first.md', {
   frontmatter: { tags: ['idea'] },
-  body: '# First\n\nLinking to [[ideas/second]].',
+  body: '# First\n\nLinking to [[Notes/ideas/second]].',
 });
 
 const hits = vault.query.queryNotes({ tag: 'idea' });
