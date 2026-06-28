@@ -18,6 +18,15 @@ function toTagTokens(value: unknown): string[] {
   return [];
 }
 
+/**
+ * Extract and normalise tag tokens from a parsed frontmatter object.
+ * Reads either the `tags` or `tag` key (whichever is present), tokenises
+ * string values on whitespace and commas, and strips leading `#` characters.
+ * Duplicate tokens are removed (first occurrence wins).
+ *
+ * @param frontmatter Parsed frontmatter key-value map.
+ * @returns Ordered, deduplicated array of normalised tag strings.
+ */
 export function deriveTags(frontmatter: Record<string, unknown>): string[] {
   const source =
     frontmatter.tags !== undefined ? frontmatter.tags : frontmatter.tag;

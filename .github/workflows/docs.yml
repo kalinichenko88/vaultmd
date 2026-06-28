@@ -1,0 +1,45 @@
+name: docs
+on:
+  workflow_run:
+    workflows: ['release']
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Deploy on a manual run, or only after the release workflow SUCCEEDED.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # workflow_run → the released commit; workflow_dispatch → the chosen ref.
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/configure-pages@v6
+      - run: bun install --frozen-lockfile
+      - run: bun run docs:build
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: website/.vitepress/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

@@ -28,6 +28,21 @@ export function extractBlock(content: string): Block | null {
   return null;
 }
 
+/**
+ * Parse the YAML frontmatter from a markdown file's raw content string.
+ * Handles files with no frontmatter, empty blocks, invalid YAML, and
+ * flat-safe vs. nested-object blocks. Never throws.
+ *
+ * @param content Raw UTF-8 content of a markdown file.
+ * @returns A {@link ParsedFrontmatter} with the parsed key-value map, tag
+ * tokens, body text, and a {@link FrontmatterValidity} descriptor.
+ *
+ * @example
+ * ```ts
+ * const { frontmatter, tags, body, valid } = parseFrontmatter(fileContent);
+ * if (valid === 'flat') { // safe to pass to editFrontmatter }
+ * ```
+ */
 export function parseFrontmatter(content: string): ParsedFrontmatter {
   const block = extractBlock(content);
   if (!block) {

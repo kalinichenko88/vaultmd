@@ -58,6 +58,17 @@ function resolveRelativeTarget(raw: string, srcDir: string): string | null {
   return resolved;
 }
 
+/**
+ * Extract and normalise outbound link records from a note, ready to store in
+ * the index. In `'wikilink'` mode, collects `[[wikilinks]]` and `![[embeds]]`
+ * (normalised stems). In `'relative'` mode, collects `[text](./path.md)` hrefs
+ * resolved relative to `srcRel`, filtering out external URLs and anchors.
+ *
+ * @param content Raw UTF-8 content of the source note.
+ * @param srcRel  Vault-relative path of the source note (used for relative resolution).
+ * @param mode    Link-resolution strategy matching the vault's `linkResolution` config.
+ * @returns Array of {@link StoredLink} records for the outbound links of the note.
+ */
 export function storedLinksFor(
   content: string,
   srcRel: string,

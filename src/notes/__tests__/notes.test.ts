@@ -192,6 +192,65 @@ describe('updateNote', () => {
       'line1\nline2',
     );
   });
+
+  test('editByMatch is body-scoped: a frontmatter occurrence is ignored (no spurious AMBIGUOUS_MATCH)', async () => {
+    await notes.createNote('fm-edit.md', {
+      frontmatter: { title: 'beta' },
+      body: 'alpha beta gamma',
+    });
+    // 'beta' appears in both frontmatter and body; only the body match counts.
+    await notes.updateNote('fm-edit.md', {
+      editByMatch: { old: 'beta', new: 'delta' },
+    });
+    const res = await notes.readNote('fm-edit.md');
+    expect(res.frontmatter.title).toBe('beta'); // frontmatter untouched
+    expect(res.body).toContain('alpha delta gamma');
+    expect(res.body).not.toContain('beta');
+  });
+
+  test('editByMatch does not match frontmatter-only text → NO_MATCH, file untouched', async () => {
+    await notes.createNote('fm-only.md', {
+      frontmatter: { kind: 'zeta' },
+      body: 'plain body',
+    });
+    const before = await readFile(join(vaultDir, 'fm-only.md'), 'utf8');
+    let err: unknown;
+    try {
+      await notes.updateNote('fm-only.md', {
+        editByMatch: { old: 'zeta', new: 'q' },
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect((err as MdVaultError).code).toBe('NO_MATCH');
+    expect(await readFile(join(vaultDir, 'fm-only.md'), 'utf8')).toBe(before);
+  });
+
+  test('append preserves the frontmatter block', async () => {
+    await notes.createNote('fm-append.md', {
+      frontmatter: { a: 1 },
+      body: 'line1',
+    });
+    await notes.updateNote('fm-append.md', { append: 'line2' });
+    const res = await notes.readNote('fm-append.md');
+    expect(res.frontmatter.a).toBe(1); // frontmatter untouched
+    expect(res.body).toContain('line1\nline2');
+  });
+
+  test('append to a frontmatter-only note with no trailing newline keeps the closing fence intact', async () => {
+    // Exact byte state: empty body, closing `---` fence with no trailing \n.
+    // The boundary newline must come BEFORE the appended text so the fence
+    // survives (otherwise `---` welds into `---line2` and frontmatter is lost).
+    await writeFile(join(vaultDir, 'fm-bare.md'), '---\na: 1\n---');
+    await notes.updateNote('fm-bare.md', { append: 'line2' });
+    expect(await readFile(join(vaultDir, 'fm-bare.md'), 'utf8')).toBe(
+      '---\na: 1\n---\nline2',
+    );
+    const res = await notes.readNote('fm-bare.md');
+    expect(res.valid).toBe('flat');
+    expect(res.frontmatter.a).toBe(1); // frontmatter preserved + still parses
+    expect(res.body).toBe('line2');
+  });
 });
 
 describe('editFrontmatter', () => {

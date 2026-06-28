@@ -9,3 +9,10 @@ dist/
 # superpowers — local only (specs, plans, SDD workspace ledger/briefs/reports)
 .superpowers/
 docs/superpowers/
+
+# generated docs API reference
+website/api/
+
+# VitePress build output and cache
+website/.vitepress/dist/
+website/.vitepress/cache/

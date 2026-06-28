@@ -28,6 +28,15 @@ function mdLinkUrl(raw: string): string {
   return t.split(/\s+/)[0];
 }
 
+/**
+ * Extract all raw link tokens from a markdown file's content. Strips fenced
+ * code blocks before scanning so links inside code are not collected.
+ * Does not normalise or resolve targets.
+ *
+ * @param content Raw UTF-8 content of a markdown file.
+ * @returns {@link ExtractedLinks} containing raw wikilinks, embeds, and
+ *   standard markdown link URLs.
+ */
 export function extractLinks(content: string): ExtractedLinks {
   const src = stripFencedCode(content);
   const wikilinks: string[] = [];

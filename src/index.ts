@@ -25,10 +25,13 @@ export type {
   TransformResult,
 } from '@/locked-file/index.ts';
 export { withFileDelete, withFileTransform } from '@/locked-file/index.ts';
-export type { ReadNoteResult, UpdateOp } from '@/notes/index.ts';
+export type { NotesApi, ReadNoteResult, UpdateOp } from '@/notes/index.ts';
 export type {
+  Backlink,
   NoteHit,
   OrderField,
+  OutboundLink,
+  QueryApi,
   QueryOrder,
   SearchHit,
   WhereMap,
