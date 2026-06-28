@@ -10,7 +10,7 @@ import type { UpdateOp } from './update-op.ts';
  * file and its index row never drift. `readNote` is a consistent read and
  * does not acquire the lock.
  */
-export interface NotesApi {
+export type NotesApi = {
   /**
    * Read a note's parsed frontmatter, tags, body, and frontmatter validity.
    * @param path Vault-relative path to the `.md` file.
@@ -50,4 +50,4 @@ export interface NotesApi {
    * @returns `true` if a file was deleted, `false` if it was already absent.
    */
   deleteNote(path: string): Promise<boolean>;
-}
+};

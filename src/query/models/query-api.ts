@@ -10,10 +10,11 @@ import type { WhereMap } from './where-map.ts';
  * `vault.query`. Results are always filtered to notes the vault instance is
  * allowed to read.
  */
-export interface QueryApi {
+export type QueryApi = {
   /**
    * Filter notes by tag, frontmatter field, and/or folder, with ordering and
-   * pagination. Defaults to newest-first (`mtime_ms` desc), limit 100.
+   * pagination. Defaults to newest-first (`mtime_ms` desc), limit 100; hard
+   * cap 1000.
    */
   queryNotes(opts?: {
     tag?: string;
@@ -47,4 +48,4 @@ export interface QueryApi {
     q: string,
     opts?: { tag?: string; folder?: string; limit?: number; offset?: number },
   ): SearchHit[];
-}
+};

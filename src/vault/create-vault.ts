@@ -31,7 +31,8 @@ import type { Vault } from './models/vault.ts';
  * ```ts
  * const vault = await createVault({
  *   root: './notes',
- *   indexPath: './notes/.vaultmd.db',
+ *   // Keep the index db outside the synced vault.
+ *   indexPath: './data/vault-index.db',
  *   prefixes: { read: [''], write: [''] },
  * });
  * const hits = vault.query.queryNotes({ tag: 'project' });

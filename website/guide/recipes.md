@@ -14,8 +14,8 @@ const recent = vault.query.queryNotes({
 ## Walk backlinks and outbound links
 
 ```ts
-const back = vault.query.backlinks('ideas/second.md');
-const out = vault.query.outboundLinks('ideas/first.md');
+const back = vault.query.backlinks('Notes/ideas/second.md');
+const out = vault.query.outboundLinks('Notes/ideas/first.md');
 ```
 
 ## Full-text search
@@ -28,6 +28,6 @@ for (const r of results) console.log(r.path, r.snippet);
 ## Read a note with its links resolved
 
 ```ts
-const note = await vault.notes.readNote('ideas/first.md', { withLinks: true });
+const note = await vault.notes.readNote('Notes/ideas/first.md', { withLinks: true });
 console.log(note.frontmatter, note.tags, note.backlinks);
 ```
