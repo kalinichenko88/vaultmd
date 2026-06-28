@@ -16,6 +16,14 @@ function isScalarOrArrayOfScalar(value: unknown): boolean {
   return isScalar(value);
 }
 
+/**
+ * Return `true` when every value in `fm` is a scalar (`string`, `number`,
+ * `boolean`, `null`, `Date`) or an array of scalars. Nested objects and
+ * nested arrays disqualify the frontmatter as non-flat.
+ *
+ * @param fm Frontmatter map to validate.
+ * @returns `true` if all values are flat-scalar-safe; `false` otherwise.
+ */
 export function isFlatFrontmatter(fm: Record<string, unknown>): boolean {
   for (const value of Object.values(fm)) {
     if (!isScalarOrArrayOfScalar(value)) {

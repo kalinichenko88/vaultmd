@@ -18,6 +18,26 @@ import { createVaultIo } from '@/vault-io/index.ts';
 import type { CreateVaultConfig } from './models/create-vault-config.ts';
 import type { Vault } from './models/vault.ts';
 
+/**
+ * Open (or create) a vault over a folder of markdown notes. Wires the IO
+ * chokepoint, the derived SQLite index, and the query/notes layers into one
+ * {@link Vault}. The `.md` files on disk remain the single source of truth;
+ * the index is a rebuildable cache.
+ *
+ * @param config Vault configuration — at minimum `root` and `indexPath`.
+ * @returns A ready-to-use {@link Vault} handle. Call {@link Vault.close} when done.
+ *
+ * @example
+ * ```ts
+ * const vault = await createVault({
+ *   root: './notes',
+ *   indexPath: './notes/.vaultmd.db',
+ *   prefixes: { read: [''], write: [''] },
+ * });
+ * const hits = vault.query.queryNotes({ tag: 'project' });
+ * vault.close();
+ * ```
+ */
 export async function createVault(config: CreateVaultConfig): Promise<Vault> {
   const linkResolution = config.linkResolution ?? 'wikilink';
   const lazyReconcile = config.lazyReconcile ?? true;

@@ -21,6 +21,24 @@ import type { VaultPrefixes } from './models/vault-prefixes.ts';
 import { canonicalizeRelative, canonPrefix } from './paths.ts';
 import { realTargetWithinRoot } from './realpath-guard.ts';
 
+/**
+ * Create a {@link VaultIo} instance scoped to `config.root` and the supplied
+ * prefix allowlists. The returned handle is the single IO chokepoint for all
+ * file reads, writes, and enumerations; it enforces path canonicalization,
+ * allowlist membership, symlink guards, and case-sensitivity probing.
+ *
+ * @param config IO configuration — at minimum `root` and `prefixes`.
+ * @returns A ready-to-use {@link VaultIo} handle.
+ *
+ * @example
+ * ```ts
+ * const io = createVaultIo({
+ *   root: '/notes',
+ *   prefixes: { read: [''], write: ['drafts'] },
+ * });
+ * const file = await io.readVaultFile('drafts/idea.md');
+ * ```
+ */
 export function createVaultIo(config: VaultIoConfig): VaultIo {
   const root = resolvePath(config.root);
   const caseSensitive = resolveCaseSensitive(root, config.caseSensitive);

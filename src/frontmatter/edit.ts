@@ -4,10 +4,34 @@ import type { EditOutcome } from './models/edit-outcome.ts';
 import { extractBlock, parseFrontmatter } from './parse.ts';
 import { isFlatFrontmatter } from './validate.ts';
 
+/**
+ * Apply a mutator callback to a note's frontmatter and return the rewritten
+ * file content. Preserves the existing YAML structure and only writes back
+ * changed keys. If the frontmatter is non-flat or the mutation would produce a
+ * non-flat result, the file is left untouched and `outcome` is `'unverifiable'`.
+ *
+ * @param content Raw UTF-8 content of the markdown file.
+ * @param mutate  Callback that receives a mutable copy of the frontmatter
+ *   object. Add, update, or delete keys in place.
+ * @returns Object with the updated `content` string and an {@link EditOutcome}
+ *   describing whether the frontmatter was changed.
+ *
+ * @example
+ * ```ts
+ * const { content: updated, outcome } = editFrontmatter(raw, (fm) => {
+ *   fm.status = 'done';
+ * });
+ * ```
+ */
 export function editFrontmatter(
   content: string,
   mutate: (fm: Record<string, unknown>) => void,
-): { content: string; outcome: EditOutcome } {
+): {
+  /** The rewritten file content (identical to input when `outcome` is not `'edited'`). */
+  content: string;
+  /** Whether the mutation produced a change, no change, or was skipped. */
+  outcome: EditOutcome;
+} {
   const parsed = parseFrontmatter(content);
   if (parsed.valid === 'present-but-invalid') {
     return { content, outcome: 'unverifiable' };

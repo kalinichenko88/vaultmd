@@ -11,8 +11,17 @@ import type { TransformOpts } from './models/transform-opts.ts';
 import type { TransformResult } from './models/transform-result.ts';
 
 /**
+ * Apply a transform to a vault file inside the per-file lock, with
+ * optimistic-concurrency retry on mtime conflicts. The `transform` callback
+ * receives the current file content (or `null` if the file is absent) and
+ * must return the desired new content, or `null` to leave the file untouched.
+ *
+ * @param fullPath     Absolute filesystem path to the target file.
  * @param lockKey      Canonical/case-folded serialization key — pass `VaultIo.toKey(rel)`.
  * @param relForCommit Display path written to `CommitEvent.path` — pass `VaultIo.toVaultRelative(rel)`.
+ * @param transform    Pure function from current content to desired content, or `null` for no-op.
+ * @param opts         Optional behaviour overrides — see {@link TransformOpts}.
+ * @returns A {@link TransformResult} describing the outcome and final content.
  */
 export function withFileTransform(
   fullPath: string,

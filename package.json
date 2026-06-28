@@ -49,7 +49,8 @@
     "check": "biome check . && tsc --noEmit",
     "format": "biome format --write .",
     "lint": "biome lint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "docs:api": "typedoc"
   },
   "dependencies": {
     "yaml": "^2.5.0"
@@ -58,6 +59,9 @@
     "@biomejs/biome": "^2.5.1",
     "@types/bun": "latest",
     "tsup": "^8.3.0",
+    "typedoc": "^0.28.19",
+    "typedoc-plugin-markdown": "^4.12.0",
+    "typedoc-vitepress-theme": "^1.1.3",
     "typescript": "^6.0.3"
   }
 }
