@@ -3,7 +3,8 @@ import { link, mkdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 
 import { MdVaultError } from '../errors.ts';
-import { makeSig, type Sig, sigsEqual, statSig } from './sig.ts';
+import type { Sig } from './models/sig.ts';
+import { makeSig, sigsEqual, statSig } from './sig.ts';
 
 function tempPath(fullPath: string): string {
   const dir = path.dirname(fullPath);

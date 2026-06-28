@@ -1,7 +1,7 @@
 import { Document, parseDocument } from 'yaml';
 
+import type { EditOutcome } from './models/edit-outcome.ts';
 import { extractBlock, parseFrontmatter } from './parse.ts';
-import type { EditOutcome } from './types.ts';
 import { isFlatFrontmatter } from './validate.ts';
 
 export function editFrontmatter(

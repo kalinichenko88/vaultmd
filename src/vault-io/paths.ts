@@ -12,7 +12,9 @@ export function canonicalizeRelative(rel: string): string {
   const nfc = rel.normalize('NFC').replaceAll('\\', '/');
   const out: string[] = [];
   for (const seg of nfc.split('/')) {
-    if (seg === '' || seg === '.') continue;
+    if (seg === '' || seg === '.') {
+      continue;
+    }
     if (seg === '..') {
       if (out.length === 0) {
         throw new MdVaultError(
@@ -34,7 +36,9 @@ export function canonPrefix(p: string): string {
   const nfc = p.normalize('NFC').replaceAll('\\', '/');
   const out: string[] = [];
   for (const seg of nfc.split('/')) {
-    if (seg === '' || seg === '.') continue;
+    if (seg === '' || seg === '.') {
+      continue;
+    }
     if (seg === '..') {
       throw new MdVaultError(
         'ALLOWLIST_VIOLATION',

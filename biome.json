@@ -2,5 +2,11 @@
   "$schema": "https://biomejs.dev/schemas/2.5.1/schema.json",
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2 },
   "javascript": { "formatter": { "quoteStyle": "single" } },
-  "linter": { "enabled": true, "rules": { "preset": "recommended" } }
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "style": { "useBlockStatements": "error" }
+    }
+  }
 }

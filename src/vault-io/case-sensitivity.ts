@@ -7,9 +7,13 @@ export function resolveCaseSensitive(
   root: string,
   override?: boolean,
 ): boolean {
-  if (override !== undefined) return override;
+  if (override !== undefined) {
+    return override;
+  }
   const cached = caseSensitiveCache.get(root);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    return cached;
+  }
   const detected = detectCaseSensitive(root);
   caseSensitiveCache.set(root, detected);
 

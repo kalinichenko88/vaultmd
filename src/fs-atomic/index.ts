@@ -4,6 +4,6 @@ export {
   exclusiveCreate,
   unlinkIfUnchanged,
 } from './atomic-write.ts';
+export type { Sig } from './models/sig.ts';
 export { readConsistent } from './read-consistent.ts';
-export type { Sig } from './sig.ts';
 export { statSig } from './sig.ts';

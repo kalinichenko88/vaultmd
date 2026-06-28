@@ -1,7 +1,7 @@
 import type { Stats } from 'node:fs';
 import { stat } from 'node:fs/promises';
 
-export type Sig = { mtimeMs: number; size: number };
+import type { Sig } from './models/sig.ts';
 
 export function makeSig(st: Stats): Sig {
   return { mtimeMs: Math.trunc(st.mtimeMs), size: st.size };

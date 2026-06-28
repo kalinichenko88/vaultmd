@@ -6,7 +6,8 @@ import {
 } from '../fs-atomic/index.ts';
 import { withCrossProcessLock, withFileLock } from '../locks/index.ts';
 import { emitCommit } from './commit.ts';
-import type { TransformOpts, TransformResult } from './types.ts';
+import type { TransformOpts } from './models/transform-opts.ts';
+import type { TransformResult } from './models/transform-result.ts';
 
 /**
  * @param lockKey      Canonical/case-folded serialization key — pass `VaultIo.toKey(rel)`.

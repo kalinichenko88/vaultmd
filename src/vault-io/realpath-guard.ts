@@ -11,7 +11,9 @@ export function realTargetWithinRoot(full: string, root: string): boolean {
   let probe = full;
   while (!existsSync(probe)) {
     const parent = dirname(probe);
-    if (parent === probe) return true; // reached fs root, nothing exists yet
+    if (parent === probe) {
+      return true; // reached fs root, nothing exists yet
+    }
     probe = parent;
   }
   let real: string;

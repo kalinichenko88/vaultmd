@@ -1,4 +1,4 @@
-import type { ExtractedLinks } from './types.ts';
+import type { ExtractedLinks } from './models/extracted-links.ts';
 
 function stripFencedCode(content: string): string {
   const lines = content.split('\n');
@@ -36,7 +36,9 @@ export function extractLinks(content: string): ExtractedLinks {
 
   for (const m of src.matchAll(/(!?)\[\[([^\]\n]+)\]\]/g)) {
     const raw = m[2].trim();
-    if (!raw) continue;
+    if (!raw) {
+      continue;
+    }
     if (m[1] === '!') {
       embeds.push(raw);
     } else {
@@ -46,7 +48,9 @@ export function extractLinks(content: string): ExtractedLinks {
 
   for (const m of src.matchAll(/(?<!!)\[[^\]]*\]\(([^)]+)\)/g)) {
     const url = mdLinkUrl(m[1]);
-    if (!url) continue;
+    if (!url) {
+      continue;
+    }
     mdLinks.push(url);
   }
 

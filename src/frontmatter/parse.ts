@@ -1,7 +1,8 @@
 import { parse } from 'yaml';
 
+import type { FrontmatterValidity } from './models/frontmatter-validity.ts';
+import type { ParsedFrontmatter } from './models/parsed-frontmatter.ts';
 import { deriveTags } from './tags.ts';
-import type { FrontmatterValidity, ParsedFrontmatter } from './types.ts';
 import { isFlatFrontmatter } from './validate.ts';
 
 type Block = { yaml: string; body: string };

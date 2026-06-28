@@ -3,10 +3,11 @@ import { readFileSync } from 'node:fs';
 
 import * as mdvault from '../index.ts';
 
-// The frozen Plan 1 package public API. Changing this set must be deliberate:
+// The frozen Plan 1 + Plan 2 package public API. Changing this set must be deliberate:
 // adding/removing/renaming any export fails these tests.
 const VALUE_EXPORTS = [
   'MdVaultError',
+  'createVault',
   'createVaultIo',
   'deriveTags',
   'editFrontmatter',
@@ -19,7 +20,7 @@ const VALUE_EXPORTS = [
 ].sort();
 
 const ALL_EXPORTS = [
-  ...VALUE_EXPORTS,
+  // — Plan 1 (existing 26) —
   'Access',
   'CommitEvent',
   'CrossLock',
@@ -28,6 +29,7 @@ const ALL_EXPORTS = [
   'FrontmatterValidity',
   'LinkResolution',
   'MdVaultCode',
+  'MdVaultError',
   'ParsedFrontmatter',
   'Sig',
   'StoredLink',
@@ -36,6 +38,26 @@ const ALL_EXPORTS = [
   'VaultIo',
   'VaultIoConfig',
   'VaultPrefixes',
+  'createVaultIo',
+  'deriveTags',
+  'editFrontmatter',
+  'extractLinks',
+  'isFlatFrontmatter',
+  'parseFrontmatter',
+  'storedLinksFor',
+  'withFileDelete',
+  'withFileTransform',
+  // — Plan 2 (new 10) —
+  'CreateVaultConfig',
+  'NoteHit',
+  'OrderField',
+  'QueryOrder',
+  'ReadNoteResult',
+  'SearchHit',
+  'UpdateOp',
+  'Vault',
+  'WhereMap',
+  'createVault',
 ].sort();
 
 function exportedNames(source: string): string[] {
@@ -46,7 +68,9 @@ function exportedNames(source: string): string[] {
       // (exported) name — the last segment — not the source-side name.
       const parts = raw.trim().split(/\s+as\s+/);
       const name = parts[parts.length - 1].trim();
-      if (name) names.add(name);
+      if (name) {
+        names.add(name);
+      }
     }
   }
 
@@ -54,13 +78,17 @@ function exportedNames(source: string): string[] {
 }
 
 describe('package public API freeze', () => {
-  test('src/index.ts exports exactly the frozen 26 names (value + type)', () => {
+  test('src/index.ts exports exactly the frozen 36 names (Plan 1 + Plan 2)', () => {
     const src = readFileSync(new URL('../index.ts', import.meta.url), 'utf8');
     expect(exportedNames(src)).toEqual(ALL_EXPORTS);
   });
 
-  test('runtime value exports are exactly the 10 live values', () => {
+  test('runtime value exports are exactly the 11 live values', () => {
     expect(Object.keys(mdvault).sort()).toEqual(VALUE_EXPORTS);
+  });
+
+  test('createVault is a live function export', () => {
+    expect(typeof mdvault.createVault).toBe('function');
   });
 
   test('the barrel uses no `export *` (every export is named)', () => {

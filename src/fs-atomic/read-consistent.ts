@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 
-import { type Sig, sigsEqual, statSig } from './sig.ts';
+import type { Sig } from './models/sig.ts';
+import { sigsEqual, statSig } from './sig.ts';
 
 type ConsistentRead =
   | { content: string; sig: Sig }

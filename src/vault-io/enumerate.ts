@@ -39,14 +39,22 @@ async function walk(
       }
     }
     if (isDir) {
-      if (name.startsWith('.')) continue;
-      if (deps.isIgnored(childRel)) continue;
-      if (!realTargetWithinRoot(childAbs, root)) continue;
+      if (name.startsWith('.')) {
+        continue;
+      }
+      if (deps.isIgnored(childRel)) {
+        continue;
+      }
+      if (!realTargetWithinRoot(childAbs, root)) {
+        continue;
+      }
       await walk(root, childAbs, childRel, out, deps);
       continue;
     }
     if (isFile && name.endsWith('.md')) {
-      if (deps.isIgnored(childRel)) continue;
+      if (deps.isIgnored(childRel)) {
+        continue;
+      }
       try {
         deps.resolveVaultPath(childRel, 'read');
       } catch {
@@ -64,7 +72,9 @@ export async function listMarkdown(
 ): Promise<string[]> {
   const startRel = dir === undefined ? '' : deps.toVaultRelative(dir);
   const startAbs = startRel === '' ? root : join(root, startRel);
-  if (!realTargetWithinRoot(startAbs, root)) return [];
+  if (!realTargetWithinRoot(startAbs, root)) {
+    return [];
+  }
   const out: string[] = [];
   await walk(root, startAbs, startRel, out, deps);
   out.sort();

@@ -13,29 +13,12 @@ import { matches } from './allowlist.ts';
 import { resolveCaseSensitive } from './case-sensitivity.ts';
 import { listMarkdown as enumerateMarkdown } from './enumerate.ts';
 import { globToRegExp } from './glob.ts';
+import type { Access } from './models/access.ts';
+import type { VaultIo } from './models/vault-io.ts';
+import type { VaultIoConfig } from './models/vault-io-config.ts';
+import type { VaultPrefixes } from './models/vault-prefixes.ts';
 import { canonicalizeRelative, canonPrefix } from './paths.ts';
 import { realTargetWithinRoot } from './realpath-guard.ts';
-
-export type Access = 'read' | 'write';
-export type VaultPrefixes = { read: string[]; write: string[] };
-export type VaultIoConfig = {
-  root: string;
-  prefixes: VaultPrefixes;
-  caseSensitive?: boolean;
-  ignore?: string[];
-};
-export type VaultIo = {
-  toVaultRelative(rel: string): string;
-  toKey(rel: string): string;
-  can(rel: string, access: Access): boolean;
-  resolveVaultPath(rel: string, access?: Access): string;
-  readVaultFile(rel: string): Promise<{ content: string; sig: Sig } | null>;
-  writeVaultFile(rel: string, content: string): Promise<Sig>;
-  rewriteIfUnchanged(rel: string, content: string, expected: Sig): Promise<Sig>;
-  unlinkIfUnchanged(rel: string, expected: Sig): Promise<boolean>;
-  stat(rel: string): Promise<Sig | null>;
-  listMarkdown(dir?: string): Promise<string[]>;
-};
 
 export function createVaultIo(config: VaultIoConfig): VaultIo {
   const root = resolvePath(config.root);

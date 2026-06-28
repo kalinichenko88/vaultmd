@@ -3,3 +3,7 @@ node_modules/
 *.db-shm
 *.db-wal
 .DS_Store
+
+# superpowers — local only (specs, plans, SDD workspace ledger/briefs/reports)
+.superpowers/
+docs/superpowers/
