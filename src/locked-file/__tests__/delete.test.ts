@@ -14,7 +14,7 @@ const KEY = 'note.md';
 const REL = 'note.md';
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'mdvault-locked-'));
+  dir = await mkdtemp(join(tmpdir(), 'vaultmd-locked-'));
   file = join(dir, 'note.md');
 });
 

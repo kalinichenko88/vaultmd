@@ -17,7 +17,7 @@ const cfg: IndexConfig = {
 };
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'mdvault-'));
+  dir = await mkdtemp(join(tmpdir(), 'vaultmd-'));
   // caseSensitive: true makes toKey === toVaultRelative -> deterministic on any volume
   io = createVaultIo({
     root: dir,

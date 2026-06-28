@@ -11,7 +11,7 @@ describe('applySchema', () => {
   let db: Database;
 
   beforeEach(async () => {
-    dir = await mkdtemp(path.join(tmpdir(), 'mdvault-'));
+    dir = await mkdtemp(path.join(tmpdir(), 'vaultmd-'));
     db = new Database(path.join(dir, 'index.db'));
   });
 

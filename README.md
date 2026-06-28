@@ -45,19 +45,19 @@ Being `0.x`, the surface may still evolve before `1.0`; see
 
 ## Requirements
 
-- **[Bun](https://bun.sh) ≥ 1.1.0.** mdvault uses `bun:sqlite`, `Bun.file`, and
+- **[Bun](https://bun.sh) ≥ 1.1.0.** vaultmd uses `bun:sqlite`, `Bun.file`, and
   other Bun built-ins — it does **not** run under Node.
 
 ## Install
 
 ```bash
-bun add mdvault
+bun add vaultmd
 ```
 
 ## Quick start
 
 ```ts
-import { createVault } from 'mdvault';
+import { createVault } from 'vaultmd';
 
 const vault = await createVault({
   root: '/path/to/vault',
@@ -212,7 +212,7 @@ import {
   deriveTags,
   extractLinks,            // pull wikilinks / relative links from text
   storedLinksFor,
-} from 'mdvault';
+} from 'vaultmd';
 ```
 
 ### Error handling
@@ -221,7 +221,7 @@ Every failure throws an `MdVaultError` carrying a stable `code`. Catch and
 switch on `err.code`, never on the message:
 
 ```ts
-import { MdVaultError } from 'mdvault';
+import { MdVaultError } from 'vaultmd';
 
 try {
   await vault.notes.createNote('Notes/today.md', { body: '...' });

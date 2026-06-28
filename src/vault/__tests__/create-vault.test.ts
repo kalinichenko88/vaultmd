@@ -30,8 +30,8 @@ let indexPath: string;
 const opened: Vault[] = [];
 
 beforeEach(async () => {
-  vaultDir = await mkdtemp(join(tmpdir(), 'mdvault-vault-'));
-  dataDir = await mkdtemp(join(tmpdir(), 'mdvault-data-'));
+  vaultDir = await mkdtemp(join(tmpdir(), 'vaultmd-vault-'));
+  dataDir = await mkdtemp(join(tmpdir(), 'vaultmd-data-'));
   indexPath = join(dataDir, 'index.db');
 });
 

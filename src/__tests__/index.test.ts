@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
-import * as mdvault from '@/index.ts';
+import * as vaultmd from '@/index.ts';
 
 // The frozen Plan 1 + Plan 2 package public API. Changing this set must be deliberate:
 // adding/removing/renaming any export fails these tests.
@@ -84,11 +84,11 @@ describe('package public API freeze', () => {
   });
 
   test('runtime value exports are exactly the 11 live values', () => {
-    expect(Object.keys(mdvault).sort()).toEqual(VALUE_EXPORTS);
+    expect(Object.keys(vaultmd).sort()).toEqual(VALUE_EXPORTS);
   });
 
   test('createVault is a live function export', () => {
-    expect(typeof mdvault.createVault).toBe('function');
+    expect(typeof vaultmd.createVault).toBe('function');
   });
 
   test('the barrel uses no `export *` (every export is named)', () => {

@@ -1,7 +1,7 @@
 ---
 name: release
 description: >-
-  Cut and publish a new npm release of mdvault. Use this WHENEVER the
+  Cut and publish a new npm release of vaultmd. Use this WHENEVER the
   user wants to release, publish, ship a new version, bump the version, cut a
   tag, or generate a changelog entry for this package — even if they only say
   "release it" or "let's publish". Drives the whole local side of the release:
@@ -13,7 +13,7 @@ description: >-
   once CI confirms the npm publish succeeded.
 ---
 
-# Releasing mdvault
+# Releasing vaultmd
 
 ## How releasing works here
 
@@ -74,7 +74,7 @@ If there are **zero** commits since the last tag, stop — there's nothing to re
 
 ## Step 2 — Propose the version (and let the user confirm)
 
-**First release (no prior release yet).** If `npm view mdvault version` returns a
+**First release (no prior release yet).** If `npm view vaultmd version` returns a
 404 **or** there is no prior `v*` tag, this is the first publish: publish the
 current `package.json` version **as-is** (`v0.1.0`) and skip the bump rules
 entirely — do not propose `0.2.0`. Only apply the bump rules below once a prior
@@ -142,7 +142,7 @@ Check and fix `README.md` against the actual codebase and the release being cut:
 
 1. **Publish/status accuracy.** On the **first** real release, flip the Status
    section + the `status-pre--release` badge to "published", and remove the
-   "Not yet on npm" callout under Install so `bun add mdvault` stands alone. On
+   "Not yet on npm" callout under Install so `bun add vaultmd` stands alone. On
    later releases, ensure no stale "not yet published / bundling pending" text
    survives.
 2. **Version references** in prose (e.g. "Pre-release (`0.1.0`)") match the new
@@ -240,7 +240,7 @@ gh run watch --exit-status $(gh run list --workflow=release.yml --limit=1 --json
 **On success** — confirm the version is live, then flip the draft to published:
 
 ```sh
-npm view mdvault version              # should print <version>
+npm view vaultmd version              # should print <version>
 gh release edit v<version> --draft=false      # publish the GitHub Release
 ```
 

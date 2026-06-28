@@ -26,7 +26,7 @@ let query: ReturnType<typeof createQuery>;
 let notes: ReturnType<typeof createNotes>;
 
 beforeEach(async () => {
-  base = await mkdtemp(join(tmpdir(), 'mdvault-notes-'));
+  base = await mkdtemp(join(tmpdir(), 'vaultmd-notes-'));
   vaultDir = join(base, 'vault');
   await mkdir(vaultDir, { recursive: true });
   indexPath = join(base, 'index.db');

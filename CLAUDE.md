@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`mdvault` is a headless markdown-vault data layer for **Bun**: CRUD over `.md`
+`vaultmd` is a headless markdown-vault data layer for **Bun**: CRUD over `.md`
 notes plus a derived `bun:sqlite` index (collection queries, backlinks, keyword
 search). The `.md` files on disk are the **source of truth**; the SQLite index is
 a **rebuildable cache**. No Obsidian, no Electron. Internal imports use `@/`
@@ -64,7 +64,7 @@ assembles.
 1. **Package public API — `src/index.ts`.** The *only* `exports` entry (`"."`).
    Its exact name set is **frozen** and guarded by `src/__tests__/index.test.ts`
    (currently 36 names, value + type). Adding/removing/renaming an export means
-   updating that test deliberately. No `mdvault/<subpath>` is reachable — only
+   updating that test deliberately. No `vaultmd/<subpath>` is reachable — only
    `"."` is exported.
 2. **Module barrels — `<module>/index.ts`.** The stable *internal* integration
    surface. Intentionally broader than the package API (e.g. `fs-atomic` exposes
@@ -162,5 +162,5 @@ All failures throw `MdVaultError` with a `code: MdVaultCode` (see
 ## Planning docs
 
 Design specs and implementation plans live in `docs/superpowers/`. The
-module-reorg spec (`specs/2026-06-27-mdvault-module-reorg-design.md`) is the
+module-reorg spec (`specs/2026-06-27-vaultmd-module-reorg-design.md`) is the
 canonical statement of the three-surface layering rules above.

@@ -17,7 +17,7 @@ describe('statSig + atomicWrite', () => {
   let dir: string;
 
   beforeEach(async () => {
-    dir = await mkdtemp(path.join(tmpdir(), 'mdvault-'));
+    dir = await mkdtemp(path.join(tmpdir(), 'vaultmd-'));
   });
 
   afterEach(async () => {
@@ -66,7 +66,7 @@ describe('exclusiveCreate + unlinkIfUnchanged', () => {
   let dir: string;
 
   beforeEach(async () => {
-    dir = await mkdtemp(path.join(tmpdir(), 'mdvault-'));
+    dir = await mkdtemp(path.join(tmpdir(), 'vaultmd-'));
   });
 
   afterEach(async () => {

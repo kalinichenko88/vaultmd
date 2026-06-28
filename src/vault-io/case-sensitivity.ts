@@ -21,7 +21,7 @@ export function resolveCaseSensitive(
 }
 
 export function detectCaseSensitive(root: string): boolean {
-  const probe = join(root, `.mdvault-case-probe-${process.pid}-${Date.now()}`);
+  const probe = join(root, `.vaultmd-case-probe-${process.pid}-${Date.now()}`);
   try {
     writeFileSync(probe, 'x');
     const flipped =

@@ -79,7 +79,7 @@ let db: Database;
 
 beforeEach(async () => {
   seq = 0;
-  vaultDir = await mkdtemp(join(tmpdir(), 'mdvault-query-'));
+  vaultDir = await mkdtemp(join(tmpdir(), 'vaultmd-query-'));
   db = new Database(':memory:');
   setupDb(db);
 });

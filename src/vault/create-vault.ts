@@ -139,7 +139,7 @@ export async function createVault(config: CreateVaultConfig): Promise<Vault> {
     onCommit: config.onCommit,
     cross: crossProcessWriterLock
       ? {
-          lockDir: `${dirname(config.indexPath)}/.mdvault-locks`,
+          lockDir: `${dirname(config.indexPath)}/.vaultmd-locks`,
           busyTimeoutMs: sqliteBusyTimeoutMs,
         }
       : false,

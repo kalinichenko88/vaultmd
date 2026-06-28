@@ -20,7 +20,7 @@ const cfg: IndexConfig = {
 };
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'mdvault-'));
+  dir = await mkdtemp(join(tmpdir(), 'vaultmd-'));
   db = new Database(join(dir, 'index.db'));
   applySchema(db);
   io = createVaultIo({

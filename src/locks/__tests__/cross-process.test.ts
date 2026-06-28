@@ -13,7 +13,7 @@ describe('withCrossProcessLock', () => {
   let dir: string;
 
   beforeEach(async () => {
-    dir = await mkdtemp(path.join(tmpdir(), 'mdvault-'));
+    dir = await mkdtemp(path.join(tmpdir(), 'vaultmd-'));
   });
 
   afterEach(async () => {

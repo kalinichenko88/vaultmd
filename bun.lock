@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "mdvault",
+      "name": "vaultmd",
       "dependencies": {
         "yaml": "^2.5.0",
       },

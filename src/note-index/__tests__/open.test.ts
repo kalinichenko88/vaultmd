@@ -25,7 +25,7 @@ describe('openIndexDb + probeCapabilities', () => {
   let db: Database;
 
   beforeEach(async () => {
-    dir = await mkdtemp(path.join(tmpdir(), 'mdvault-'));
+    dir = await mkdtemp(path.join(tmpdir(), 'vaultmd-'));
     db = openIndexDb(path.join(dir, 'index.db'), { sqliteBusyTimeoutMs: 5000 });
     applySchema(db);
   });

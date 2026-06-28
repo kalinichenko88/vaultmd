@@ -8,7 +8,7 @@ import * as sig from '../sig.ts';
 
 let dir: string;
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'mdvault-'));
+  dir = await mkdtemp(join(tmpdir(), 'vaultmd-'));
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });

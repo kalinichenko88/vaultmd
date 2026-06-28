@@ -10,7 +10,7 @@ import { createVaultIo } from '../index.ts';
 let vault: string;
 
 beforeEach(async () => {
-  vault = await mkdtemp(join(tmpdir(), 'mdvault-'));
+  vault = await mkdtemp(join(tmpdir(), 'vaultmd-'));
 });
 
 afterEach(async () => {
@@ -209,7 +209,7 @@ describe('resolveVaultPath', () => {
   });
 
   test('rejects a symlink that escapes the vault root', async () => {
-    const outside = await mkdtemp(join(tmpdir(), 'mdvault-out-'));
+    const outside = await mkdtemp(join(tmpdir(), 'vaultmd-out-'));
     await writeFile(join(outside, 'secret.md'), '# secret');
     await symlink(join(outside, 'secret.md'), join(vault, 'leak.md'));
     const io = createVaultIo({
@@ -223,7 +223,7 @@ describe('resolveVaultPath', () => {
   });
 
   test('rejects symlinked-parent escape on create via nearest-existing-ancestor realpath', async () => {
-    const outside = await mkdtemp(join(tmpdir(), 'mdvault-out-'));
+    const outside = await mkdtemp(join(tmpdir(), 'vaultmd-out-'));
     await symlink(outside, join(vault, 'link')); // link/ -> outside the vault
     const io = createVaultIo({
       root: vault,
@@ -348,7 +348,7 @@ describe('listMarkdown', () => {
   });
 
   test('does NOT follow a vault-escaping symlinked dir, nor an escaping symlinked .md', async () => {
-    const outside = await mkdtemp(join(tmpdir(), 'mdvault-out-'));
+    const outside = await mkdtemp(join(tmpdir(), 'vaultmd-out-'));
     await writeFile(join(outside, 'secret.md'), '# secret');
     const io = createVaultIo({
       root: vault,

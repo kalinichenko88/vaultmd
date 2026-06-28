@@ -21,8 +21,8 @@ describe('note-index reconcile', () => {
   let reconciler: ReturnType<typeof createReconciler>;
 
   beforeEach(async () => {
-    root = await mkdtemp(path.join(tmpdir(), 'mdvault-vault-'));
-    dataDir = await mkdtemp(path.join(tmpdir(), 'mdvault-data-'));
+    root = await mkdtemp(path.join(tmpdir(), 'vaultmd-vault-'));
+    dataDir = await mkdtemp(path.join(tmpdir(), 'vaultmd-data-'));
     vaultIo = createVaultIo({
       root,
       prefixes: { read: [''], write: [''] },

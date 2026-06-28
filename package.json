@@ -7,11 +7,11 @@
   "author": "Ivan Kalinichenko",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kalinichenko88/mdvault.git"
+    "url": "git+https://github.com/kalinichenko88/vaultmd.git"
   },
-  "homepage": "https://github.com/kalinichenko88/mdvault#readme",
+  "homepage": "https://github.com/kalinichenko88/vaultmd#readme",
   "bugs": {
-    "url": "https://github.com/kalinichenko88/mdvault/issues"
+    "url": "https://github.com/kalinichenko88/vaultmd/issues"
   },
   "keywords": [
     "markdown",
