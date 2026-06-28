@@ -11,13 +11,13 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # full history for the on-main ancestry check
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '22' # >= host Node (never pin CI below the dev machine)
           registry-url: 'https://registry.npmjs.org'
       - name: Guard — tag matches package.json version and is on main
         run: |
