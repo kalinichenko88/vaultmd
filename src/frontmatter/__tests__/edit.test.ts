@@ -34,7 +34,6 @@ body text
   test('deleting a key removes it, outcome edited', () => {
     const content = '---\nkeep: 1\ndrop: 2\n---\nb';
     const r = editFrontmatter(content, (fm) => {
-      // biome-ignore lint/performance/noDelete: test intent is key removal
       delete fm.drop;
     });
     expect(r.outcome).toBe('edited');

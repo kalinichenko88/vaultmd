@@ -2,18 +2,18 @@ import { join, resolve as resolvePath } from 'node:path';
 
 import { MdVaultError } from '../errors.ts';
 import {
-  type Sig,
   atomicWrite,
   atomicWriteIfUnchanged,
   unlinkIfUnchanged as fsUnlinkIfUnchanged,
   readConsistent,
+  type Sig,
   statSig,
 } from '../fs-atomic/index.ts';
 import { matches } from './allowlist.ts';
 import { resolveCaseSensitive } from './case-sensitivity.ts';
 import { listMarkdown as enumerateMarkdown } from './enumerate.ts';
 import { globToRegExp } from './glob.ts';
-import { canonPrefix, canonicalizeRelative } from './paths.ts';
+import { canonicalizeRelative, canonPrefix } from './paths.ts';
 import { realTargetWithinRoot } from './realpath-guard.ts';
 
 export type Access = 'read' | 'write';
