@@ -1,6 +1,7 @@
 import type { EditOutcome } from '@/frontmatter/index.ts';
 
 import type { ReadNoteResult } from './read-note-result.ts';
+import type { TransformOutcome } from './transform-outcome.ts';
 import type { UpdateOp } from './update-op.ts';
 
 /**
@@ -45,6 +46,21 @@ export type NotesApi = {
     path: string,
     mutate: (fm: Record<string, unknown>) => void,
   ): Promise<EditOutcome>;
+  /**
+   * Run a free-form transform over a note's FULL content inside the per-file
+   * lock, with write-through indexing. `allowCreate` is always false:
+   *   existing file, transform → string : write + index → `'edited'`
+   *   any file,      transform → null   : no write       → `'unchanged'`
+   *   MISSING file,  transform → string : throws `REFUSE_CREATE`
+   *   MISSING file,  transform → null   : `'unchanged'` (no throw)
+   * The callback is RE-INVOKED on each `MTIME_CONFLICT` retry, so it must be a
+   * pure function of `current` (side-effects must overwrite, not accumulate).
+   * @throws {@link MdVaultError} `REFUSE_CREATE` if asked to write a missing file.
+   */
+  transformNote(
+    path: string,
+    transform: (current: string | null) => string | null,
+  ): Promise<TransformOutcome>;
   /**
    * Delete a note and drop its index row.
    * @returns `true` if a file was deleted, `false` if it was already absent.

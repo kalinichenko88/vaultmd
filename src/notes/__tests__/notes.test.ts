@@ -321,3 +321,35 @@ describe('deleteNote', () => {
     expect(await notes.deleteNote('nope.md')).toBe(false);
   });
 });
+
+describe('transformNote', () => {
+  test('null transform → unchanged, no write', async () => {
+    await writeFile(join(vaultDir, 'n.md'), 'hello');
+    const outcome = await notes.transformNote('n.md', () => null);
+    expect(outcome).toBe('unchanged');
+    expect(await readFile(join(vaultDir, 'n.md'), 'utf8')).toBe('hello');
+  });
+
+  test('string transform → edited, writes, write-through indexes', async () => {
+    await writeFile(join(vaultDir, 'n.md'), 'hello');
+    const outcome = await notes.transformNote('n.md', (c) => `${c}\nworld`);
+    expect(outcome).toBe('edited');
+    expect(await readFile(join(vaultDir, 'n.md'), 'utf8')).toBe('hello\nworld');
+    expect(query.searchText('world').map((h) => h.path)).toContain('n.md');
+  });
+
+  test('missing file + non-null transform → REFUSE_CREATE', async () => {
+    let err: unknown;
+    try {
+      await notes.transformNote('ghost.md', () => 'x');
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(MdVaultError);
+    expect((err as MdVaultError).code).toBe('REFUSE_CREATE');
+  });
+
+  test('missing file + null transform → unchanged, no throw', async () => {
+    expect(await notes.transformNote('ghost.md', () => null)).toBe('unchanged');
+  });
+});

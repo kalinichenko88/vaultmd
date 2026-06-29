@@ -63,6 +63,8 @@ const ALL_EXPORTS = [
   'NotesApi',
   'OutboundLink',
   'QueryApi',
+  // — 0.2.0 (new 1) —
+  'TransformOutcome',
 ].sort();
 
 function exportedNames(source: string): string[] {
@@ -83,7 +85,7 @@ function exportedNames(source: string): string[] {
 }
 
 describe('package public API freeze', () => {
-  test('src/index.ts exports exactly the frozen 40 names (Plan 1 + Plan 2 + Plan 3)', () => {
+  test('src/index.ts exports exactly the frozen 41 names (Plan 1 + Plan 2 + Plan 3 + 0.2.0)', () => {
     const src = readFileSync(new URL('../index.ts', import.meta.url), 'utf8');
     expect(exportedNames(src)).toEqual(ALL_EXPORTS);
   });

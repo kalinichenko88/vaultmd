@@ -20,6 +20,7 @@ import type { VaultIo } from '@/vault-io/index.ts';
 
 import type { NotesApi } from './models/notes-api.ts';
 import type { ReadNoteResult } from './models/read-note-result.ts';
+import type { TransformOutcome } from './models/transform-outcome.ts';
 import type { UpdateOp } from './models/update-op.ts';
 
 export type NotesDeps = {
@@ -252,5 +253,28 @@ export function createNotes(deps: NotesDeps): NotesApi {
     return deleted;
   }
 
-  return { readNote, createNote, updateNote, editFrontmatter, deleteNote };
+  async function transformNote(
+    path: string,
+    transform: (current: string | null) => string | null,
+  ): Promise<TransformOutcome> {
+    const full = vaultIo.resolveVaultPath(path, 'write');
+    const key = vaultIo.toKey(path);
+    const display = vaultIo.toVaultRelative(path);
+    const res = await withFileTransform(full, key, display, transform, {
+      allowCreate: false,
+      onCommit: indexCommit,
+      cross,
+    });
+
+    return res.outcome === 'unchanged' ? 'unchanged' : 'edited';
+  }
+
+  return {
+    readNote,
+    createNote,
+    updateNote,
+    editFrontmatter,
+    deleteNote,
+    transformNote,
+  };
 }

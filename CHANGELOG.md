@@ -1,11 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-06-29
 
 - **Public types** — `Backlink` and `OutboundLink` are now exported from the
   package root, and the `vault.notes` / `vault.query` bundles have named
   interfaces `NotesApi` / `QueryApi` (previously inferred). Additive and
   non-breaking; enables the generated API reference.
+- **`transformNote`** — a new `NotesApi` method: run a caller-supplied
+  whole-note transform inside the per-file lock with write-through indexing,
+  returning `'edited' | 'unchanged'` (`TransformOutcome`). `allowCreate` is
+  false (a missing file + non-null transform throws `REFUSE_CREATE`). The
+  callback is re-invoked on mtime-conflict retries and must be pure. Enables an
+  atomic "conditionally edit frontmatter + body in one commit" for consumers.
 
 ## 0.1.0 — 2026-06-28
 

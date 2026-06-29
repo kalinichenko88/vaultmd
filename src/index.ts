@@ -25,7 +25,12 @@ export type {
   TransformResult,
 } from '@/locked-file/index.ts';
 export { withFileDelete, withFileTransform } from '@/locked-file/index.ts';
-export type { NotesApi, ReadNoteResult, UpdateOp } from '@/notes/index.ts';
+export type {
+  NotesApi,
+  ReadNoteResult,
+  TransformOutcome,
+  UpdateOp,
+} from '@/notes/index.ts';
 export type {
   Backlink,
   NoteHit,
