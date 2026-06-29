@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
+import { MdVaultError } from '@/errors.ts';
+
 import { editFrontmatter } from '../edit.ts';
 import { parseFrontmatter } from '../parse.ts';
 import { serializeFrontmatter } from '../serialize.ts';
@@ -13,50 +15,60 @@ describe('serializeFrontmatter', () => {
       meta: null,
       tags: ['a', 'b', 'c'],
     };
-    const serialized = serializeFrontmatter(fm);
-    const parsed = parseFrontmatter(serialized);
+    const parsed = parseFrontmatter(serializeFrontmatter(fm));
     expect(parsed.valid).toBe('flat');
     expect(parsed.frontmatter).toEqual(fm);
   });
 
-  test('non-flat input throws MdVaultError with code FRONTMATTER_INVALID', () => {
-    const { MdVaultError } = require('../../errors.ts');
-    expect(() => serializeFrontmatter({ a: { b: 1 } })).toThrow(MdVaultError);
-    try {
-      serializeFrontmatter({ a: { b: 1 } });
-    } catch (e: unknown) {
-      expect((e as InstanceType<typeof MdVaultError>).code).toBe(
-        'FRONTMATTER_INVALID',
-      );
+  test('round-trip preserves multi-line strings, including trailing blank lines', () => {
+    for (const note of ['a\nb', 'text\n', 'text\n\n', 'a\nb\n\n\n']) {
+      const fm: Record<string, unknown> = { title: 'T', note, count: 3 };
+      const parsed = parseFrontmatter(serializeFrontmatter(fm));
+      expect(parsed.frontmatter).toEqual(fm);
     }
   });
 
-  test('consistency: frontmatter block is byte-identical to what editFrontmatter produces', () => {
-    const fm: Record<string, unknown> = {
-      title: 'Consistency',
-      count: 7,
-      active: false,
-      tags: ['x', 'y'],
-    };
+  test('round-trip preserves an empty array value', () => {
+    const fm: Record<string, unknown> = { tags: [] };
+    const parsed = parseFrontmatter(serializeFrontmatter(fm));
+    expect(parsed.frontmatter).toEqual(fm);
+  });
 
-    // editFrontmatter on an empty string with no prior frontmatter creates
-    // `---\n<block>\n---\n<original-content>`. Extract the header portion.
-    const { content: fromEdit } = editFrontmatter('', (view) => {
-      for (const [k, v] of Object.entries(fm)) {
-        view[k] = v;
-      }
-    });
-    // The result is `---\n<block>\n---\n` (body is empty string, so trailing newline only)
-    const headerFromEdit = `${fromEdit.replace(/\n$/, '')}\n`; // normalise trailing newline
+  test('an empty map serializes to an empty string (no block), like editFrontmatter', () => {
+    expect(serializeFrontmatter({})).toBe('');
+  });
 
-    const fromSerialize = serializeFrontmatter(fm);
+  test('non-flat input throws FRONTMATTER_INVALID naming only the offending keys', () => {
+    let err: MdVaultError | undefined;
+    try {
+      serializeFrontmatter({ title: 'ok', count: 3, nested: { x: 1 } });
+    } catch (e) {
+      err = e as MdVaultError;
+    }
+    expect(err).toBeInstanceOf(MdVaultError);
+    expect(err?.code).toBe('FRONTMATTER_INVALID');
+    expect(err?.message).toContain('nested');
+    expect(err?.message).not.toContain('title');
+    expect(err?.message).not.toContain('count');
+  });
 
-    expect(fromSerialize).toBe(headerFromEdit);
+  test('Date values are rejected (they cannot round-trip)', () => {
+    expect(() => serializeFrontmatter({ published: new Date() })).toThrow(
+      MdVaultError,
+    );
+  });
+
+  test('non-finite numbers (NaN / Infinity) are rejected', () => {
+    expect(() => serializeFrontmatter({ score: Number.NaN })).toThrow(
+      MdVaultError,
+    );
+    expect(() =>
+      serializeFrontmatter({ score: Number.POSITIVE_INFINITY }),
+    ).toThrow(MdVaultError);
   });
 
   test('flat array serializes as block sequence (no flow [a,b] style), no comments', () => {
-    const fm: Record<string, unknown> = { tags: ['alpha', 'beta'] };
-    const serialized = serializeFrontmatter(fm);
+    const serialized = serializeFrontmatter({ tags: ['alpha', 'beta'] });
     // Block sequence uses `- item` lines, NOT `[alpha, beta]`
     expect(serialized).toContain('- alpha');
     expect(serialized).toContain('- beta');
@@ -66,10 +78,27 @@ describe('serializeFrontmatter', () => {
   });
 
   test('output is wrapped in --- fences with trailing newline', () => {
-    const fm: Record<string, unknown> = { title: 'Test' };
-    const result = serializeFrontmatter(fm);
+    const result = serializeFrontmatter({ title: 'Test' });
     expect(result.startsWith('---\n')).toBe(true);
     expect(result).toContain('\n---\n');
     expect(result.endsWith('\n')).toBe(true);
+  });
+
+  test('block is byte-identical to the fresh block editFrontmatter writes, across inputs', () => {
+    const inputs: Record<string, unknown>[] = [
+      { title: 'Consistency', count: 7, active: false, tags: ['x', 'y'] },
+      { only: 'one' },
+      { note: 'a\nb\n\n', count: 3 },
+    ];
+    for (const fm of inputs) {
+      // editFrontmatter on empty content with no prior frontmatter writes
+      // `---\n<block>\n---\n` (body is the empty string), the fresh-block path.
+      const { content: fromEdit } = editFrontmatter('', (view) => {
+        for (const [k, v] of Object.entries(fm)) {
+          view[k] = v;
+        }
+      });
+      expect(serializeFrontmatter(fm)).toBe(fromEdit);
+    }
   });
 });

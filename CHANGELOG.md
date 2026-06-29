@@ -3,11 +3,19 @@
 ## 0.3.0 — 2026-06-29
 
 - **`serializeFrontmatter`** — the inverse of `parseFrontmatter`: converts a
-  flat frontmatter map to a fenced YAML block (`---\n…\n---\n`). Output is
-  byte-identical to the block `createNote`/`editFrontmatter` emit for the same
-  input. Throws `MdVaultError('FRONTMATTER_INVALID')` on non-flat input (nested
-  objects or arrays of non-scalars). Arrays serialize as YAML block sequences
-  (Obsidian-style `- item` lines, not flow `[a, b]`).
+  flat frontmatter map to a fenced YAML block (`---\n…\n---\n`), or the empty
+  string for an empty map. Output is byte-identical to the fresh block
+  `createNote`/`editFrontmatter` write to a note with no existing frontmatter
+  (an existing block's styling is preserved by `editFrontmatter`, not reproduced
+  here). Every accepted input round-trips, including multi-line strings. Throws
+  `MdVaultError('FRONTMATTER_INVALID')`, naming the offending keys, on input that
+  cannot round-trip — nested objects, arrays of non-scalars, `Date`s, or
+  non-finite numbers (`NaN`, `Infinity`). Non-empty arrays serialize as YAML
+  block sequences (Obsidian-style `- item` lines, not flow `[a, b]`).
+- **`isFlatFrontmatter`** now treats `Date`s and non-finite numbers (`NaN`,
+  `Infinity`) as non-flat, since neither survives a serialize/parse round-trip.
+  `createNote`/`editFrontmatter` therefore reject those frontmatter values
+  instead of silently storing a lossy string.
 
 ## 0.2.0 — 2026-06-29
 

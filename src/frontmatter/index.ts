@@ -5,4 +5,4 @@ export type { ParsedFrontmatter } from './models/parsed-frontmatter.ts';
 export { parseFrontmatter } from './parse.ts';
 export { serializeFrontmatter } from './serialize.ts';
 export { deriveTags } from './tags.ts';
-export { isFlatFrontmatter } from './validate.ts';
+export { assertFlatFrontmatter, isFlatFrontmatter } from './validate.ts';
