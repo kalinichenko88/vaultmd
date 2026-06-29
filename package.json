@@ -1,6 +1,6 @@
 {
   "name": "vaultmd",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Headless markdown-vault data layer for Bun — CRUD + SQLite index, no Obsidian required",
   "type": "module",
   "license": "MIT",

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 — 2026-06-29
+
+- **`serializeFrontmatter`** — the inverse of `parseFrontmatter`: converts a
+  flat frontmatter map to a fenced YAML block (`---\n…\n---\n`). Output is
+  byte-identical to the block `createNote`/`editFrontmatter` emit for the same
+  input. Throws `MdVaultError('FRONTMATTER_INVALID')` on non-flat input (nested
+  objects or arrays of non-scalars). Arrays serialize as YAML block sequences
+  (Obsidian-style `- item` lines, not flow `[a, b]`).
+
 ## 0.2.0 — 2026-06-29
 
 - **Public types** — `Backlink` and `OutboundLink` are now exported from the
