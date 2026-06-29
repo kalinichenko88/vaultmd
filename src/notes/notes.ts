@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite';
 
 import { MdVaultError } from '@/errors.ts';
 import {
+  assertFlatFrontmatter,
   type EditOutcome,
   editFrontmatter as fmEditFrontmatter,
   parseFrontmatter,
@@ -107,15 +108,20 @@ export function createNotes(deps: NotesDeps): NotesApi {
     if (!fm || Object.keys(fm).length === 0) {
       return input.body;
     }
+    // Validate the caller-supplied frontmatter up front, naming only the
+    // offending keys (shared with serializeFrontmatter's guard).
+    assertFlatFrontmatter(fm);
     const res = fmEditFrontmatter(input.body, (view) => {
       for (const [k, v] of Object.entries(fm)) {
         view[k] = v;
       }
     });
     if (res.outcome === 'unverifiable') {
+      // fm is flat (asserted above), so the body itself carries an invalid
+      // frontmatter block.
       throw new MdVaultError(
         'FRONTMATTER_INVALID',
-        `frontmatter is not flat: ${Object.keys(fm).join(', ')}`,
+        'note body has an invalid frontmatter block',
       );
     }
 

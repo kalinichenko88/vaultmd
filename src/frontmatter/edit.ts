@@ -1,7 +1,8 @@
-import { Document, parseDocument } from 'yaml';
+import { parseDocument } from 'yaml';
 
 import type { EditOutcome } from './models/edit-outcome.ts';
 import { extractBlock, parseFrontmatter } from './parse.ts';
+import { buildFrontmatterBlock } from './serialize.ts';
 import { isFlatFrontmatter } from './validate.ts';
 
 /**
@@ -45,9 +46,11 @@ export function editFrontmatter(
     if (Object.keys(view).length === 0) {
       return { content, outcome: 'unchanged' };
     }
-    const block = String(new Document(view)).replace(/\n$/, '');
 
-    return { content: `---\n${block}\n---\n${content}`, outcome: 'edited' };
+    return {
+      content: `${buildFrontmatterBlock(view)}${content}`,
+      outcome: 'edited',
+    };
   }
   const ext = extractBlock(content);
   if (!ext) {

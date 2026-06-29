@@ -10,6 +10,7 @@ export {
   editFrontmatter,
   isFlatFrontmatter,
   parseFrontmatter,
+  serializeFrontmatter,
 } from '@/frontmatter/index.ts';
 export type { Sig } from '@/fs-atomic/index.ts';
 export type {
