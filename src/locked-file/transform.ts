@@ -57,6 +57,11 @@ export function withFileTransform(
 
         return { content: next, outcome: 'created' };
       }
+      if (next === read.content) {
+        // Byte-identical result: skip the redundant rewrite (which would bump
+        // mtime), the write-through reindex, and the phantom 'update' commit.
+        return { content: read.content, outcome: 'unchanged' };
+      }
       try {
         await atomicWriteIfUnchanged(fullPath, next, read.sig);
       } catch (err) {

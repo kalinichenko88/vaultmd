@@ -6,10 +6,10 @@ import type { UpdateOp } from './update-op.ts';
 
 /**
  * The notes CRUD surface, exposed as `vault.notes`. Every method takes a
- * vault-relative path; the four mutating methods (`createNote`, `updateNote`,
- * `editFrontmatter`, `deleteNote`) run inside the per-file lock so the `.md`
- * file and its index row never drift. `readNote` is a consistent read and
- * does not acquire the lock.
+ * vault-relative path; the five mutating methods (`createNote`, `updateNote`,
+ * `editFrontmatter`, `transformNote`, `deleteNote`) run inside the per-file
+ * lock so the `.md` file and its index row never drift. `readNote` is a
+ * consistent read and does not acquire the lock.
  */
 export type NotesApi = {
   /**
@@ -55,7 +55,12 @@ export type NotesApi = {
    *   MISSING file,  transform → null   : `'unchanged'` (no throw)
    * The callback is RE-INVOKED on each `MTIME_CONFLICT` retry, so it must be a
    * pure function of `current` (side-effects must overwrite, not accumulate).
-   * @throws {@link MdVaultError} `REFUSE_CREATE` if asked to write a missing file.
+   * A `null` or `undefined` return is a no-op; a return byte-identical to the
+   * current content is also a no-op (no rewrite, no reindex) → `'unchanged'`.
+   * @throws {@link MdVaultError} `REFUSE_CREATE` if asked to write a missing
+   * file, `MTIME_CONFLICT` if a concurrent writer keeps winning past the retry
+   * budget, or `COMMIT_FAILED` if the write-through index update or the
+   * `onCommit` hook throws.
    */
   transformNote(
     path: string,

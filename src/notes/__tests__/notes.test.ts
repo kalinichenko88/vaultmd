@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { MdVaultError } from '@/errors.ts';
+import type { CommitEvent } from '@/locked-file/index.ts';
 import {
   applySchema,
   type IndexConfig,
@@ -323,11 +324,32 @@ describe('deleteNote', () => {
 });
 
 describe('transformNote', () => {
-  test('null transform → unchanged, no write', async () => {
-    await writeFile(join(vaultDir, 'n.md'), 'hello');
-    const outcome = await notes.transformNote('n.md', () => null);
+  test('null transform → unchanged: no write, no reindex, no onCommit', async () => {
+    const commits: CommitEvent[] = [];
+    const tracked = createNotes({
+      db,
+      vaultIo: io,
+      cfg,
+      query,
+      cross: false,
+      onCommit: (e) => {
+        commits.push(e);
+      },
+    });
+    // Seed via createNote so the row IS indexed and searchable.
+    await tracked.createNote('n.md', { body: 'hello world' });
+    const before = await io.stat('n.md');
+    commits.length = 0; // drop the create commit
+
+    const outcome = await tracked.transformNote('n.md', () => null);
     expect(outcome).toBe('unchanged');
-    expect(await readFile(join(vaultDir, 'n.md'), 'utf8')).toBe('hello');
+    // file bytes + signature untouched (no write happened)
+    expect(await readFile(join(vaultDir, 'n.md'), 'utf8')).toBe('hello world');
+    expect(await io.stat('n.md')).toEqual(before);
+    // no write-through reindex and no consumer onCommit on the no-op path
+    expect(commits).toEqual([]);
+    // index row still intact
+    expect(query.searchText('hello').map((h) => h.path)).toContain('n.md');
   });
 
   test('string transform → edited, writes, write-through indexes', async () => {
@@ -336,6 +358,42 @@ describe('transformNote', () => {
     expect(outcome).toBe('edited');
     expect(await readFile(join(vaultDir, 'n.md'), 'utf8')).toBe('hello\nworld');
     expect(query.searchText('world').map((h) => h.path)).toContain('n.md');
+  });
+
+  test('byte-identical transform → unchanged: no rewrite, no reindex, no onCommit', async () => {
+    const commits: CommitEvent[] = [];
+    const tracked = createNotes({
+      db,
+      vaultIo: io,
+      cfg,
+      query,
+      cross: false,
+      onCommit: (e) => {
+        commits.push(e);
+      },
+    });
+    await tracked.createNote('same.md', { body: 'unchanged body' });
+    const before = await io.stat('same.md');
+    commits.length = 0;
+
+    // Returns content byte-identical to the file rather than null.
+    const outcome = await tracked.transformNote('same.md', (c) => c);
+    expect(outcome).toBe('unchanged');
+    // no mtime bump and no phantom 'update' commit
+    expect(await io.stat('same.md')).toEqual(before);
+    expect(commits).toEqual([]);
+  });
+
+  test('undefined transform return → no-op (unchanged), no raw TypeError', async () => {
+    await writeFile(join(vaultDir, 'u.md'), 'hello');
+    // A JS consumer who forgets `return null` returns undefined; the public
+    // method must coerce it to a no-op, not crash in the write path.
+    const forgetful = (() => undefined) as unknown as (
+      current: string | null,
+    ) => string | null;
+    const outcome = await notes.transformNote('u.md', forgetful);
+    expect(outcome).toBe('unchanged');
+    expect(await readFile(join(vaultDir, 'u.md'), 'utf8')).toBe('hello');
   });
 
   test('missing file + non-null transform → REFUSE_CREATE', async () => {

@@ -64,6 +64,21 @@ describe('withFileTransform', () => {
     expect(await statSig(file)).toBeNull();
   });
 
+  test('transform returns byte-identical content → unchanged, no rewrite, no commit', async () => {
+    await writeFile(file, 'orig');
+    const before = await statSig(file);
+    const events: CommitSpy[] = [];
+    const res = await withFileTransform(file, KEY, REL, (c) => c, {
+      onCommit: (e) => {
+        events.push(e);
+      },
+    });
+    expect(res).toEqual({ content: 'orig', outcome: 'unchanged' });
+    // mtime/signature untouched (no rename) and no phantom 'update' event
+    expect(await statSig(file)).toEqual(before);
+    expect(events).toEqual([]);
+  });
+
   test('present file changed → updated, disk updated, onCommit update event', async () => {
     await writeFile(file, 'a');
     const events: CommitSpy[] = [];

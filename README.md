@@ -109,8 +109,9 @@ return notes the instance is allowed to read; writes are rejected outside the
 write scope. This is the security chokepoint — all path canonicalization and
 containment checks live behind it.
 
-**Write-through indexing.** `createNote`, `updateNote`, `editFrontmatter`, and
-`deleteNote` update the index *inside the same per-file lock* as the file write.
+**Write-through indexing.** `createNote`, `updateNote`, `editFrontmatter`,
+`transformNote`, and `deleteNote` update the index *inside the same per-file
+lock* as the file write.
 The file and its index row are never updated in separate transactions, so a
 crash can't leave them disagreeing.
 
@@ -158,6 +159,11 @@ updateNote(path, op: { append: string } | { editByMatch: { old: string; new: str
 
 // Edit flat frontmatter via a mutator callback. Returns 'edited' | 'unchanged' | 'unverifiable'.
 editFrontmatter(path, mutate: (fm: Record<string, unknown>) => void): Promise<EditOutcome>
+
+// Transform a note's FULL content atomically. Return new content, or null for a
+// no-op. Never creates a missing file (throws REFUSE_CREATE). The callback must
+// be pure — it is re-invoked on write contention. Returns 'edited' | 'unchanged'.
+transformNote(path, transform: (current: string | null) => string | null): Promise<TransformOutcome>
 
 // Delete a note. Returns whether a file was actually removed.
 deleteNote(path): Promise<boolean>
