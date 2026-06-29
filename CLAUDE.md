@@ -174,13 +174,17 @@ All failures throw `MdVaultError` with a `code: MdVaultCode` (see
   copies is how an invariant like write-through indexing quietly breaks.
 - **Prune dead code in the same change that orphans it.** When a refactor leaves
   a symbol, import, branch, parameter, or whole helper unreferenced, delete it
-  then — never leave it "for later" or "just in case." The gate will **not**
-  catch most of it: `tsc` runs without `noUnusedLocals`, and biome only *warns*
-  (never fails) on unused imports, so dead code sails through `bun run check`
-  green. It is a manual discipline. Before deleting, grep the symbol to confirm
-  it is truly unreferenced; if it sat on a module barrel or the package API,
-  removing it is a deliberate surface change (update the freeze test in
-  `src/__tests__/index.test.ts` and any TSDoc), not a silent cleanup.
+  then — never leave it "for later" or "just in case." `bun run check` enforces
+  this for *local* dead code: biome is configured to **error** (not warn) on
+  unused imports, variables, function parameters, private class members, and
+  labels. A genuinely-intentional unused binding opts out with a leading
+  underscore (`_current`). The gate cannot see a dead **export**, though — an
+  unused name on a module barrel or the package API reads as "used" to biome —
+  so those you still catch by hand: grep the symbol across `src`, and if it was
+  barrel- or root-exported, removing it is a deliberate surface change (update
+  the freeze test in `src/__tests__/index.test.ts` and any TSDoc), not a silent
+  cleanup. (`tsc` itself does not flag unused locals — `noUnusedLocals` is off —
+  biome carries that load.)
 
 ## Documentation
 
