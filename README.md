@@ -21,7 +21,7 @@ schemas, and sync logic live in whatever you build on top.
 
 ## Status
 
-Released (`0.2.0`) — live on npm. The public API is frozen and tested, and the
+Released (`0.3.0`) — live on npm. The public API is frozen and tested, and the
 package ships as a bundled `dist/` (ESM + types). Being `0.x`, the surface may
 still evolve before `1.0`; see [CHANGELOG.md](./CHANGELOG.md) for what changed.
 
@@ -216,6 +216,7 @@ import {
   withFileDelete,          // atomic delete with commit hook
   parseFrontmatter,        // pure flat-YAML frontmatter parser
   editFrontmatter,         // pure frontmatter editor
+  serializeFrontmatter,    // flat map → fenced YAML block (inverse of parse)
   isFlatFrontmatter,
   deriveTags,
   extractLinks,            // pull wikilinks / relative links from text
