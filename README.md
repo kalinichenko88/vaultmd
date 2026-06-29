@@ -21,10 +21,9 @@ schemas, and sync logic live in whatever you build on top.
 
 ## Status
 
-Released (`0.1.0`) — the first published version is live on npm. The public API
-is frozen and tested, and the package ships as a bundled `dist/` (ESM + types).
-Being `0.x`, the surface may still evolve before `1.0`; see
-[CHANGELOG.md](./CHANGELOG.md) for what changed.
+Released (`0.2.0`) — live on npm. The public API is frozen and tested, and the
+package ships as a bundled `dist/` (ESM + types). Being `0.x`, the surface may
+still evolve before `1.0`; see [CHANGELOG.md](./CHANGELOG.md) for what changed.
 
 ## Features
 
