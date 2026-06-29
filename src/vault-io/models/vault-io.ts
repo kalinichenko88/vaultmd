@@ -41,6 +41,26 @@ export type VaultIo = {
    */
   resolveVaultPath(rel: string, access?: Access): string;
   /**
+   * Resolve everything a write-path mutator needs in a single canonicalization
+   * pass: the absolute filesystem path (write-allowlist + symlink enforced),
+   * the case-folded index/lock key, and the canonical vault-relative path.
+   * Equivalent to calling {@link resolveVaultPath} (`'write'`), {@link toKey},
+   * and {@link toVaultRelative} together, but canonicalizes `rel` only once.
+   * @param rel Vault-relative `.md` path.
+   * @returns `{ full, key, relative }` for the write target.
+   * @throws {@link MdVaultError} `NOT_MARKDOWN` if `rel` is not a `.md` path.
+   * @throws {@link MdVaultError} `ALLOWLIST_VIOLATION` if `rel` is outside the
+   * write allowlist or escapes the root via a symlink.
+   */
+  resolveWriteTarget(rel: string): {
+    /** Absolute filesystem path of the write target. */
+    full: string;
+    /** Case-folded index/lock key — see {@link toKey}. */
+    key: string;
+    /** Canonical vault-relative path — see {@link toVaultRelative}. */
+    relative: string;
+  };
+  /**
    * Read a vault file consistently, returning its content and filesystem
    * signature for optimistic-concurrency checks.
    * @param rel Vault-relative `.md` path.

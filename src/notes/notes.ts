@@ -87,17 +87,16 @@ export function createNotes(deps: NotesDeps): NotesApi {
   }
 
   // The write-path resolve trio shared by every mutator: the absolute fs path,
-  // the case-folded lock/serialization key, and the display path for commits.
+  // the case-folded lock/serialization key, and the display path for commits —
+  // canonicalized once by vault-io rather than three times.
   function resolveForWrite(path: string): {
     full: string;
     key: string;
     display: string;
   } {
-    return {
-      full: vaultIo.resolveVaultPath(path, 'write'),
-      key: vaultIo.toKey(path),
-      display: vaultIo.toVaultRelative(path),
-    };
+    const { full, key, relative } = vaultIo.resolveWriteTarget(path);
+
+    return { full, key, display: relative };
   }
 
   function buildContent(input: {

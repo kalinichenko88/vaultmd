@@ -249,6 +249,39 @@ describe('resolveVaultPath', () => {
   });
 });
 
+describe('resolveWriteTarget', () => {
+  test('matches resolveVaultPath(write)/toKey/toVaultRelative in one pass', () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: ['Public/'], write: ['Public/'] },
+      caseSensitive: false,
+    });
+    // non-canonical input exercises the single canonicalization pass
+    const target = io.resolveWriteTarget('Public/./sub/../A.md');
+    expect(target).toEqual({
+      full: io.resolveVaultPath('Public/A.md', 'write'),
+      key: io.toKey('Public/A.md'),
+      relative: io.toVaultRelative('Public/A.md'),
+    });
+    // case-insensitive: key is folded, relative is case-preserving
+    expect(target.key).toBe('public/a.md');
+    expect(target.relative).toBe('Public/A.md');
+  });
+
+  test('enforces the write allowlist and .md guard like resolveVaultPath', () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: ['Public/'] },
+    });
+    expect(syncCode(() => io.resolveWriteTarget('Public/note.txt'))).toBe(
+      'NOT_MARKDOWN',
+    );
+    expect(syncCode(() => io.resolveWriteTarget('Private/x.md'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+  });
+});
+
 describe('atomic IO', () => {
   test('writeVaultFile + readVaultFile round-trip carry a matching sig; missing -> null', async () => {
     const io = createVaultIo({
