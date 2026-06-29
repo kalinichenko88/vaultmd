@@ -20,6 +20,7 @@ import type { VaultIo } from '@/vault-io/index.ts';
 
 import type { NotesApi } from './models/notes-api.ts';
 import type { ReadNoteResult } from './models/read-note-result.ts';
+import type { TransformOutcome } from './models/transform-outcome.ts';
 import type { UpdateOp } from './models/update-op.ts';
 
 export type NotesDeps = {
@@ -85,6 +86,19 @@ export function createNotes(deps: NotesDeps): NotesApi {
     return locked();
   }
 
+  // The write-path resolve trio shared by every mutator: the absolute fs path,
+  // the case-folded lock/serialization key, and the display path for commits —
+  // canonicalized once by vault-io rather than three times.
+  function resolveForWrite(path: string): {
+    full: string;
+    key: string;
+    display: string;
+  } {
+    const { full, key, relative } = vaultIo.resolveWriteTarget(path);
+
+    return { full, key, display: relative };
+  }
+
   function buildContent(input: {
     frontmatter?: Record<string, unknown>;
     body: string;
@@ -113,9 +127,7 @@ export function createNotes(deps: NotesDeps): NotesApi {
     input: { frontmatter?: Record<string, unknown>; body: string },
   ): Promise<void> {
     const content = buildContent(input);
-    const full = vaultIo.resolveVaultPath(path, 'write');
-    const key = vaultIo.toKey(path);
-    const display = vaultIo.toVaultRelative(path);
+    const { full, key, display } = resolveForWrite(path);
     await runLocked(key, async () => {
       // exclusiveCreate (temp + link) → ALREADY_EXISTS on clash, never clobbers.
       const sig = await exclusiveCreate(full, content);
@@ -152,9 +164,24 @@ export function createNotes(deps: NotesDeps): NotesApi {
     }
   };
 
+  // Shared wiring for the transform-based mutators (updateNote, editFrontmatter,
+  // transformNote): resolve → run under the per-file lock with write-through
+  // indexing. Any change to the write-through seam lands here once, for all three.
+  function transformLocked(
+    path: string,
+    transform: (current: string | null) => string | null,
+    allowCreate: boolean,
+  ) {
+    const { full, key, display } = resolveForWrite(path);
+
+    return withFileTransform(full, key, display, transform, {
+      allowCreate,
+      onCommit: indexCommit,
+      cross,
+    });
+  }
+
   async function updateNote(path: string, op: UpdateOp): Promise<void> {
-    const full = vaultIo.resolveVaultPath(path, 'write');
-    const key = vaultIo.toKey(path);
     const display = vaultIo.toVaultRelative(path);
     const transform = (current: string | null): string | null => {
       // updateNote targets the note body only; any frontmatter block is left
@@ -202,20 +229,13 @@ export function createNotes(deps: NotesDeps): NotesApi {
         prefix + body.slice(0, at) + replacement + body.slice(at + old.length)
       );
     };
-    await withFileTransform(full, key, display, transform, {
-      allowCreate: 'append' in op,
-      onCommit: indexCommit,
-      cross,
-    });
+    await transformLocked(path, transform, 'append' in op);
   }
 
   async function editFrontmatter(
     path: string,
     mutate: (fm: Record<string, unknown>) => void,
   ): Promise<EditOutcome> {
-    const full = vaultIo.resolveVaultPath(path, 'write');
-    const key = vaultIo.toKey(path);
-    const display = vaultIo.toVaultRelative(path);
     let outcome: EditOutcome = 'unchanged';
     const transform = (current: string | null): string | null => {
       if (current === null) {
@@ -231,19 +251,13 @@ export function createNotes(deps: NotesDeps): NotesApi {
 
       return null;
     };
-    await withFileTransform(full, key, display, transform, {
-      allowCreate: false,
-      onCommit: indexCommit,
-      cross,
-    });
+    await transformLocked(path, transform, false);
 
     return outcome;
   }
 
   async function deleteNote(path: string): Promise<boolean> {
-    const full = vaultIo.resolveVaultPath(path, 'write');
-    const key = vaultIo.toKey(path);
-    const display = vaultIo.toVaultRelative(path);
+    const { full, key, display } = resolveForWrite(path);
     const { deleted } = await withFileDelete(full, key, display, {
       onCommit: indexCommit,
       cross,
@@ -252,5 +266,34 @@ export function createNotes(deps: NotesDeps): NotesApi {
     return deleted;
   }
 
-  return { readNote, createNote, updateNote, editFrontmatter, deleteNote };
+  async function transformNote(
+    path: string,
+    transform: (current: string | null) => string | null,
+  ): Promise<TransformOutcome> {
+    // Coerce a forgotten/implicit `undefined` return (a JS consumer omitting
+    // `return null`) into a no-op, rather than letting it fall through to the
+    // write path and throw a raw TypeError with no MdVaultCode.
+    const safe = (current: string | null): string | null =>
+      transform(current) ?? null;
+    const res = await transformLocked(path, safe, false);
+
+    switch (res.outcome) {
+      case 'unchanged':
+        return 'unchanged';
+      // `created` is unreachable with allowCreate:false; the exhaustive switch
+      // forces a compile error if TransformResult.outcome ever grows a case.
+      case 'created':
+      case 'updated':
+        return 'edited';
+    }
+  }
+
+  return {
+    readNote,
+    createNote,
+    updateNote,
+    editFrontmatter,
+    deleteNote,
+    transformNote,
+  };
 }

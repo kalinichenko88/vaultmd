@@ -161,6 +161,30 @@ All failures throw `MdVaultError` with a `code: MdVaultCode` (see
   module already depends on the other, else to a shared root (`src/models/`,
   `src/lib/`, `src/constants.ts`, created lazily). Cross-module imports stay
   barrel-only. See `docs/superpowers/specs/2026-06-28-types-constants-reuse-design.md`.
+- **Factor out duplication, not just across modules.** The rule above is about
+  *where* shared code lives; this is about *noticing* it. Before writing a third
+  near-copy of a sequence — a resolve/lock/commit wiring, an outcome remap, a
+  guard chain — extract a named helper at the lowest scope all callers share:
+  a function inside the composition closure for intra-module reuse
+  (`transformLocked` in `notes`), or a method on the primitive that owns the
+  work when the duplication is that primitive's concern
+  (`VaultIo.resolveWriteTarget`, folding the canonicalize-thrice resolve trio
+  into one pass). Two copies is a judgement call; three is a smell. Consolidate
+  so one edit reaches every caller — silent divergence between near-identical
+  copies is how an invariant like write-through indexing quietly breaks.
+- **Prune dead code in the same change that orphans it.** When a refactor leaves
+  a symbol, import, branch, parameter, or whole helper unreferenced, delete it
+  then — never leave it "for later" or "just in case." `bun run check` enforces
+  this for *local* dead code: biome is configured to **error** (not warn) on
+  unused imports, variables, function parameters, private class members, and
+  labels. A genuinely-intentional unused binding opts out with a leading
+  underscore (`_current`). The gate cannot see a dead **export**, though — an
+  unused name on a module barrel or the package API reads as "used" to biome —
+  so those you still catch by hand: grep the symbol across `src`, and if it was
+  barrel- or root-exported, removing it is a deliberate surface change (update
+  the freeze test in `src/__tests__/index.test.ts` and any TSDoc), not a silent
+  cleanup. (`tsc` itself does not flag unused locals — `noUnusedLocals` is off —
+  biome carries that load.)
 
 ## Documentation
 

@@ -48,29 +48,18 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
   };
   const ignoreRes = (config.ignore ?? []).map(globToRegExp);
 
-  function toVaultRelative(rel: string): string {
-    return canonicalizeRelative(rel);
-  }
-
-  function toKey(rel: string): string {
-    const canonical = canonicalizeRelative(rel);
-
+  function keyFromCanonical(canonical: string): string {
     return caseSensitive ? canonical : canonical.toLowerCase();
   }
 
-  function can(rel: string, access: Access): boolean {
-    let x: string;
-    try {
-      x = canonicalizeRelative(rel);
-    } catch {
-      return false;
-    }
-
-    return matches(x, canonPrefixes[access]);
-  }
-
-  function resolveVaultPath(rel: string, access: Access = 'read'): string {
-    const canonical = canonicalizeRelative(rel);
+  // Run the .md/allowlist/symlink guards on an ALREADY-canonical path and return
+  // the absolute fs path. `rel` is only used for error messages. The single
+  // security gate shared by resolveVaultPath and resolveWriteTarget.
+  function resolveCanonical(
+    canonical: string,
+    access: Access,
+    rel: string,
+  ): string {
     if (!canonical.endsWith('.md')) {
       throw new MdVaultError('NOT_MARKDOWN', `not a markdown path: ${rel}`);
     }
@@ -89,6 +78,43 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
     }
 
     return full;
+  }
+
+  function toVaultRelative(rel: string): string {
+    return canonicalizeRelative(rel);
+  }
+
+  function toKey(rel: string): string {
+    return keyFromCanonical(canonicalizeRelative(rel));
+  }
+
+  function can(rel: string, access: Access): boolean {
+    let x: string;
+    try {
+      x = canonicalizeRelative(rel);
+    } catch {
+      return false;
+    }
+
+    return matches(x, canonPrefixes[access]);
+  }
+
+  function resolveVaultPath(rel: string, access: Access = 'read'): string {
+    return resolveCanonical(canonicalizeRelative(rel), access, rel);
+  }
+
+  function resolveWriteTarget(rel: string): {
+    full: string;
+    key: string;
+    relative: string;
+  } {
+    const canonical = canonicalizeRelative(rel);
+
+    return {
+      full: resolveCanonical(canonical, 'write', rel),
+      key: keyFromCanonical(canonical),
+      relative: canonical,
+    };
   }
 
   async function readVaultFile(
@@ -147,6 +173,7 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
     toKey,
     can,
     resolveVaultPath,
+    resolveWriteTarget,
     readVaultFile,
     writeVaultFile,
     rewriteIfUnchanged,
