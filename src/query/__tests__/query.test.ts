@@ -305,8 +305,14 @@ describe('queryNotes — filtering', () => {
     });
     insertNote(db, { path: 'foo_1/a.md' }); // literal underscore
     insertNote(db, { path: 'fooX1/b.md' }); // matches only if '_' is a wildcard
-    const hits = queryNotes({ folder: 'foo_1' });
-    expect(hits.map((h) => h.path)).toEqual(['foo_1/a.md']);
+    insertNote(db, { path: 'bar%baz/c.md' }); // literal percent
+    insertNote(db, { path: 'barXXbaz/d.md' }); // matches only if '%' is a wildcard
+    expect(queryNotes({ folder: 'foo_1' }).map((h) => h.path)).toEqual([
+      'foo_1/a.md',
+    ]);
+    expect(queryNotes({ folder: 'bar%baz' }).map((h) => h.path)).toEqual([
+      'bar%baz/c.md',
+    ]);
   });
 
   test('where filter: matches key=value; missing key = no match', () => {
@@ -840,6 +846,23 @@ describe('searchText — basic search + filters + read-scope', () => {
     insertNote(db, { path: 'projects/foo.md', body: 'standup notes' });
     const hits = searchText('standup', { folder: 'daily' });
     expect(hits.map((h) => h.path)).toEqual(['daily/2026-01.md']);
+  });
+
+  test('folder filter: % and _ in the folder name match literally', () => {
+    const io = createVaultIo({
+      root: vaultDir,
+      prefixes: { read: [''], write: [''] },
+    });
+    const { searchText } = createQuery(db, io, {
+      linkResolution: 'wikilink',
+      caseSensitive: false,
+      ignore: [],
+    });
+    insertNote(db, { path: 'foo_1/a.md', body: 'standup notes' });
+    insertNote(db, { path: 'fooX1/b.md', body: 'standup notes' });
+    expect(
+      searchText('standup', { folder: 'foo_1' }).map((h) => h.path),
+    ).toEqual(['foo_1/a.md']);
   });
 
   test('read-scope: out-of-scope notes never returned', () => {
