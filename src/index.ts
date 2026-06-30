@@ -40,6 +40,7 @@ export type {
   QueryApi,
   QueryOrder,
   SearchHit,
+  TagInfo,
   WhereMap,
 } from '@/query/index.ts';
 export type { CreateVaultConfig, Vault } from '@/vault/index.ts';

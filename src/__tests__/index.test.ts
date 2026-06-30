@@ -68,6 +68,8 @@ const ALL_EXPORTS = [
   'TransformOutcome',
   // — 0.3.0 (new 1) —
   'serializeFrontmatter',
+  // — tags discovery (new 1) —
+  'TagInfo',
 ].sort();
 
 function exportedNames(source: string): string[] {
@@ -88,7 +90,7 @@ function exportedNames(source: string): string[] {
 }
 
 describe('package public API freeze', () => {
-  test('src/index.ts exports exactly the frozen 42 names (Plan 1 + Plan 2 + Plan 3 + 0.2.0 + 0.3.0)', () => {
+  test('src/index.ts exports exactly the frozen 43 names (Plan 1 + Plan 2 + Plan 3 + 0.2.0 + 0.3.0 + tags)', () => {
     const src = readFileSync(new URL('../index.ts', import.meta.url), 'utf8');
     expect(exportedNames(src)).toEqual(ALL_EXPORTS);
   });
