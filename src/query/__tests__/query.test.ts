@@ -1101,6 +1101,18 @@ describe('tags', () => {
     expect(tags({ contains: 'a_b' }).map((t) => t.tag)).toEqual(['a_b']);
   });
 
+  test('prefix and contains AND together', () => {
+    const tags = mkTags();
+    insertNote(db, {
+      path: 'a.md',
+      tags: ['project/alpha', 'project/beta', 'other/alpha'],
+    });
+    // prefix 'project/' AND contains 'alpha' → only project/alpha qualifies
+    expect(
+      tags({ prefix: 'project/', contains: 'alpha' }).map((t) => t.tag),
+    ).toEqual(['project/alpha']);
+  });
+
   test('folder: only tags from the subtree, count scoped to subtree', () => {
     const tags = mkTags();
     insertNote(db, { path: 'daily/a.md', tags: ['journal'] });

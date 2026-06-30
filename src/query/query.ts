@@ -475,9 +475,10 @@ export function createQuery(
     }
     const result: TagInfo[] = [...counts.entries()]
       .map(([tag, count]) => ({ tag, count }))
-      // count DESC, then tag ASC by Unicode code point — locale-independent and
-      // matching SQLite BINARY collation (the prefix filter is case-sensitive),
-      // so ordering is identical across macOS and Linux CI.
+      // count DESC, then tag ASC by UTF-16 code-unit order — locale-independent
+      // and deterministic across macOS/Linux CI (the prefix filter is likewise
+      // case-sensitive). Diverges from SQLite BINARY only for astral-plane
+      // characters, which do not occur in realistic tags.
       .sort((a, b) => {
         if (a.count !== b.count) {
           return b.count - a.count;

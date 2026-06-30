@@ -53,8 +53,8 @@ export type QueryApi = {
    * Every tag present on notes the instance can read, each with the number of
    * those notes that carry it, ranked most-used first (canonical tags float to
    * the top). `prefix` matches case-sensitively for hierarchy navigation;
-   * `contains` is a case-insensitive substring search; `folder` restricts to a
-   * folder subtree; `limit` caps the result.
+   * `contains` is a substring search (ASCII case-insensitive, per SQLite LIKE);
+   * `folder` restricts to a folder subtree; `limit` caps the result.
    */
   tags(opts?: {
     prefix?: string;
