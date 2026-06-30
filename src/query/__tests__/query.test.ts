@@ -1036,6 +1036,14 @@ describe('tags', () => {
     ]);
   });
 
+  test('sort tiebreak uses Unicode code point, not locale (uppercase before lowercase)', () => {
+    const tags = mkTags();
+    // 'Z' (U+005A) precedes 'a' (U+0061) by code point; a locale collator would
+    // typically order 'a' before 'Z'. Equal count → tiebreak must be code-point.
+    insertNote(db, { path: 'a.md', tags: ['a', 'Z'] });
+    expect(tags().map((t) => t.tag)).toEqual(['Z', 'a']);
+  });
+
   test('read-scope: out-of-scope-only tag is absent; shared tag counts only in-scope notes', () => {
     const tags = mkTags(
       createVaultIo({

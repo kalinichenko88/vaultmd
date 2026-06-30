@@ -475,7 +475,16 @@ export function createQuery(
     }
     const result: TagInfo[] = [...counts.entries()]
       .map(([tag, count]) => ({ tag, count }))
-      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+      // count DESC, then tag ASC by Unicode code point — locale-independent and
+      // matching SQLite BINARY collation (the prefix filter is case-sensitive),
+      // so ordering is identical across macOS and Linux CI.
+      .sort((a, b) => {
+        if (a.count !== b.count) {
+          return b.count - a.count;
+        }
+
+        return a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0;
+      });
 
     return limit === undefined ? result : result.slice(0, limit);
   }
