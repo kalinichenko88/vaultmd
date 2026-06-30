@@ -29,24 +29,23 @@ type LinkRow = { target: string; base: string | null };
 type SearchRow = { path: string; title: string; snippet: string };
 type PathRow = { path: string };
 
+function assertNonNegativeInt(value: number, label: string): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new MdVaultError(
+      'VALIDATION_ERROR',
+      `${label} must be a non-negative integer, got: ${value}`,
+    );
+  }
+}
+
 function validatePagination(
   limit: number | undefined,
   offset: number | undefined,
 ): { lim: number; off: number } {
   const lim = limit ?? DEFAULT_LIMIT;
   const off = offset ?? 0;
-  if (!Number.isInteger(lim) || lim < 0) {
-    throw new MdVaultError(
-      'VALIDATION_ERROR',
-      `limit must be a non-negative integer, got: ${limit}`,
-    );
-  }
-  if (!Number.isInteger(off) || off < 0) {
-    throw new MdVaultError(
-      'VALIDATION_ERROR',
-      `offset must be a non-negative integer, got: ${offset}`,
-    );
-  }
+  assertNonNegativeInt(lim, 'limit');
+  assertNonNegativeInt(off, 'offset');
 
   return { lim: Math.min(lim, HARD_MAX), off };
 }
@@ -55,12 +54,7 @@ function validateLimit(limit: number | undefined): void {
   if (limit === undefined) {
     return;
   }
-  if (!Number.isInteger(limit) || limit < 0) {
-    throw new MdVaultError(
-      'VALIDATION_ERROR',
-      `limit must be a non-negative integer, got: ${limit}`,
-    );
-  }
+  assertNonNegativeInt(limit, 'limit');
 }
 
 function sanitizeFts(q: string): string | null {
@@ -449,8 +443,12 @@ export function createQuery(
     }
 
     if (contains !== undefined) {
-      parts.push("LOWER(nt.tag) LIKE ? ESCAPE '\\'");
-      params.push(`%${escapeLike(contains.toLowerCase())}%`);
+      // LOWER both sides via SQLite (ASCII-only) so case-folding is symmetric.
+      // A JS toLowerCase here would Unicode-fold only the needle while SQLite
+      // leaves the haystack's non-ASCII letters intact, making non-ASCII tags
+      // (e.g. Cyrillic) unfindable even by exact spelling.
+      parts.push("LOWER(nt.tag) LIKE LOWER(?) ESCAPE '\\'");
+      params.push(`%${escapeLike(contains)}%`);
     }
 
     if (folder !== undefined) {
@@ -468,8 +466,14 @@ export function createQuery(
       >(sql)
       .all(...params);
     const counts = new Map<string, number>();
+    const scopeByPath = new Map<string, boolean>();
     for (const row of rows) {
-      if (inScope(row.path)) {
+      let allowed = scopeByPath.get(row.path);
+      if (allowed === undefined) {
+        allowed = inScope(row.path);
+        scopeByPath.set(row.path, allowed);
+      }
+      if (allowed) {
         counts.set(row.tag, (counts.get(row.tag) ?? 0) + 1);
       }
     }

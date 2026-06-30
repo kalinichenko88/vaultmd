@@ -129,32 +129,23 @@ export async function createVault(config: CreateVaultConfig): Promise<Vault> {
   }
 
   const rawQuery = createQuery(db, io, cfg);
+  // Every read fires one lazy reconcile, then delegates. Wrap once so the
+  // sequence lives in a single place instead of being copy-pasted per method.
+  function reconciled<A extends unknown[], R>(
+    fn: (...args: A) => R,
+  ): (...args: A) => R {
+    return (...args) => {
+      maybeReconcile();
+
+      return fn(...args);
+    };
+  }
   const query: ReturnType<typeof createQuery> = {
-    queryNotes(opts) {
-      maybeReconcile();
-
-      return rawQuery.queryNotes(opts);
-    },
-    backlinks(path, opts) {
-      maybeReconcile();
-
-      return rawQuery.backlinks(path, opts);
-    },
-    outboundLinks(path, opts) {
-      maybeReconcile();
-
-      return rawQuery.outboundLinks(path, opts);
-    },
-    searchText(q, opts) {
-      maybeReconcile();
-
-      return rawQuery.searchText(q, opts);
-    },
-    tags(opts) {
-      maybeReconcile();
-
-      return rawQuery.tags(opts);
-    },
+    queryNotes: reconciled(rawQuery.queryNotes),
+    backlinks: reconciled(rawQuery.backlinks),
+    outboundLinks: reconciled(rawQuery.outboundLinks),
+    searchText: reconciled(rawQuery.searchText),
+    tags: reconciled(rawQuery.tags),
   };
 
   const notes = createNotes({

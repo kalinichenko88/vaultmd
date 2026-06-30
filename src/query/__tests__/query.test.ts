@@ -1113,6 +1113,20 @@ describe('tags', () => {
     ).toEqual(['project/alpha']);
   });
 
+  test('contains: non-ASCII tag is findable by exact spelling (symmetric ASCII case-fold)', () => {
+    const tags = mkTags();
+    insertNote(db, { path: 'a.md', tags: ['Проект/альфа', 'project/beta'] });
+    // SQLite LOWER won't fold Cyrillic 'П', so the needle must NOT be
+    // JS-lowercased — exact spelling must still match.
+    expect(tags({ contains: 'Проект' }).map((t) => t.tag)).toEqual([
+      'Проект/альфа',
+    ]);
+    // ASCII case-insensitivity still works:
+    expect(tags({ contains: 'PROJECT' }).map((t) => t.tag)).toEqual([
+      'project/beta',
+    ]);
+  });
+
   test('folder: only tags from the subtree, count scoped to subtree', () => {
     const tags = mkTags();
     insertNote(db, { path: 'daily/a.md', tags: ['journal'] });
