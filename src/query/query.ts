@@ -62,6 +62,24 @@ function sanitizeFts(q: string): string | null {
   return tokens.map((t) => `"${t.replace(/"/g, '""')}"`).join(' ');
 }
 
+// Escapes LIKE metacharacters (\, %, _) so caller-supplied text matches
+// literally under an `ESCAPE '\'` clause. Single pass: each metachar gets one
+// leading backslash, so escaping '\' first is not double-applied.
+function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+// Appends the recursive folder-subtree filter (`folder` itself + `folder/…`
+// descendants) with %/_ escaped. note paths are aliased `n` in every query.
+function pushFolderFilter(
+  parts: string[],
+  params: (string | number | boolean | null)[],
+  folder: string,
+): void {
+  parts.push("(n.path = ? OR n.path LIKE ? ESCAPE '\\')");
+  params.push(folder, `${escapeLike(folder)}/%`);
+}
+
 function pathBaseLower(p: string): string {
   return (p.split('/').at(-1) ?? p).replace(/\.md$/i, '').toLowerCase();
 }
@@ -152,8 +170,7 @@ export function createQuery(
     }
 
     if (folder !== undefined) {
-      parts.push('(n.path = ? OR n.path LIKE ?)');
-      params.push(folder, `${folder}/%`);
+      pushFolderFilter(parts, params, folder);
     }
 
     const clause = parts.length > 0 ? `WHERE ${parts.join(' AND ')}` : '';
@@ -357,8 +374,7 @@ export function createQuery(
     }
 
     if (folder !== undefined) {
-      parts.push('(n.path = ? OR n.path LIKE ?)');
-      params.push(folder, `${folder}/%`);
+      pushFolderFilter(parts, params, folder);
     }
 
     const extra = parts.length > 0 ? `AND ${parts.join(' AND ')}` : '';

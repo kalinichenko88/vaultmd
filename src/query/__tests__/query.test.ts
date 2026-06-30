@@ -293,6 +293,22 @@ describe('queryNotes — filtering', () => {
     ]);
   });
 
+  test('folder filter: % and _ in the folder name match literally, not as wildcards', () => {
+    const io = createVaultIo({
+      root: vaultDir,
+      prefixes: { read: [''], write: [''] },
+    });
+    const { queryNotes } = createQuery(db, io, {
+      linkResolution: 'wikilink',
+      caseSensitive: false,
+      ignore: [],
+    });
+    insertNote(db, { path: 'foo_1/a.md' }); // literal underscore
+    insertNote(db, { path: 'fooX1/b.md' }); // matches only if '_' is a wildcard
+    const hits = queryNotes({ folder: 'foo_1' });
+    expect(hits.map((h) => h.path)).toEqual(['foo_1/a.md']);
+  });
+
   test('where filter: matches key=value; missing key = no match', () => {
     const io = createVaultIo({
       root: vaultDir,
