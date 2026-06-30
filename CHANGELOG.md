@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0 — 2026-06-30
+
+- **`query.tags()`** — a new read-only query returning the vault's existing tags
+  as `{ tag, count }[]`, ranked most-used first, so callers can reuse and extend
+  tags instead of inventing duplicates. Optional filters: `prefix` (case-sensitive
+  hierarchy navigation, e.g. `project/`), `contains` (ASCII case-insensitive
+  substring search), `folder` (restrict to a folder subtree), and `limit` (top-N).
+  Results are read-scope filtered like every other query, and `count` reflects
+  only the notes the instance is allowed to read.
+- **`TagInfo`** — the `{ tag: string; count: number }` shape `query.tags()`
+  returns, added to the public API.
+- **`query` folder filter** now treats `%` and `_` in a folder name as literal
+  characters instead of SQL `LIKE` wildcards — `queryNotes`, `searchText`, and
+  `tags` with a `folder` such as `foo_1` no longer over-match unrelated paths.
+
 ## 0.3.0 — 2026-06-29
 
 - **`serializeFrontmatter`** — the inverse of `parseFrontmatter`: converts a

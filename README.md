@@ -21,7 +21,7 @@ schemas, and sync logic live in whatever you build on top.
 
 ## Status
 
-Released (`0.3.0`) — live on npm. The public API is frozen and tested, and the
+Released (`0.4.0`) — live on npm. The public API is frozen and tested, and the
 package ships as a bundled `dist/` (ESM + types). Being `0.x`, the surface may
 still evolve before `1.0`; see [CHANGELOG.md](./CHANGELOG.md) for what changed.
 
@@ -192,6 +192,10 @@ outboundLinks(path, opts?: { limit?: number; offset?: number }): OutboundLink[]
 
 // Full-text keyword search over bodies. Returns { path, title, snippet? }[].
 searchText(q, opts?: { tag?: string; folder?: string; limit?: number; offset?: number }): SearchHit[]
+
+// Existing tags ranked by use. Returns TagInfo[] = { tag, count }[] (count desc, tag asc).
+// prefix = case-sensitive hierarchy prefix; contains = ASCII case-insensitive substring.
+tags(opts?: { prefix?: string; contains?: string; folder?: string; limit?: number }): TagInfo[]
 ```
 
 ### Lifecycle
