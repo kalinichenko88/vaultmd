@@ -10,6 +10,7 @@ import type { QueryOrder } from './models/order.ts';
 import type { OutboundLink } from './models/outbound-link.ts';
 import type { QueryApi } from './models/query-api.ts';
 import type { SearchHit } from './models/search-hit.ts';
+import type { TagInfo } from './models/tag-info.ts';
 import type { WhereMap } from './models/where-map.ts';
 
 const ORDER_FIELDS = new Set<string>(['mtime_ms', 'path', 'title']);
@@ -48,6 +49,18 @@ function validatePagination(
   }
 
   return { lim: Math.min(lim, HARD_MAX), off };
+}
+
+function validateLimit(limit: number | undefined): void {
+  if (limit === undefined) {
+    return;
+  }
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw new MdVaultError(
+      'VALIDATION_ERROR',
+      `limit must be a non-negative integer, got: ${limit}`,
+    );
+  }
 }
 
 function sanitizeFts(q: string): string | null {
@@ -415,5 +428,57 @@ export function createQuery(
     return scoped.slice(off, off + lim);
   }
 
-  return { queryNotes, backlinks, outboundLinks, searchText };
+  function tags(
+    opts: {
+      prefix?: string;
+      contains?: string;
+      folder?: string;
+      limit?: number;
+    } = {},
+  ): TagInfo[] {
+    const { prefix, contains, folder, limit } = opts;
+    validateLimit(limit);
+    const parts: string[] = [];
+    const params: (string | number | boolean | null)[] = [];
+
+    if (prefix !== undefined) {
+      // Case-sensitive exact prefix (default BINARY collation); substr avoids
+      // LIKE wildcard handling, so %/_ in the prefix are literal.
+      parts.push('substr(nt.tag, 1, length(?)) = ?');
+      params.push(prefix, prefix);
+    }
+
+    if (contains !== undefined) {
+      parts.push("LOWER(nt.tag) LIKE ? ESCAPE '\\'");
+      params.push(`%${escapeLike(contains.toLowerCase())}%`);
+    }
+
+    if (folder !== undefined) {
+      pushFolderFilter(parts, params, folder);
+    }
+
+    const clause = parts.length > 0 ? `WHERE ${parts.join(' AND ')}` : '';
+    // Join notes for the path so scope is filtered in JS (note_tags is keyed by
+    // path_key, not path); aggregate counts in a Map since a tag spans notes.
+    const sql = `SELECT nt.tag AS tag, n.path AS path FROM note_tags nt JOIN notes n ON n.path_key = nt.path_key ${clause}`;
+    const rows = db
+      .query<
+        { tag: string; path: string },
+        (string | number | boolean | null)[]
+      >(sql)
+      .all(...params);
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+      if (inScope(row.path)) {
+        counts.set(row.tag, (counts.get(row.tag) ?? 0) + 1);
+      }
+    }
+    const result: TagInfo[] = [...counts.entries()]
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+
+    return limit === undefined ? result : result.slice(0, limit);
+  }
+
+  return { queryNotes, backlinks, outboundLinks, searchText, tags };
 }

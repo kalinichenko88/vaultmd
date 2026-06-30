@@ -150,6 +150,11 @@ export async function createVault(config: CreateVaultConfig): Promise<Vault> {
 
       return rawQuery.searchText(q, opts);
     },
+    tags(opts) {
+      maybeReconcile();
+
+      return rawQuery.tags(opts);
+    },
   };
 
   const notes = createNotes({

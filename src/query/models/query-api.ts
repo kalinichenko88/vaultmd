@@ -3,6 +3,7 @@ import type { NoteHit } from './note-hit.ts';
 import type { QueryOrder } from './order.ts';
 import type { OutboundLink } from './outbound-link.ts';
 import type { SearchHit } from './search-hit.ts';
+import type { TagInfo } from './tag-info.ts';
 import type { WhereMap } from './where-map.ts';
 
 /**
@@ -48,4 +49,17 @@ export type QueryApi = {
     q: string,
     opts?: { tag?: string; folder?: string; limit?: number; offset?: number },
   ): SearchHit[];
+  /**
+   * Every tag present on notes the instance can read, each with the number of
+   * those notes that carry it, ranked most-used first (canonical tags float to
+   * the top). `prefix` matches case-sensitively for hierarchy navigation;
+   * `contains` is a case-insensitive substring search; `folder` restricts to a
+   * folder subtree; `limit` caps the result.
+   */
+  tags(opts?: {
+    prefix?: string;
+    contains?: string;
+    folder?: string;
+    limit?: number;
+  }): TagInfo[];
 };
