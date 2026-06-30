@@ -10,6 +10,7 @@ import type { QueryOrder } from './models/order.ts';
 import type { OutboundLink } from './models/outbound-link.ts';
 import type { QueryApi } from './models/query-api.ts';
 import type { SearchHit } from './models/search-hit.ts';
+import type { TagInfo } from './models/tag-info.ts';
 import type { WhereMap } from './models/where-map.ts';
 
 const ORDER_FIELDS = new Set<string>(['mtime_ms', 'path', 'title']);
@@ -28,26 +29,32 @@ type LinkRow = { target: string; base: string | null };
 type SearchRow = { path: string; title: string; snippet: string };
 type PathRow = { path: string };
 
+function assertNonNegativeInt(value: number, label: string): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new MdVaultError(
+      'VALIDATION_ERROR',
+      `${label} must be a non-negative integer, got: ${value}`,
+    );
+  }
+}
+
 function validatePagination(
   limit: number | undefined,
   offset: number | undefined,
 ): { lim: number; off: number } {
   const lim = limit ?? DEFAULT_LIMIT;
   const off = offset ?? 0;
-  if (!Number.isInteger(lim) || lim < 0) {
-    throw new MdVaultError(
-      'VALIDATION_ERROR',
-      `limit must be a non-negative integer, got: ${limit}`,
-    );
-  }
-  if (!Number.isInteger(off) || off < 0) {
-    throw new MdVaultError(
-      'VALIDATION_ERROR',
-      `offset must be a non-negative integer, got: ${offset}`,
-    );
-  }
+  assertNonNegativeInt(lim, 'limit');
+  assertNonNegativeInt(off, 'offset');
 
   return { lim: Math.min(lim, HARD_MAX), off };
+}
+
+function validateLimit(limit: number | undefined): void {
+  if (limit === undefined) {
+    return;
+  }
+  assertNonNegativeInt(limit, 'limit');
 }
 
 function sanitizeFts(q: string): string | null {
@@ -60,6 +67,24 @@ function sanitizeFts(q: string): string | null {
   }
 
   return tokens.map((t) => `"${t.replace(/"/g, '""')}"`).join(' ');
+}
+
+// Escapes LIKE metacharacters (\, %, _) so caller-supplied text matches
+// literally under an `ESCAPE '\'` clause. Single pass: each metachar gets one
+// leading backslash, so escaping '\' first is not double-applied.
+function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+// Appends the recursive folder-subtree filter (`folder` itself + `folder/…`
+// descendants) with %/_ escaped. note paths are aliased `n` in every query.
+function pushFolderFilter(
+  parts: string[],
+  params: (string | number | boolean | null)[],
+  folder: string,
+): void {
+  parts.push("(n.path = ? OR n.path LIKE ? ESCAPE '\\')");
+  params.push(folder, `${escapeLike(folder)}/%`);
 }
 
 function pathBaseLower(p: string): string {
@@ -152,8 +177,7 @@ export function createQuery(
     }
 
     if (folder !== undefined) {
-      parts.push('(n.path = ? OR n.path LIKE ?)');
-      params.push(folder, `${folder}/%`);
+      pushFolderFilter(parts, params, folder);
     }
 
     const clause = parts.length > 0 ? `WHERE ${parts.join(' AND ')}` : '';
@@ -357,8 +381,7 @@ export function createQuery(
     }
 
     if (folder !== undefined) {
-      parts.push('(n.path = ? OR n.path LIKE ?)');
-      params.push(folder, `${folder}/%`);
+      pushFolderFilter(parts, params, folder);
     }
 
     const extra = parts.length > 0 ? `AND ${parts.join(' AND ')}` : '';
@@ -399,5 +422,77 @@ export function createQuery(
     return scoped.slice(off, off + lim);
   }
 
-  return { queryNotes, backlinks, outboundLinks, searchText };
+  function tags(
+    opts: {
+      prefix?: string;
+      contains?: string;
+      folder?: string;
+      limit?: number;
+    } = {},
+  ): TagInfo[] {
+    const { prefix, contains, folder, limit } = opts;
+    validateLimit(limit);
+    const parts: string[] = [];
+    const params: (string | number | boolean | null)[] = [];
+
+    if (prefix !== undefined) {
+      // Case-sensitive exact prefix (default BINARY collation); substr avoids
+      // LIKE wildcard handling, so %/_ in the prefix are literal.
+      parts.push('substr(nt.tag, 1, length(?)) = ?');
+      params.push(prefix, prefix);
+    }
+
+    if (contains !== undefined) {
+      // LOWER both sides via SQLite (ASCII-only) so case-folding is symmetric.
+      // A JS toLowerCase here would Unicode-fold only the needle while SQLite
+      // leaves the haystack's non-ASCII letters intact, making non-ASCII tags
+      // (e.g. Cyrillic) unfindable even by exact spelling.
+      parts.push("LOWER(nt.tag) LIKE LOWER(?) ESCAPE '\\'");
+      params.push(`%${escapeLike(contains)}%`);
+    }
+
+    if (folder !== undefined) {
+      pushFolderFilter(parts, params, folder);
+    }
+
+    const clause = parts.length > 0 ? `WHERE ${parts.join(' AND ')}` : '';
+    // Join notes for the path so scope is filtered in JS (note_tags is keyed by
+    // path_key, not path); aggregate counts in a Map since a tag spans notes.
+    const sql = `SELECT nt.tag AS tag, n.path AS path FROM note_tags nt JOIN notes n ON n.path_key = nt.path_key ${clause}`;
+    const rows = db
+      .query<
+        { tag: string; path: string },
+        (string | number | boolean | null)[]
+      >(sql)
+      .all(...params);
+    const counts = new Map<string, number>();
+    const scopeByPath = new Map<string, boolean>();
+    for (const row of rows) {
+      let allowed = scopeByPath.get(row.path);
+      if (allowed === undefined) {
+        allowed = inScope(row.path);
+        scopeByPath.set(row.path, allowed);
+      }
+      if (allowed) {
+        counts.set(row.tag, (counts.get(row.tag) ?? 0) + 1);
+      }
+    }
+    const result: TagInfo[] = [...counts.entries()]
+      .map(([tag, count]) => ({ tag, count }))
+      // count DESC, then tag ASC by UTF-16 code-unit order — locale-independent
+      // and deterministic across macOS/Linux CI (the prefix filter is likewise
+      // case-sensitive). Diverges from SQLite BINARY only for astral-plane
+      // characters, which do not occur in realistic tags.
+      .sort((a, b) => {
+        if (a.count !== b.count) {
+          return b.count - a.count;
+        }
+
+        return a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0;
+      });
+
+    return limit === undefined ? result : result.slice(0, limit);
+  }
+
+  return { queryNotes, backlinks, outboundLinks, searchText, tags };
 }

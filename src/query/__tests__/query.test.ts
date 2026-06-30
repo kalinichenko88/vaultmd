@@ -91,7 +91,7 @@ afterEach(async () => {
 
 // ── Cycle 1: scaffold ─────────────────────────────────────────────────────────
 describe('createQuery factory', () => {
-  test('returns an object with all four methods', () => {
+  test('returns an object with all five methods', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
@@ -105,6 +105,7 @@ describe('createQuery factory', () => {
     expect(typeof q.backlinks).toBe('function');
     expect(typeof q.outboundLinks).toBe('function');
     expect(typeof q.searchText).toBe('function');
+    expect(typeof q.tags).toBe('function');
   });
 
   test('queryNotes returns [] on an empty DB', () => {
@@ -290,6 +291,28 @@ describe('queryNotes — filtering', () => {
     expect(hits.map((h) => h.path).sort()).toEqual([
       'daily/2026-01.md',
       'daily/sub/2026-02.md',
+    ]);
+  });
+
+  test('folder filter: % and _ in the folder name match literally, not as wildcards', () => {
+    const io = createVaultIo({
+      root: vaultDir,
+      prefixes: { read: [''], write: [''] },
+    });
+    const { queryNotes } = createQuery(db, io, {
+      linkResolution: 'wikilink',
+      caseSensitive: false,
+      ignore: [],
+    });
+    insertNote(db, { path: 'foo_1/a.md' }); // literal underscore
+    insertNote(db, { path: 'fooX1/b.md' }); // matches only if '_' is a wildcard
+    insertNote(db, { path: 'bar%baz/c.md' }); // literal percent
+    insertNote(db, { path: 'barXXbaz/d.md' }); // matches only if '%' is a wildcard
+    expect(queryNotes({ folder: 'foo_1' }).map((h) => h.path)).toEqual([
+      'foo_1/a.md',
+    ]);
+    expect(queryNotes({ folder: 'bar%baz' }).map((h) => h.path)).toEqual([
+      'bar%baz/c.md',
     ]);
   });
 
@@ -826,6 +849,23 @@ describe('searchText — basic search + filters + read-scope', () => {
     expect(hits.map((h) => h.path)).toEqual(['daily/2026-01.md']);
   });
 
+  test('folder filter: % and _ in the folder name match literally', () => {
+    const io = createVaultIo({
+      root: vaultDir,
+      prefixes: { read: [''], write: [''] },
+    });
+    const { searchText } = createQuery(db, io, {
+      linkResolution: 'wikilink',
+      caseSensitive: false,
+      ignore: [],
+    });
+    insertNote(db, { path: 'foo_1/a.md', body: 'standup notes' });
+    insertNote(db, { path: 'fooX1/b.md', body: 'standup notes' });
+    expect(
+      searchText('standup', { folder: 'foo_1' }).map((h) => h.path),
+    ).toEqual(['foo_1/a.md']);
+  });
+
   test('read-scope: out-of-scope notes never returned', () => {
     const io = createVaultIo({
       root: vaultDir,
@@ -952,6 +992,182 @@ describe('queryNotes — mixed-scope pagination (Finding 1 regression)', () => {
     // no overlaps, no gaps
     const all = [...page1, ...page2].map((h) => h.path);
     expect(new Set(all).size).toBe(4);
+  });
+});
+
+// ── tags ──────────────────────────────────────────────────────────────────────
+describe('tags', () => {
+  function mkTags(
+    io = createVaultIo({
+      root: vaultDir,
+      prefixes: { read: [''], write: [''] },
+    }),
+  ) {
+    return createQuery(db, io, {
+      linkResolution: 'wikilink',
+      caseSensitive: false,
+      ignore: [],
+    }).tags;
+  }
+
+  test('returns [] on an empty DB', () => {
+    expect(mkTags()()).toEqual([]);
+  });
+
+  test('counts notes per tag and dedups across notes', () => {
+    const tags = mkTags();
+    insertNote(db, { path: 'a.md', tags: ['idea'] });
+    insertNote(db, { path: 'b.md', tags: ['idea', 'project'] });
+    expect(tags()).toEqual([
+      { tag: 'idea', count: 2 },
+      { tag: 'project', count: 1 },
+    ]);
+  });
+
+  test('sorts by count desc, then tag asc (name tiebreak)', () => {
+    const tags = mkTags();
+    insertNote(db, { path: 'a.md', tags: ['zeta', 'alpha'] });
+    insertNote(db, { path: 'b.md', tags: ['zeta', 'alpha'] });
+    insertNote(db, { path: 'c.md', tags: ['mid'] });
+    expect(tags()).toEqual([
+      { tag: 'alpha', count: 2 },
+      { tag: 'zeta', count: 2 },
+      { tag: 'mid', count: 1 },
+    ]);
+  });
+
+  test('sort tiebreak uses Unicode code point, not locale (uppercase before lowercase)', () => {
+    const tags = mkTags();
+    // 'Z' (U+005A) precedes 'a' (U+0061) by code point; a locale collator would
+    // typically order 'a' before 'Z'. Equal count → tiebreak must be code-point.
+    insertNote(db, { path: 'a.md', tags: ['a', 'Z'] });
+    expect(tags().map((t) => t.tag)).toEqual(['Z', 'a']);
+  });
+
+  test('read-scope: out-of-scope-only tag is absent; shared tag counts only in-scope notes', () => {
+    const tags = mkTags(
+      createVaultIo({
+        root: vaultDir,
+        prefixes: { read: ['public'], write: ['public'] },
+      }),
+    );
+    insertNote(db, { path: 'public/a.md', tags: ['shared', 'pub'] });
+    insertNote(db, { path: 'private/b.md', tags: ['shared', 'priv'] });
+    expect(tags()).toEqual([
+      { tag: 'pub', count: 1 },
+      { tag: 'shared', count: 1 }, // not 2 — the private note is out of scope
+    ]);
+  });
+
+  test('prefix: anchored branch match, siblings excluded', () => {
+    const tags = mkTags();
+    insertNote(db, {
+      path: 'a.md',
+      tags: ['project/vaultmd', 'project/site', 'idea'],
+    });
+    expect(tags({ prefix: 'project/' }).map((t) => t.tag)).toEqual([
+      'project/site',
+      'project/vaultmd',
+    ]);
+  });
+
+  test('prefix: case-sensitive — "project/" does not match "Project/"', () => {
+    const tags = mkTags();
+    insertNote(db, { path: 'a.md', tags: ['project/x', 'Project/y'] });
+    expect(tags({ prefix: 'project/' }).map((t) => t.tag)).toEqual([
+      'project/x',
+    ]);
+  });
+
+  test('prefix: % and _ are literal, not wildcards', () => {
+    const tags = mkTags();
+    insertNote(db, { path: 'a.md', tags: ['a_b/x', 'aXb/y'] });
+    expect(tags({ prefix: 'a_b/' }).map((t) => t.tag)).toEqual(['a_b/x']);
+  });
+
+  test('contains: ASCII case-insensitive substring', () => {
+    const tags = mkTags();
+    insertNote(db, { path: 'a.md', tags: ['Project/x', 'idea', 'reproj'] });
+    expect(
+      tags({ contains: 'proj' })
+        .map((t) => t.tag)
+        .sort(),
+    ).toEqual(['Project/x', 'reproj']);
+  });
+
+  test('contains: % and _ are literal', () => {
+    const tags = mkTags();
+    insertNote(db, { path: 'a.md', tags: ['a_b', 'aXb'] });
+    expect(tags({ contains: 'a_b' }).map((t) => t.tag)).toEqual(['a_b']);
+  });
+
+  test('prefix and contains AND together', () => {
+    const tags = mkTags();
+    insertNote(db, {
+      path: 'a.md',
+      tags: ['project/alpha', 'project/beta', 'other/alpha'],
+    });
+    // prefix 'project/' AND contains 'alpha' → only project/alpha qualifies
+    expect(
+      tags({ prefix: 'project/', contains: 'alpha' }).map((t) => t.tag),
+    ).toEqual(['project/alpha']);
+  });
+
+  test('contains: non-ASCII tag is findable by exact spelling (symmetric ASCII case-fold)', () => {
+    const tags = mkTags();
+    insertNote(db, { path: 'a.md', tags: ['Проект/альфа', 'project/beta'] });
+    // SQLite LOWER won't fold Cyrillic 'П', so the needle must NOT be
+    // JS-lowercased — exact spelling must still match.
+    expect(tags({ contains: 'Проект' }).map((t) => t.tag)).toEqual([
+      'Проект/альфа',
+    ]);
+    // ASCII case-insensitivity still works:
+    expect(tags({ contains: 'PROJECT' }).map((t) => t.tag)).toEqual([
+      'project/beta',
+    ]);
+  });
+
+  test('folder: only tags from the subtree, count scoped to subtree', () => {
+    const tags = mkTags();
+    insertNote(db, { path: 'daily/a.md', tags: ['journal'] });
+    insertNote(db, { path: 'daily/sub/b.md', tags: ['journal', 'sub'] });
+    insertNote(db, { path: 'projects/c.md', tags: ['proj'] });
+    expect(tags({ folder: 'daily' })).toEqual([
+      { tag: 'journal', count: 2 },
+      { tag: 'sub', count: 1 },
+    ]);
+  });
+
+  test('folder: % and _ in the folder name match literally', () => {
+    const tags = mkTags();
+    insertNote(db, { path: 'foo_1/a.md', tags: ['t1'] });
+    insertNote(db, { path: 'fooX1/b.md', tags: ['t2'] });
+    expect(tags({ folder: 'foo_1' }).map((t) => t.tag)).toEqual(['t1']);
+  });
+
+  test('limit: returns the top-N by count', () => {
+    const tags = mkTags();
+    insertNote(db, { path: 'a.md', tags: ['x'] });
+    insertNote(db, { path: 'b.md', tags: ['x', 'y'] });
+    insertNote(db, { path: 'c.md', tags: ['x', 'y', 'z'] });
+    expect(tags({ limit: 2 })).toEqual([
+      { tag: 'x', count: 3 },
+      { tag: 'y', count: 2 },
+    ]);
+  });
+
+  test('limit: negative throws VALIDATION_ERROR', () => {
+    const tags = mkTags();
+    expect(() => tags({ limit: -1 })).toThrow(
+      expect.objectContaining({ code: 'VALIDATION_ERROR' }),
+    );
+  });
+
+  test('limit: non-integer throws VALIDATION_ERROR', () => {
+    const tags = mkTags();
+    expect(() => tags({ limit: 1.5 })).toThrow(
+      expect.objectContaining({ code: 'VALIDATION_ERROR' }),
+    );
   });
 });
 

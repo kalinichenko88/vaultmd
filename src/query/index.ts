@@ -4,5 +4,6 @@ export type { OrderField, QueryOrder } from './models/order.ts';
 export type { OutboundLink } from './models/outbound-link.ts';
 export type { QueryApi } from './models/query-api.ts';
 export type { SearchHit } from './models/search-hit.ts';
+export type { TagInfo } from './models/tag-info.ts';
 export type { WhereMap } from './models/where-map.ts';
 export { createQuery } from './query.ts';
