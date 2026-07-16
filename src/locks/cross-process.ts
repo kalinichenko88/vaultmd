@@ -5,10 +5,6 @@ import * as path from 'node:path';
 
 import { MdVaultError } from '@/errors.ts';
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function tryReclaim(lockfile: string, payload: string): Promise<boolean> {
   let holder: { pid?: number; host?: string };
   try {
@@ -74,7 +70,7 @@ export async function withCrossProcessLock<T>(
           `cross-process lock busy: ${lockfile}`,
         );
       }
-      await delay(50);
+      await Bun.sleep(50);
     }
   }
 

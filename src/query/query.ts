@@ -50,13 +50,6 @@ function validatePagination(
   return { lim: Math.min(lim, HARD_MAX), off };
 }
 
-function validateLimit(limit: number | undefined): void {
-  if (limit === undefined) {
-    return;
-  }
-  assertNonNegativeInt(limit, 'limit');
-}
-
 function sanitizeFts(q: string): string | null {
   const tokens = q
     .trim()
@@ -133,6 +126,17 @@ export function createQuery(
       .query<TagRow, [string]>('SELECT tag FROM note_tags WHERE path_key = ?')
       .all(pathKey)
       .map((r) => r.tag);
+  }
+
+  // In-scope notes whose basename (case-folded, sans .md) equals `base` — the
+  // bare-wikilink candidate set, shared by backlinks and outboundLinks.
+  function bareCandidates(base: string): PathRow[] {
+    return db
+      .query<PathRow, [string, string]>(
+        'SELECT path FROM notes WHERE LOWER(path_key) = ? OR LOWER(path_key) LIKE ?',
+      )
+      .all(`${base}.md`, `%/${base}.md`)
+      .filter((c) => pathBaseLower(c.path) === base && inScope(c.path));
   }
 
   function queryNotes(
@@ -264,14 +268,7 @@ export function createQuery(
 
       // candidates are the same for every source with this base, but tie-break winner
       // differs per source folder — compute candidates once, winner per source
-      const rawCandidates = db
-        .query<PathRow, [string, string]>(
-          `SELECT path FROM notes WHERE LOWER(path_key) = ? OR LOWER(path_key) LIKE ?`,
-        )
-        .all(`${base}.md`, `%/${base}.md`);
-      const candidates = rawCandidates.filter(
-        (c) => pathBaseLower(c.path) === base && inScope(c.path),
-      );
+      const candidates = bareCandidates(base);
 
       for (const r of bareRows) {
         if (!inScope(r.from_path)) {
@@ -334,15 +331,10 @@ export function createQuery(
           resolved = hit.path;
         }
       } else if (row.base !== null) {
-        const rawC = db
-          .query<PathRow, [string, string]>(
-            'SELECT path FROM notes WHERE LOWER(path_key) = ? OR LOWER(path_key) LIKE ?',
-          )
-          .all(`${row.base}.md`, `%/${row.base}.md`);
-        const cands = rawC.filter(
-          (c) => pathBaseLower(c.path) === row.base && inScope(c.path),
+        const winner = tieBreakWinner(
+          bareCandidates(row.base),
+          pathFolder(display),
         );
-        const winner = tieBreakWinner(cands, pathFolder(display));
         if (winner !== undefined) {
           resolved = winner;
         }
@@ -431,7 +423,9 @@ export function createQuery(
     } = {},
   ): TagInfo[] {
     const { prefix, contains, folder, limit } = opts;
-    validateLimit(limit);
+    if (limit !== undefined) {
+      assertNonNegativeInt(limit, 'limit');
+    }
     const parts: string[] = [];
     const params: (string | number | boolean | null)[] = [];
 
