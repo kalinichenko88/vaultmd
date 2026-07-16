@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1 — 2026-07-16
+
+- **Internal cleanup only — no API or behavior changes.** Removed a handful of
+  hand-rolled reimplementations of standard-library/Bun helpers and single-use
+  wrappers across `notes`, `query`, and `locks`: exact-match counting in
+  `updateNote` now uses `String.split`, the bare-wikilink candidate lookup shared
+  by `backlinks` and `outboundLinks` was de-duplicated into one helper, and the
+  cross-process lock's retry delay now uses `Bun.sleep`. The frozen public
+  surface is unchanged.
+
 ## 0.4.0 — 2026-06-30
 
 - **`query.tags()`** — a new read-only query returning the vault's existing tags
