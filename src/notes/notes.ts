@@ -33,20 +33,6 @@ export type NotesDeps = {
   cross?: CrossLock | false;
 };
 
-function countOccurrences(haystack: string, needle: string): number {
-  if (needle.length === 0) {
-    return 0;
-  }
-  let count = 0;
-  let idx = haystack.indexOf(needle);
-  while (idx !== -1) {
-    count++;
-    idx = haystack.indexOf(needle, idx + needle.length);
-  }
-
-  return count;
-}
-
 export function createNotes(deps: NotesDeps): NotesApi {
   const { db, vaultIo, cfg, query, onCommit, cross = false } = deps;
 
@@ -87,19 +73,6 @@ export function createNotes(deps: NotesDeps): NotesApi {
     return locked();
   }
 
-  // The write-path resolve trio shared by every mutator: the absolute fs path,
-  // the case-folded lock/serialization key, and the display path for commits —
-  // canonicalized once by vault-io rather than three times.
-  function resolveForWrite(path: string): {
-    full: string;
-    key: string;
-    display: string;
-  } {
-    const { full, key, relative } = vaultIo.resolveWriteTarget(path);
-
-    return { full, key, display: relative };
-  }
-
   function buildContent(input: {
     frontmatter?: Record<string, unknown>;
     body: string;
@@ -133,7 +106,7 @@ export function createNotes(deps: NotesDeps): NotesApi {
     input: { frontmatter?: Record<string, unknown>; body: string },
   ): Promise<void> {
     const content = buildContent(input);
-    const { full, key, display } = resolveForWrite(path);
+    const { full, key, relative: display } = vaultIo.resolveWriteTarget(path);
     await runLocked(key, async () => {
       // exclusiveCreate (temp + link) → ALREADY_EXISTS on clash, never clobbers.
       const sig = await exclusiveCreate(full, content);
@@ -178,7 +151,7 @@ export function createNotes(deps: NotesDeps): NotesApi {
     transform: (current: string | null) => string | null,
     allowCreate: boolean,
   ) {
-    const { full, key, display } = resolveForWrite(path);
+    const { full, key, relative: display } = vaultIo.resolveWriteTarget(path);
 
     return withFileTransform(full, key, display, transform, {
       allowCreate,
@@ -216,7 +189,7 @@ export function createNotes(deps: NotesDeps): NotesApi {
           `no match in missing file: ${display}`,
         );
       }
-      const count = countOccurrences(body, old);
+      const count = old.length === 0 ? 0 : body.split(old).length - 1;
       if (count === 0) {
         throw new MdVaultError(
           'NO_MATCH',
@@ -263,7 +236,7 @@ export function createNotes(deps: NotesDeps): NotesApi {
   }
 
   async function deleteNote(path: string): Promise<boolean> {
-    const { full, key, display } = resolveForWrite(path);
+    const { full, key, relative: display } = vaultIo.resolveWriteTarget(path);
     const { deleted } = await withFileDelete(full, key, display, {
       onCommit: indexCommit,
       cross,
