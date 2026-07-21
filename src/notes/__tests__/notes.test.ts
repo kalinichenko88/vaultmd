@@ -411,3 +411,107 @@ describe('transformNote', () => {
     expect(await notes.transformNote('ghost.md', () => null)).toBe('unchanged');
   });
 });
+
+describe('moveNote', () => {
+  test('moves the file AND the index row to the new path', async () => {
+    await notes.createNote('a.md', {
+      frontmatter: { tags: ['keep'] },
+      body: 'body',
+    });
+
+    const before = await readFile(join(vaultDir, 'a.md'), 'utf8');
+
+    await notes.moveNote('a.md', 'archive/a.md');
+
+    // Byte-for-byte, frontmatter untouched.
+    expect(await readFile(join(vaultDir, 'archive/a.md'), 'utf8')).toBe(before);
+    expect(await io.stat('a.md')).toBeNull();
+    // Write-through: the index followed the file, IN-LOCK — no reconcile.
+    const paths = query.queryNotes({ tag: 'keep' }).map((n) => n.path);
+    expect(paths).toContain('archive/a.md');
+    expect(paths).not.toContain('a.md');
+  });
+
+  test('missing source → NOT_FOUND', async () => {
+    let err: unknown;
+    try {
+      await notes.moveNote('ghost.md', 'archive/ghost.md');
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(MdVaultError);
+    expect((err as MdVaultError).code).toBe('NOT_FOUND');
+  });
+
+  test('occupied destination → ALREADY_EXISTS, source left in place', async () => {
+    await notes.createNote('a.md', { body: 'source' });
+    await notes.createNote('b.md', { body: 'target' });
+    let err: unknown;
+    try {
+      await notes.moveNote('a.md', 'b.md');
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(MdVaultError);
+    expect((err as MdVaultError).code).toBe('ALREADY_EXISTS');
+    expect(await readFile(join(vaultDir, 'a.md'), 'utf8')).toBe('source');
+    expect(await readFile(join(vaultDir, 'b.md'), 'utf8')).toBe('target');
+  });
+
+  test('from === to → VALIDATION_ERROR', async () => {
+    await notes.createNote('a.md', { body: 'x' });
+    let err: unknown;
+    try {
+      await notes.moveNote('a.md', './a.md');
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(MdVaultError);
+    expect((err as MdVaultError).code).toBe('VALIDATION_ERROR');
+    expect(await readFile(join(vaultDir, 'a.md'), 'utf8')).toBe('x');
+  });
+
+  test('destination outside the write scope → ALLOWLIST_VIOLATION, source intact', async () => {
+    await mkdir(join(vaultDir, 'notes'), { recursive: true });
+    const scopedIo = createVaultIo({
+      root: vaultDir,
+      prefixes: { read: [''], write: ['notes'] },
+      caseSensitive: true,
+      ignore: [],
+    });
+    const scoped = createNotes({
+      db,
+      vaultIo: scopedIo,
+      cfg,
+      query,
+      cross: false,
+    });
+    await scoped.createNote('notes/a.md', { body: 'scoped' });
+
+    let err: unknown;
+    try {
+      await scoped.moveNote('notes/a.md', 'archive/a.md');
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(MdVaultError);
+    expect((err as MdVaultError).code).toBe('ALLOWLIST_VIOLATION');
+    expect(await readFile(join(vaultDir, 'notes/a.md'), 'utf8')).toBe('scoped');
+  });
+
+  test('opposing concurrent moves settle instead of deadlocking', async () => {
+    await notes.createNote('a.md', { body: 'A' });
+    await notes.createNote('b.md', { body: 'B' });
+
+    // Both locks are taken in sorted key order, so a→b and b→a queue behind
+    // 'a.md' rather than each holding what the other waits for. Both reject
+    // (each destination is occupied) — the regression is a hang, not a code.
+    const settled = await Promise.allSettled([
+      notes.moveNote('a.md', 'b.md'),
+      notes.moveNote('b.md', 'a.md'),
+    ]);
+    expect(settled.map((s) => s.status)).toEqual(['rejected', 'rejected']);
+    expect(await readFile(join(vaultDir, 'a.md'), 'utf8')).toBe('A');
+    expect(await readFile(join(vaultDir, 'b.md'), 'utf8')).toBe('B');
+  });
+});

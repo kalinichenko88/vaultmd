@@ -17,6 +17,7 @@ const VALUE_EXPORTS = [
   'serializeFrontmatter',
   'storedLinksFor',
   'withFileDelete',
+  'withFileMove',
   'withFileTransform',
 ].sort();
 
@@ -70,6 +71,9 @@ const ALL_EXPORTS = [
   'serializeFrontmatter',
   // — tags discovery (new 1) —
   'TagInfo',
+  // — 0.5.0 (new 2) —
+  'MoveTarget',
+  'withFileMove',
 ].sort();
 
 function exportedNames(source: string): string[] {
@@ -90,12 +94,12 @@ function exportedNames(source: string): string[] {
 }
 
 describe('package public API freeze', () => {
-  test('src/index.ts exports exactly the frozen 43 names (Plan 1 + Plan 2 + Plan 3 + 0.2.0 + 0.3.0 + tags)', () => {
+  test('src/index.ts exports exactly the frozen 45 names (Plan 1 + Plan 2 + Plan 3 + 0.2.0 + 0.3.0 + tags + 0.5.0)', () => {
     const src = readFileSync(new URL('../index.ts', import.meta.url), 'utf8');
     expect(exportedNames(src)).toEqual(ALL_EXPORTS);
   });
 
-  test('runtime value exports are exactly the 12 live values', () => {
+  test('runtime value exports are exactly the 13 live values', () => {
     expect(Object.keys(vaultmd).sort()).toEqual(VALUE_EXPORTS);
   });
 

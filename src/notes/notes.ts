@@ -12,6 +12,7 @@ import {
   type CommitEvent,
   type CrossLock,
   withFileDelete,
+  withFileMove,
   withFileTransform,
 } from '@/locked-file/index.ts';
 import { withCrossProcessLock, withFileLock } from '@/locks/index.ts';
@@ -245,6 +246,16 @@ export function createNotes(deps: NotesDeps): NotesApi {
     return deleted;
   }
 
+  async function moveNote(from: string, to: string): Promise<void> {
+    // Both ends go through resolveWriteTarget: containment, allowlist and the
+    // .md requirement are enforced on the destination too, not just the source.
+    await withFileMove(
+      vaultIo.resolveWriteTarget(from),
+      vaultIo.resolveWriteTarget(to),
+      { onCommit: indexCommit, cross },
+    );
+  }
+
   async function transformNote(
     path: string,
     transform: (current: string | null) => string | null,
@@ -273,6 +284,7 @@ export function createNotes(deps: NotesDeps): NotesApi {
     updateNote,
     editFrontmatter,
     deleteNote,
+    moveNote,
     transformNote,
   };
 }

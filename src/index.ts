@@ -22,10 +22,15 @@ export { extractLinks, storedLinksFor } from '@/links/index.ts';
 export type {
   CommitEvent,
   CrossLock,
+  MoveTarget,
   TransformOpts,
   TransformResult,
 } from '@/locked-file/index.ts';
-export { withFileDelete, withFileTransform } from '@/locked-file/index.ts';
+export {
+  withFileDelete,
+  withFileMove,
+  withFileTransform,
+} from '@/locked-file/index.ts';
 export type {
   NotesApi,
   ReadNoteResult,

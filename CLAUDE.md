@@ -90,8 +90,8 @@ code** — only the API-freeze test (`src/__tests__/index.test.ts`) imports it.
 ### Key invariants
 
 - **Write-through indexing.** `notes` mutations (`createNote`, `updateNote`,
-  `editFrontmatter`, `deleteNote`) update the SQLite index *inside the same
-  per-file lock* as the file write, via the `indexCommit` onCommit seam (after
+  `editFrontmatter`, `deleteNote`, `moveNote`) update the SQLite index *inside
+  the same per-file lock* as the file write (`moveNote` holds both ends' locks), via the `indexCommit` onCommit seam (after
   the file commits, before the consumer `onCommit`). File write and index update
   are never split across locks.
 - **Config fingerprint guard.** `IndexConfig` (`linkResolution`, `caseSensitive`,

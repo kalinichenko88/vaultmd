@@ -6,10 +6,11 @@ import type { UpdateOp } from './update-op.ts';
 
 /**
  * The notes CRUD surface, exposed as `vault.notes`. Every method takes a
- * vault-relative path; the five mutating methods (`createNote`, `updateNote`,
- * `editFrontmatter`, `transformNote`, `deleteNote`) run inside the per-file
- * lock so the `.md` file and its index row never drift. `readNote` is a
- * consistent read and does not acquire the lock.
+ * vault-relative path; the six mutating methods (`createNote`, `updateNote`,
+ * `editFrontmatter`, `transformNote`, `deleteNote`, `moveNote`) run inside the
+ * per-file lock so the `.md` file and its index row never drift (`moveNote`
+ * holds both ends' locks). `readNote` is a consistent read and does not
+ * acquire the lock.
  */
 export type NotesApi = {
   /**
@@ -71,4 +72,18 @@ export type NotesApi = {
    * @returns `true` if a file was deleted, `false` if it was already absent.
    */
   deleteNote(path: string): Promise<boolean>;
+  /**
+   * Move a note to a new vault-relative path, byte-for-byte: the content and
+   * its frontmatter are carried over untouched, and the index row follows to
+   * the new path. Both ends are allowlist- and containment-checked; the
+   * destination is never clobbered. Runs under BOTH per-file locks, so a
+   * concurrent write to either end serializes against it.
+   * @param from Vault-relative path of the note to move.
+   * @param to Vault-relative destination path (must be a free `.md` path).
+   * @throws {@link MdVaultError} `VALIDATION_ERROR` if `from` and `to` resolve
+   * to the same note, `NOT_FOUND` if `from` does not exist, `ALREADY_EXISTS`
+   * if `to` is taken (the source is left in place), or `MTIME_CONFLICT` if the
+   * source changed mid-move (the destination is rolled back).
+   */
+  moveNote(from: string, to: string): Promise<void>;
 };

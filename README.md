@@ -109,8 +109,8 @@ write scope. This is the security chokepoint — all path canonicalization and
 containment checks live behind it.
 
 **Write-through indexing.** `createNote`, `updateNote`, `editFrontmatter`,
-`transformNote`, and `deleteNote` update the index *inside the same per-file
-lock* as the file write.
+`transformNote`, `deleteNote`, and `moveNote` update the index *inside the same
+per-file lock* as the file write (`moveNote` holds both ends' locks).
 The file and its index row are never updated in separate transactions, so a
 crash can't leave them disagreeing.
 
@@ -166,6 +166,11 @@ transformNote(path, transform: (current: string | null) => string | null): Promi
 
 // Delete a note. Returns whether a file was actually removed.
 deleteNote(path): Promise<boolean>
+
+// Move a note to a new path, byte-for-byte (frontmatter untouched); the index
+// row follows. Both ends are allowlist-checked, and the destination is never
+// clobbered. Throws NOT_FOUND / ALREADY_EXISTS / VALIDATION_ERROR (from === to).
+moveNote(from, to): Promise<void>
 ```
 
 `ReadNoteResult` is `{ frontmatter, tags, body, valid, outbound?, backlinks? }`,
@@ -218,6 +223,7 @@ import {
   createVaultIo,           // path → safe-IO security layer
   withFileTransform,       // atomic compare-and-swap file edit
   withFileDelete,          // atomic delete with commit hook
+  withFileMove,            // move under both per-file locks, rollback on conflict
   parseFrontmatter,        // pure flat-YAML frontmatter parser
   editFrontmatter,         // pure frontmatter editor
   serializeFrontmatter,    // flat map → fenced YAML block (inverse of parse)
