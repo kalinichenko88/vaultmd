@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.5.0 — 2026-07-21
+
+- **`notes.moveNote(from, to)`** — relocate a note to a new vault-relative path
+  as one atomic operation, instead of assembling it consumer-side from
+  `createNote` + `deleteNote` (which leaves a duplicate note in the source of
+  truth if the process dies between the two steps, and forces callers to hold
+  `deleteNote` they may not want). Content moves byte-for-byte with its
+  frontmatter untouched, and the index row follows the file in the same lock.
+  Both ends go through the `vault-io` chokepoint, so containment, the write
+  allowlist and the `.md` requirement are enforced on the destination too — not
+  only the source. Throws `NOT_FOUND` for a missing source, `ALREADY_EXISTS`
+  for an occupied destination (never clobbers, source left in place),
+  `VALIDATION_ERROR` when both paths resolve to the same note, and
+  `MTIME_CONFLICT` if the source changes mid-move — in which case the freshly
+  created destination is rolled back, so a failed move never leaves the
+  duplicate it exists to prevent.
+- **`withFileMove` + `MoveTarget`** — the `locked-file` primitive behind it, now
+  public alongside `withFileTransform` / `withFileDelete`. It takes **both**
+  per-file locks in sorted key order (in-process inside cross-process, as
+  before), so two opposing moves — `a → b` and `b → a` — can never deadlock.
+- On success the move emits two commit events, `delete` then `create`, rather
+  than a new `move` variant: the pair describes the same observable end state,
+  so existing `onCommit` consumers and write-through indexing need no changes.
+
 ## 0.4.1 — 2026-07-16
 
 - **Internal cleanup only — no API or behavior changes.** Removed a handful of
