@@ -15,9 +15,9 @@ jobs:
         with:
           fetch-depth: 0 # full history for the on-main ancestry check
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
-          node-version: '22' # >= host Node (never pin CI below the dev machine)
+          node-version: '24' # >= host Node (never pin CI below the dev machine)
           registry-url: 'https://registry.npmjs.org'
       - name: Guard — tag matches package.json version and is on main
         run: |
