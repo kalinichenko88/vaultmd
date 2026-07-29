@@ -12,8 +12,13 @@ import type { QueryOrder } from './models/order.ts';
 import type { OutboundLink } from './models/outbound-link.ts';
 import type { QueryApi } from './models/query-api.ts';
 import type { SearchHit } from './models/search-hit.ts';
+import type { TagFilter } from './models/tag-filter.ts';
 import type { TagInfo } from './models/tag-info.ts';
-import type { WhereMap } from './models/where-map.ts';
+import type {
+  WhereCondition,
+  WhereMap,
+  WhereValue,
+} from './models/where-map.ts';
 
 const ORDER_FIELDS = new Set<string>(['mtime_ms', 'path', 'title']);
 const WHERE_KEY_RE = /^[A-Za-z0-9_.-]+$/;
@@ -85,25 +90,117 @@ function pushFolderFilter(
   params.push(folder, `${escapeLike(folder)}/%`);
 }
 
+// Comparison operators that take one scalar operand. `ne` is `IS NOT`, not
+// `!=`: json_extract yields NULL for a field the note never sets, and `!=`
+// would drop those rows — "status is not done" reads as including a note with
+// no status at all. Callers who want the field present add `exists: true`.
+// A Map, not an object literal: a plain object would resolve an operator named
+// `toString` (or any other prototype member) to an inherited function and
+// splice it into the SQL text instead of falling through to the unknown-operator
+// throw.
+const WHERE_COMPARISONS = new Map<string, string>([
+  ['ne', 'IS NOT'],
+  ['lt', '<'],
+  ['lte', '<='],
+  ['gt', '>'],
+  ['gte', '>='],
+]);
+
+function placeholders(n: number): string {
+  return Array.from({ length: n }, () => '?').join(', ');
+}
+
+// One `where` entry as SQL over the frontmatter JSON: a bare value is equality,
+// an object is a set of operators AND-ed together. Only `key` reaches the SQL
+// text (WHERE_KEY_RE-guarded by the caller) — every operand stays a parameter.
+function pushWhereFilter(
+  parts: string[],
+  params: (string | number | boolean | null)[],
+  key: string,
+  cond: WhereValue | WhereCondition,
+): void {
+  const col = `json_extract(n.frontmatter, '$."${key}"')`;
+  if (typeof cond !== 'object' || cond === null) {
+    parts.push(`${col} = ?`);
+    params.push(cond);
+
+    return;
+  }
+
+  for (const op of Object.keys(cond)) {
+    const value = cond[op as keyof WhereCondition];
+    if (value === undefined) {
+      continue;
+    }
+    const comparison = WHERE_COMPARISONS.get(op);
+    if (comparison !== undefined) {
+      parts.push(`${col} ${comparison} ?`);
+      params.push(value as WhereValue);
+      continue;
+    }
+    if (op === 'in') {
+      if (!Array.isArray(value)) {
+        throw new MdVaultError(
+          'VALIDATION_ERROR',
+          `where ${key}.in must be an array`,
+        );
+      }
+      // `IN ()` is legal in SQLite and matches nothing — the right answer for
+      // "any of no values", so an empty list needs no special case.
+      parts.push(`${col} IN (${placeholders(value.length)})`);
+      params.push(...value);
+      continue;
+    }
+    if (op === 'exists') {
+      parts.push(`${col} IS ${value ? 'NOT NULL' : 'NULL'}`);
+      continue;
+    }
+    throw new MdVaultError(
+      'VALIDATION_ERROR',
+      `unknown where operator on ${key}: ${op}`,
+    );
+  }
+}
+
+// Membership in a tag set: one row in note_tags carrying any of `list`. Used
+// once per tag for `all` (each must match) and once for the whole list for
+// `any`. note paths are aliased `n` in every query.
+function pushTagFilter(
+  parts: string[],
+  params: (string | number | boolean | null)[],
+  list: string[],
+): void {
+  parts.push(
+    `EXISTS (SELECT 1 FROM note_tags nt WHERE nt.path_key = n.path_key AND nt.tag IN (${placeholders(list.length)}))`,
+  );
+  params.push(...list);
+}
+
 // Builds the row predicates shared by every note reader: tag membership,
-// frontmatter equality, folder subtree. Returned unjoined because searchText
+// frontmatter filters, folder subtree. Returned unjoined because searchText
 // appends them to an existing `WHERE notes_fts MATCH ?` with AND, while the
 // note-table readers open their own WHERE. The notes table is aliased `n` in
 // every caller.
 function buildNoteFilters(opts: {
   tag?: string;
+  tags?: TagFilter;
   where?: WhereMap;
   folder?: string;
 }): { parts: string[]; params: (string | number | boolean | null)[] } {
-  const { tag, where = {}, folder } = opts;
+  const { tag, tags, where = {}, folder } = opts;
   const parts: string[] = [];
   const params: (string | number | boolean | null)[] = [];
 
   if (tag !== undefined) {
-    parts.push(
-      'EXISTS (SELECT 1 FROM note_tags nt WHERE nt.path_key = n.path_key AND nt.tag = ?)',
-    );
-    params.push(tag);
+    pushTagFilter(parts, params, [tag]);
+  }
+
+  for (const t of tags?.all ?? []) {
+    pushTagFilter(parts, params, [t]);
+  }
+
+  if (tags?.any !== undefined) {
+    pushTagFilter(parts, params, tags.any);
   }
 
   for (const key of Object.keys(where)) {
@@ -113,8 +210,7 @@ function buildNoteFilters(opts: {
         `where key contains invalid characters: ${key}`,
       );
     }
-    parts.push(`json_extract(n.frontmatter, '$."${key}"') = ?`);
-    params.push(where[key]);
+    pushWhereFilter(parts, params, key, where[key]);
   }
 
   if (folder !== undefined) {
@@ -242,6 +338,7 @@ export function createQuery(
   function queryNotes(
     opts: {
       tag?: string;
+      tags?: TagFilter;
       where?: WhereMap;
       folder?: string;
       orderBy?: QueryOrder;
@@ -287,7 +384,12 @@ export function createQuery(
   }
 
   function countNotes(
-    opts: { tag?: string; where?: WhereMap; folder?: string } = {},
+    opts: {
+      tag?: string;
+      tags?: TagFilter;
+      where?: WhereMap;
+      folder?: string;
+    } = {},
   ): number {
     const { parts, params } = buildNoteFilters(opts);
     // Path-only projection: the scope filter needs nothing else, so this skips
@@ -499,7 +601,7 @@ export function createQuery(
   // N" render would pay for one per hit only to discard it.
   function searchScoped(
     q: string,
-    opts: { tag?: string; folder?: string } = {},
+    opts: { tag?: string; tags?: TagFilter; folder?: string } = {},
     withSnippet = true,
   ): SearchHit[] {
     const ftsQ = sanitizeFts(q);
@@ -556,6 +658,7 @@ export function createQuery(
     q: string,
     opts: {
       tag?: string;
+      tags?: TagFilter;
       folder?: string;
       limit?: number;
       offset?: number;
@@ -568,7 +671,7 @@ export function createQuery(
 
   function countSearch(
     q: string,
-    opts: { tag?: string; folder?: string } = {},
+    opts: { tag?: string; tags?: TagFilter; folder?: string } = {},
   ): number {
     return searchScoped(q, opts, false).length;
   }

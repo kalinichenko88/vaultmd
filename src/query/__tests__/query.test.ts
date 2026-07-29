@@ -429,6 +429,204 @@ describe('queryNotes — filtering', () => {
   });
 });
 
+type QueryNotesOpts = Parameters<
+  ReturnType<typeof createQuery>['queryNotes']
+>[0];
+
+describe('queryNotes — rich where operators', () => {
+  // Seeds the fixture and returns a paths-only, order-independent runner.
+  function fixture(): (opts: QueryNotesOpts) => string[] {
+    const io = createVaultIo({
+      root: vaultDir,
+      prefixes: { read: [''], write: [''] },
+    });
+    const { queryNotes } = createQuery(db, io, {
+      linkResolution: 'wikilink',
+      caseSensitive: false,
+      ignore: [],
+    });
+    insertNote(db, {
+      path: 'a.md',
+      frontmatter: { status: 'open', due: '2026-07-01', priority: 1 },
+    });
+    insertNote(db, {
+      path: 'b.md',
+      frontmatter: { status: 'blocked', due: '2026-09-01', priority: 5 },
+    });
+    insertNote(db, { path: 'c.md', frontmatter: { status: 'done' } });
+    insertNote(db, { path: 'd.md', frontmatter: {} }); // no status at all
+
+    return (opts) =>
+      queryNotes(opts)
+        .map((h) => h.path)
+        .sort();
+  }
+
+  test('in: set membership', () => {
+    const run = fixture();
+    expect(run({ where: { status: { in: ['open', 'blocked'] } } })).toEqual([
+      'a.md',
+      'b.md',
+    ]);
+  });
+
+  test('in: empty list matches nothing', () => {
+    const run = fixture();
+    expect(run({ where: { status: { in: [] } } })).toEqual([]);
+  });
+
+  test('ranges: lt / lte / gt / gte, and two bounds AND-ed', () => {
+    const run = fixture();
+    expect(run({ where: { due: { lt: '2026-08-01' } } })).toEqual(['a.md']);
+    expect(run({ where: { priority: { gte: 5 } } })).toEqual(['b.md']);
+    expect(run({ where: { priority: { gt: 1, lte: 5 } } })).toEqual(['b.md']);
+    // a note missing the field never satisfies a range
+    expect(run({ where: { due: { gt: '0000' } } })).toEqual(['a.md', 'b.md']);
+  });
+
+  test('ne: excludes the value AND keeps notes missing the field', () => {
+    const run = fixture();
+    expect(run({ where: { status: { ne: 'done' } } })).toEqual([
+      'a.md',
+      'b.md',
+      'd.md',
+    ]);
+    // pair with exists to require the field
+    expect(run({ where: { status: { ne: 'done', exists: true } } })).toEqual([
+      'a.md',
+      'b.md',
+    ]);
+  });
+
+  test('exists: false selects notes lacking the field, true those having it', () => {
+    const run = fixture();
+    expect(run({ where: { due: { exists: false } } })).toEqual([
+      'c.md',
+      'd.md',
+    ]);
+    expect(run({ where: { due: { exists: true } } })).toEqual(['a.md', 'b.md']);
+  });
+
+  test('operator entries combine with plain equality across keys', () => {
+    const run = fixture();
+    expect(run({ where: { status: 'blocked', priority: { gte: 5 } } })).toEqual(
+      ['b.md'],
+    );
+  });
+
+  test('an injected key is rejected for every operator, table intact', () => {
+    const run = fixture();
+    const bad = 'a";DROP TABLE notes--';
+    for (const cond of [
+      { in: ['x'] },
+      { ne: 'x' },
+      { lt: 1 },
+      { lte: 1 },
+      { gt: 1 },
+      { gte: 1 },
+      { exists: true },
+    ]) {
+      expect(() => run({ where: { [bad]: cond } })).toThrow(
+        expect.objectContaining({ code: 'VALIDATION_ERROR' }),
+      );
+    }
+    expect(
+      db.query<{ c: number }, []>('SELECT COUNT(*) AS c FROM notes').get()?.c,
+    ).toBe(4);
+  });
+
+  test('operator values holding SQL are matched literally, not executed', () => {
+    const run = fixture();
+    const evil = "x'); DROP TABLE notes--";
+    expect(run({ where: { status: { in: [evil] } } })).toEqual([]);
+    expect(run({ where: { status: { gt: evil } } })).toEqual([]);
+    expect(
+      db.query<{ c: number }, []>('SELECT COUNT(*) AS c FROM notes').get()?.c,
+    ).toBe(4);
+  });
+
+  test('unknown operator throws VALIDATION_ERROR', () => {
+    const run = fixture();
+    expect(() => run({ where: { status: { like: 'x' } as never } })).toThrow(
+      expect.objectContaining({ code: 'VALIDATION_ERROR' }),
+    );
+  });
+
+  test('an operator named after a prototype member is unknown, not inherited', () => {
+    const run = fixture();
+    for (const op of ['toString', 'constructor', '__proto__']) {
+      expect(() => run({ where: { status: { [op]: 'x' } as never } })).toThrow(
+        expect.objectContaining({ code: 'VALIDATION_ERROR' }),
+      );
+    }
+  });
+
+  test('non-array `in` throws VALIDATION_ERROR', () => {
+    const run = fixture();
+    expect(() => run({ where: { status: { in: 'open' as never } } })).toThrow(
+      expect.objectContaining({ code: 'VALIDATION_ERROR' }),
+    );
+  });
+});
+
+describe('queryNotes — multi-tag matching', () => {
+  function run(opts: QueryNotesOpts): string[] {
+    const io = createVaultIo({
+      root: vaultDir,
+      prefixes: { read: [''], write: [''] },
+    });
+    const { queryNotes } = createQuery(db, io, {
+      linkResolution: 'wikilink',
+      caseSensitive: false,
+      ignore: [],
+    });
+
+    return queryNotes(opts)
+      .map((h) => h.path)
+      .sort();
+  }
+
+  beforeEach(() => {
+    insertNote(db, { path: 'a.md', tags: ['project', 'active'] });
+    insertNote(db, { path: 'b.md', tags: ['project'] });
+    insertNote(db, { path: 'c.md', tags: ['active', 'archive'] });
+    insertNote(db, { path: 'd.md', tags: [] });
+  });
+
+  test('all: every tag must be present', () => {
+    expect(run({ tags: { all: ['project', 'active'] } })).toEqual(['a.md']);
+    expect(run({ tags: { all: [] } })).toEqual([
+      'a.md',
+      'b.md',
+      'c.md',
+      'd.md',
+    ]);
+  });
+
+  test('any: at least one tag must be present; empty matches nothing', () => {
+    expect(run({ tags: { any: ['project', 'archive'] } })).toEqual([
+      'a.md',
+      'b.md',
+      'c.md',
+    ]);
+    expect(run({ tags: { any: [] } })).toEqual([]);
+  });
+
+  test('all + any + the tag shorthand are AND-ed together', () => {
+    expect(
+      run({ tag: 'project', tags: { all: ['active'], any: ['active'] } }),
+    ).toEqual(['a.md']);
+  });
+
+  test('tag values holding SQL are parameterised', () => {
+    expect(run({ tags: { any: ["x'); DROP TABLE note_tags--"] } })).toEqual([]);
+    expect(
+      db.query<{ c: number }, []>('SELECT COUNT(*) AS c FROM note_tags').get()
+        ?.c,
+    ).toBe(5);
+  });
+});
+
 // ── Cycle 3: backlinks ───────────────────────────────────────────────────────
 describe('backlinks — relative mode', () => {
   test('returns source notes whose stored target matches the path key', () => {
@@ -1312,6 +1510,28 @@ describe('countNotes', () => {
     expect(() => mkQuery().countNotes({ where: { 'bad key!': 1 } })).toThrow(
       expect.objectContaining({ code: 'VALIDATION_ERROR' }),
     );
+  });
+
+  test('applies where operators and tags exactly as queryNotes does', () => {
+    insertNote(db, {
+      path: 'a.md',
+      tags: ['idea', 'active'],
+      frontmatter: { priority: 3 },
+    });
+    insertNote(db, { path: 'b.md', tags: ['idea'], frontmatter: {} });
+    insertNote(db, {
+      path: 'c.md',
+      tags: ['idea', 'active'],
+      frontmatter: { priority: 9 },
+    });
+    const q = mkQuery();
+    const filters = {
+      tags: { all: ['idea', 'active'] },
+      where: { priority: { lt: 5 } },
+    };
+    expect(q.countNotes(filters)).toBe(q.queryNotes(filters).length);
+    expect(q.countNotes(filters)).toBe(1);
+    expect(q.countNotes({ where: { priority: { exists: false } } })).toBe(1);
   });
 });
 

@@ -4,6 +4,7 @@ import type { NoteHit } from './note-hit.ts';
 import type { QueryOrder } from './order.ts';
 import type { OutboundLink } from './outbound-link.ts';
 import type { SearchHit } from './search-hit.ts';
+import type { TagFilter } from './tag-filter.ts';
 import type { TagInfo } from './tag-info.ts';
 import type { WhereMap } from './where-map.ts';
 
@@ -15,11 +16,15 @@ import type { WhereMap } from './where-map.ts';
 export type QueryApi = {
   /**
    * Filter notes by tag, frontmatter field, and/or folder, with ordering and
-   * pagination. Defaults to newest-first (`mtime_ms` desc), limit 100; hard
-   * cap 1000.
+   * pagination. `tag` matches one tag, {@link TagFilter} `tags` matches a set;
+   * `where` entries are equality by default and take a {@link WhereCondition}
+   * for ranges, set membership and presence tests. Every filter given is
+   * AND-ed. Defaults to newest-first (`mtime_ms` desc), limit 100; hard cap
+   * 1000.
    */
   queryNotes(opts?: {
     tag?: string;
+    tags?: TagFilter;
     where?: WhereMap;
     folder?: string;
     orderBy?: QueryOrder;
@@ -27,12 +32,14 @@ export type QueryApi = {
     offset?: number;
   }): NoteHit[];
   /**
-   * Total number of readable notes matching the same `tag` / `where` / `folder`
-   * filters {@link queryNotes} accepts — the page-count companion to it. Not
-   * capped by `limit`, so `Math.ceil(countNotes(f) / pageSize)` is exact.
+   * Total number of readable notes matching the same `tag` / `tags` / `where` /
+   * `folder` filters {@link queryNotes} accepts — the page-count companion to
+   * it. Not capped by `limit`, so `Math.ceil(countNotes(f) / pageSize)` is
+   * exact.
    */
   countNotes(opts?: {
     tag?: string;
+    tags?: TagFilter;
     where?: WhereMap;
     folder?: string;
   }): number;
@@ -73,14 +80,23 @@ export type QueryApi = {
    */
   searchText(
     q: string,
-    opts?: { tag?: string; folder?: string; limit?: number; offset?: number },
+    opts?: {
+      tag?: string;
+      tags?: TagFilter;
+      folder?: string;
+      limit?: number;
+      offset?: number;
+    },
   ): SearchHit[];
   /**
-   * Total number of readable notes matching the same query and `tag` / `folder`
-   * filters {@link searchText} accepts — the page-count companion to it. Not
-   * capped by `limit`.
+   * Total number of readable notes matching the same query and `tag` / `tags` /
+   * `folder` filters {@link searchText} accepts — the page-count companion to
+   * it. Not capped by `limit`.
    */
-  countSearch(q: string, opts?: { tag?: string; folder?: string }): number;
+  countSearch(
+    q: string,
+    opts?: { tag?: string; tags?: TagFilter; folder?: string },
+  ): number;
   /**
    * Every tag present on notes the instance can read, each with the number of
    * those notes that carry it, ranked most-used first (canonical tags float to
