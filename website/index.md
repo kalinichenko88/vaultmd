@@ -1,7 +1,7 @@
 ---
 layout: home
 hero:
-  name: vaultmd
+  name: VaultMD
   text: Headless markdown-vault data layer for Bun
   tagline: CRUD over .md notes plus a derived SQLite index for queries, backlinks, and full-text search. No Obsidian, no Electron, no plugin.
   actions:
