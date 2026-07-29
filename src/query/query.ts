@@ -329,32 +329,22 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// True for the trailing half of a surrogate pair. Cutting a window there yields
-// a lone surrogate: '�' in a UI, and a string that no longer round-trips
-// through TextEncoder/Buffer.
-function isTrailingSurrogate(code: number): boolean {
-  return code >= 0xdc00 && code <= 0xdfff;
-}
-
 // A one-line excerpt around the match, shaped like fts5's snippet(): the match
 // wrapped in <b>, '…' where the window cuts. Whitespace collapses so one hit
 // cannot drag a paragraph's worth of newlines into a list row.
 function mentionSnippet(body: string, index: number, length: number): string {
-  let from = Math.max(0, index - MENTION_CONTEXT);
-  let to = Math.min(body.length, index + length + MENTION_CONTEXT);
-  // The window is measured in UTF-16 code units, so either edge can land inside
-  // an emoji. Step off the pair rather than through it.
-  if (from > 0 && isTrailingSurrogate(body.charCodeAt(from))) {
-    from += 1;
-  }
-  if (to < body.length && isTrailingSurrogate(body.charCodeAt(to))) {
-    to -= 1;
-  }
+  const from = Math.max(0, index - MENTION_CONTEXT);
+  const to = Math.min(body.length, index + length + MENTION_CONTEXT);
   const head = body.slice(from, index).replace(/\s+/g, ' ');
   const tail = body.slice(index + length, to).replace(/\s+/g, ' ');
   const hit = body.slice(index, index + length);
 
-  return `${from > 0 ? '…' : ''}${head}<b>${hit}</b>${tail}${to < body.length ? '…' : ''}`;
+  // toWellFormed, because the window is measured in UTF-16 code units and
+  // either edge can land inside an emoji: the lone surrogate that leaves is
+  // '�' in a UI and breaks a TextEncoder/Buffer round-trip. It becomes a
+  // replacement character rather than disappearing — visible, which is the
+  // honest rendering of "the excerpt cuts here".
+  return `${from > 0 ? '…' : ''}${head}<b>${hit}</b>${tail}${to < body.length ? '…' : ''}`.toWellFormed();
 }
 
 // Reads one note's body for every name it might contain. Bound to the body
@@ -421,11 +411,7 @@ function mentionTerms(path: string, frontmatterJson: string): string[] {
   const seen = new Set<string>();
   const terms: string[] = [];
   for (const value of raw) {
-    if (
-      typeof value !== 'string' &&
-      typeof value !== 'number' &&
-      typeof value !== 'boolean'
-    ) {
+    if (!['string', 'number', 'boolean'].includes(typeof value)) {
       continue;
     }
     const term = String(value).trim();
@@ -591,10 +577,6 @@ export function createQuery(
     return rows.filter((row) => inScope(row.path)).length;
   }
 
-  // Every readable note linking to `path`, deduplicated but UNPAGINATED.
-  // backlinks slices it into a page; unlinkedMentions subtracts the whole set,
-  // which must not be capped at some caller's page size — linker #101 is still
-  // a linker, not an unlinked mention.
   // Every readable note linking to `path`, deduplicated but UNPAGINATED.
   // backlinks slices it into a page; unlinkedMentions subtracts the whole set,
   // which must not be capped at some caller's page size — linker #101 is still
@@ -942,7 +924,15 @@ export function createQuery(
     };
   }
 
-  // Notes worth checking for `term`. fts5 does the narrowing — except for a
+  // Notes worth checking for `term`. fts5 only generates candidates; the JS
+  // scanner decides, because tokenisation is not verbatim matching — a note
+  // named `C++` tokenises to `c`. `phrase` is therefore a narrowing hint and
+  // not the correctness mechanism: it keeps a two-word name from dragging in
+  // every note that merely uses both words, so fewer candidates need their
+  // body read back. Verified by mutation — flipping it off changes no result,
+  // only the work done.
+  //
+  // fts5 does the narrowing — except for a
   // name it cannot index at all: unicode61 keeps only letters and digits, so a
   // note filed as `→.md` or `📥.md` (an ordinary Obsidian inbox convention)
   // tokenises to nothing and MATCH answers no rows, an empty result the caller
@@ -979,13 +969,6 @@ export function createQuery(
     const hits: SearchHit[] = [];
     const seen = new Set<string>();
     for (const term of subject.terms) {
-      // fts5 generates candidates; the JS scanner decides. Tokenisation is not
-      // verbatim matching — a note named `C++` tokenises to `c`, and trusting
-      // fts alone would report every note containing that letter.
-      // `phrase` is therefore a narrowing hint, not the correctness mechanism:
-      // it keeps a two-word name from dragging in every note that merely uses
-      // both words, so fewer candidates need their body read back. Verified by
-      // mutation — flipping it off changes no result, only the work done.
       for (const candidate of mentionCandidates(term)) {
         if (excluded.has(candidate.path) || seen.has(candidate.path)) {
           continue;
