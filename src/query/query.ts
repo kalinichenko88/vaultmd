@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import { extname } from 'node:path';
 
 import { MdVaultError } from '@/errors.ts';
 import type { IndexConfig } from '@/note-index/index.ts';
@@ -134,51 +135,14 @@ function whereClause(parts: string[]): string {
 // and a missed transclusion is worse than a listed one. Anything not named
 // here is treated as a note reference and gets checked.
 // ponytail: extend the list if a real vault links a type it lacks.
-const ATTACHMENT_EXTENSIONS = new Set([
-  // images
-  'png',
-  'jpg',
-  'jpeg',
-  'gif',
-  'svg',
-  'webp',
-  'avif',
-  'bmp',
-  'ico',
-  'heic',
-  'tif',
-  'tiff',
-  // documents
-  'pdf',
-  'doc',
-  'docx',
-  'xls',
-  'xlsx',
-  'ppt',
-  'pptx',
-  'odt',
-  'ods',
-  'epub',
-  // audio / video
-  'mp3',
-  'wav',
-  'm4a',
-  'ogg',
-  'flac',
-  'aac',
-  'mp4',
-  'mov',
-  'webm',
-  'mkv',
-  'avi',
-  'm4v',
-  // archives + editor artefacts
-  'zip',
-  'gz',
-  'tar',
-  '7z',
-  'canvas',
-]);
+const ATTACHMENT_EXTENSIONS = new Set(
+  [
+    'png jpg jpeg gif svg webp avif bmp ico heic tif tiff', // images
+    'pdf doc docx xls xlsx ppt pptx odt ods epub', // documents
+    'mp3 wav m4a ogg flac aac mp4 mov webm mkv avi m4v', // audio / video
+    'zip gz tar 7z canvas', // archives + editor artefacts
+  ].flatMap((group) => group.split(' ')),
+);
 
 // `[[diagram.png]]` names an attachment, not a missing note — it can never
 // resolve to a `.md` note, so reporting it as broken would bury real breakage
@@ -187,14 +151,9 @@ const ATTACHMENT_EXTENSIONS = new Set([
 // to be clicked. Relative mode never stores non-`.md` targets, so in practice
 // this only fires for wikilinks.
 function isAttachmentTarget(target: string): boolean {
-  const dot = target.lastIndexOf('.');
-  // `dot <= 0` covers both a note with no extension at all and a leading-dot
-  // name — a note titled `zip` must not read as a zip archive.
-  if (dot <= 0) {
-    return false;
-  }
-
-  return ATTACHMENT_EXTENSIONS.has(target.slice(dot + 1).toLowerCase());
+  // extname returns '' for both a bare `zip` and a leading-dot `.png`, so a
+  // note titled `zip` cannot read as an archive and no guard is needed.
+  return ATTACHMENT_EXTENSIONS.has(extname(target).slice(1).toLowerCase());
 }
 
 function pathBaseLower(p: string): string {
@@ -272,21 +231,12 @@ export function createQuery(
   // page (outboundLinks) should NOT build this: one scan to save a handful of
   // lookups is the worse trade.
   function buildBaseIndex(): Map<string, PathRow[]> {
-    const index = new Map<string, PathRow[]>();
-    for (const row of db.query<PathRow, []>('SELECT path FROM notes').all()) {
-      if (!inScope(row.path)) {
-        continue;
-      }
-      const base = pathBaseLower(row.path);
-      const group = index.get(base);
-      if (group) {
-        group.push(row);
-      } else {
-        index.set(base, [row]);
-      }
-    }
+    const rows = db
+      .query<PathRow, []>('SELECT path FROM notes')
+      .all()
+      .filter((row) => inScope(row.path));
 
-    return index;
+    return Map.groupBy(rows, (row) => pathBaseLower(row.path));
   }
 
   function queryNotes(
@@ -347,14 +297,8 @@ export function createQuery(
         `SELECT n.path FROM notes n ${whereClause(parts)}`,
       )
       .all(...params);
-    let total = 0;
-    for (const row of rows) {
-      if (inScope(row.path)) {
-        total += 1;
-      }
-    }
 
-    return total;
+    return rows.filter((row) => inScope(row.path)).length;
   }
 
   function backlinks(

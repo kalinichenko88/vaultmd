@@ -1230,21 +1230,32 @@ describe('searchText — mixed-scope pagination (Finding 1 regression)', () => {
   });
 });
 
+// Query instance over the shared fixture db. Defaults match the vault the older
+// blocks above build by hand: whole-vault scope, wikilink resolution, and
+// filesystem-detected case sensitivity (undefined = auto-detect).
+function mkQuery(
+  opts: {
+    read?: string[];
+    linkResolution?: 'wikilink' | 'relative';
+    caseSensitive?: boolean;
+  } = {},
+) {
+  const { read = [''], linkResolution = 'wikilink', caseSensitive } = opts;
+  const io = createVaultIo({
+    root: vaultDir,
+    prefixes: { read, write: [''] },
+    caseSensitive,
+  });
+
+  return createQuery(db, io, {
+    linkResolution,
+    caseSensitive: caseSensitive ?? false,
+    ignore: [],
+  });
+}
+
 // ── 1.0 API completeness ─────────────────────────────────────────────────────
 describe('queryNotes — mtime_ms / size passthrough', () => {
-  function mkQuery() {
-    const io = createVaultIo({
-      root: vaultDir,
-      prefixes: { read: [''], write: [''] },
-    });
-
-    return createQuery(db, io, {
-      linkResolution: 'wikilink',
-      caseSensitive: false,
-      ignore: [],
-    });
-  }
-
   test('carries the indexed mtime_ms and size the order field sorts by', () => {
     insertNote(db, { path: 'a.md', body: 'hello' });
     db.query('UPDATE notes SET mtime_ms = ? WHERE path = ?').run(1234, 'a.md');
@@ -1255,19 +1266,6 @@ describe('queryNotes — mtime_ms / size passthrough', () => {
 });
 
 describe('countNotes', () => {
-  function mkQuery(read = ['']) {
-    const io = createVaultIo({
-      root: vaultDir,
-      prefixes: { read, write: [''] },
-    });
-
-    return createQuery(db, io, {
-      linkResolution: 'wikilink',
-      caseSensitive: false,
-      ignore: [],
-    });
-  }
-
   test('is 0 on an empty DB', () => {
     expect(mkQuery().countNotes()).toBe(0);
   });
@@ -1305,7 +1303,7 @@ describe('countNotes', () => {
   test('excludes notes outside the read scope', () => {
     insertNote(db, { path: 'Notes/a.md' });
     insertNote(db, { path: 'Private/b.md' });
-    expect(mkQuery(['Notes/']).countNotes()).toBe(1);
+    expect(mkQuery({ read: ['Notes/'] }).countNotes()).toBe(1);
   });
 
   test('rejects an invalid where key like queryNotes does', () => {
@@ -1316,19 +1314,6 @@ describe('countNotes', () => {
 });
 
 describe('countSearch', () => {
-  function mkQuery(read = ['']) {
-    const io = createVaultIo({
-      root: vaultDir,
-      prefixes: { read, write: [''] },
-    });
-
-    return createQuery(db, io, {
-      linkResolution: 'wikilink',
-      caseSensitive: false,
-      ignore: [],
-    });
-  }
-
   test('counts all hits beyond the requested page', () => {
     for (let i = 0; i < 4; i++) {
       insertNote(db, { path: `n${i}.md`, body: 'shared keyword here' });
@@ -1345,7 +1330,7 @@ describe('countSearch', () => {
     expect(mkQuery().countSearch('keyword')).toBe(3);
     expect(mkQuery().countSearch('keyword', { tag: 'idea' })).toBe(1);
     expect(mkQuery().countSearch('keyword', { folder: 'Notes' })).toBe(2);
-    expect(mkQuery(['Notes/']).countSearch('keyword')).toBe(2);
+    expect(mkQuery({ read: ['Notes/'] }).countSearch('keyword')).toBe(2);
   });
 
   test('is 0 for a query that sanitizes to nothing', () => {
@@ -1355,22 +1340,6 @@ describe('countSearch', () => {
 });
 
 describe('danglingLinks', () => {
-  function mkQuery(
-    linkResolution: 'wikilink' | 'relative' = 'wikilink',
-    read = [''],
-  ) {
-    const io = createVaultIo({
-      root: vaultDir,
-      prefixes: { read, write: [''] },
-    });
-
-    return createQuery(db, io, {
-      linkResolution,
-      caseSensitive: false,
-      ignore: [],
-    });
-  }
-
   test('is [] when every link resolves', () => {
     insertNote(db, {
       path: 'a.md',
@@ -1405,7 +1374,7 @@ describe('danglingLinks', () => {
       path: 'a.md',
       links: [{ target: 'gone.md', base: null, kind: 'mdlink' }],
     });
-    expect(mkQuery('relative').danglingLinks()).toEqual([
+    expect(mkQuery({ linkResolution: 'relative' }).danglingLinks()).toEqual([
       { from: 'a.md', target: 'gone.md' },
     ]);
   });
@@ -1450,7 +1419,7 @@ describe('danglingLinks', () => {
       path: 'Notes/b.md',
       links: [{ target: 'ghost', base: 'ghost', kind: 'wikilink' }],
     });
-    expect(mkQuery('wikilink', ['Notes/']).danglingLinks()).toEqual([
+    expect(mkQuery({ read: ['Notes/'] }).danglingLinks()).toEqual([
       { from: 'Notes/b.md', target: 'ghost' },
     ]);
   });
@@ -1461,7 +1430,7 @@ describe('danglingLinks', () => {
       links: [{ target: 'secret', base: 'secret', kind: 'wikilink' }],
     });
     insertNote(db, { path: 'Private/secret.md' });
-    expect(mkQuery('wikilink', ['Notes/']).danglingLinks()).toEqual([
+    expect(mkQuery({ read: ['Notes/'] }).danglingLinks()).toEqual([
       { from: 'Notes/a.md', target: 'secret' },
     ]);
   });
@@ -1483,26 +1452,13 @@ describe('danglingLinks', () => {
 
 // ── review regressions ───────────────────────────────────────────────────────
 describe('danglingLinks — review regressions', () => {
-  function mkQuery(
-    linkResolution: 'wikilink' | 'relative' = 'wikilink',
-    caseSensitive = false,
-  ) {
-    const io = createVaultIo({
-      root: vaultDir,
-      prefixes: { read: [''], write: [''] },
-      caseSensitive,
-    });
-
-    return createQuery(db, io, { linkResolution, caseSensitive, ignore: [] });
-  }
-
   test('a mixed-case relative link resolves on a case-insensitive vault', () => {
     insertNote(db, { path: 'Notes/Target.md' });
     insertNote(db, {
       path: 'Source.md',
       links: [{ target: 'Notes/Target.md', base: null, kind: 'mdlink' }],
     });
-    const q = mkQuery('relative');
+    const q = mkQuery({ linkResolution: 'relative' });
     expect(q.outboundLinks('Source.md')).toEqual([
       { target: 'Notes/Target.md', resolved: 'Notes/Target.md' },
     ]);

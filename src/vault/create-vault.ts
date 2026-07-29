@@ -140,10 +140,7 @@ export async function createVault(config: CreateVaultConfig): Promise<Vault> {
       return fn(...args);
     };
   }
-  // Listed explicitly rather than mapped over Object.entries: the annotation
-  // makes tsc fail this literal the moment QueryApi grows a method, which is
-  // the reminder to give the new read its lazy sweep too. An enumerated version
-  // would need a cast, and the cast would swallow exactly that error.
+  // Explicit, not a loop: tsc fails this literal when QueryApi grows a method.
   const query: ReturnType<typeof createQuery> = {
     queryNotes: reconciled(rawQuery.queryNotes),
     countNotes: reconciled(rawQuery.countNotes),

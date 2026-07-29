@@ -62,13 +62,9 @@ export function createNotes(deps: NotesDeps): NotesApi {
   }
 
   async function exists(path: string): Promise<boolean> {
-    // resolveVaultPath keeps the NOT_MARKDOWN / ALLOWLIST_VIOLATION contract —
-    // an unreadable path is a caller bug. Everything the stat itself can fail
-    // with is just "no note here" and must not escape as a raw errno the
-    // caller's `switch (err.code)` cannot match: ENOENT, ENOTDIR when a parent
-    // segment is a file, ELOOP, EACCES. isFile() then rejects a DIRECTORY named
-    // `x.md`, which would otherwise answer true and send the caller down the
-    // update path straight into an EISDIR.
+    // resolveVaultPath keeps the NOT_MARKDOWN / ALLOWLIST_VIOLATION contract;
+    // any stat failure just means "no note here" and must not escape as a raw
+    // errno, and isFile() rejects a DIRECTORY named `x.md`.
     const full = vaultIo.resolveVaultPath(path, 'read');
     const info = await stat(full).catch(() => null);
 
