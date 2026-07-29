@@ -86,6 +86,25 @@ export type QueryApi = {
    */
   danglingLinks(opts?: { limit?: number; offset?: number }): DanglingLink[];
   /**
+   * Notes that name this one in prose without linking it — Obsidian's
+   * "Unlinked mentions" in the Backlinks pane, and the prose counterpart of
+   * {@link backlinks}. A hit is a note whose body contains this note's
+   * filename, its explicit frontmatter `title`, or one of its `aliases`, at a
+   * word boundary and case-insensitively, while linking nothing to it. Notes
+   * that already link are reported by {@link backlinks} instead, never here.
+   *
+   * The `snippet` quotes the *mentioning* note (the hit) around the name.
+   *
+   * Matching needs a word boundary, so a name embedded in unsegmented text —
+   * Chinese and Japanese prose, which is written without spaces — is NOT
+   * found; only occurrences delimited by spaces or punctuation are. Defaults
+   * to limit 100; hard cap 1000.
+   */
+  unlinkedMentions(
+    path: string,
+    opts?: { limit?: number; offset?: number },
+  ): SearchHit[];
+  /**
    * FTS5 keyword search over note bodies, returning highlighted snippets,
    * narrowed by the same {@link NoteFilter} the note readers take. Defaults to
    * limit 100; hard cap 1000.

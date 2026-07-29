@@ -112,6 +112,7 @@ describe('createQuery factory', () => {
       'queryNotes',
       'searchText',
       'tags',
+      'unlinkedMentions',
     ]);
   });
 
@@ -2050,5 +2051,154 @@ describe('orphanNotes', () => {
     expect(() =>
       mkQuery().orphanNotes({ mode: 'lonely' as 'disconnected' }),
     ).toThrow(expect.objectContaining({ code: 'VALIDATION_ERROR' }));
+  });
+});
+
+describe('unlinkedMentions', () => {
+  test('reports a note naming the target in prose, with a snippet', () => {
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, {
+      path: 'journal.md',
+      body: 'we kicked off Alpha today and it went well',
+    });
+    expect(mkQuery().unlinkedMentions('Alpha.md')).toEqual([
+      {
+        path: 'journal.md',
+        title: 'journal',
+        snippet: 'we kicked off <b>Alpha</b> today and it went well',
+      },
+    ]);
+  });
+
+  test('excludes a note that already links, text or not', () => {
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, {
+      path: 'linker.md',
+      body: 'see [[Alpha]] for context',
+      links: [{ target: 'Alpha', base: 'alpha', kind: 'wikilink' }],
+    });
+    expect(mkQuery().unlinkedMentions('Alpha.md')).toEqual([]);
+  });
+
+  test('the linker exclusion is not capped at a page of backlinks', () => {
+    insertNote(db, { path: 'Alpha.md' });
+    for (let i = 0; i < 150; i++) {
+      insertNote(db, {
+        path: `linker${i}.md`,
+        body: 'mentions Alpha and links it',
+        links: [{ target: 'Alpha', base: 'alpha', kind: 'wikilink' }],
+      });
+    }
+    insertNote(db, { path: 'prose.md', body: 'Alpha came up again' });
+    expect(
+      mkQuery()
+        .unlinkedMentions('Alpha.md')
+        .map((h) => h.path),
+    ).toEqual(['prose.md']);
+  });
+
+  test('excludes the note itself', () => {
+    insertNote(db, {
+      path: 'Alpha.md',
+      body: '# Alpha\n\nAlpha is a project.',
+    });
+    expect(mkQuery().unlinkedMentions('Alpha.md')).toEqual([]);
+  });
+
+  test('matches an alias, as a list or a bare scalar, and coerces numbers', () => {
+    insertNote(db, {
+      path: 'Alpha.md',
+      frontmatter: { aliases: ['AI thing', 2024] },
+    });
+    insertNote(db, { path: 'Beta.md', frontmatter: { aliases: 'Bee' } });
+    insertNote(db, { path: 'm1.md', body: 'the AI thing shipped' });
+    insertNote(db, { path: 'm2.md', body: 'back in 2024 we tried' });
+    insertNote(db, { path: 'm3.md', body: 'Bee handled it' });
+    const q = mkQuery();
+    expect(
+      q
+        .unlinkedMentions('Alpha.md')
+        .map((h) => h.path)
+        .sort(),
+    ).toEqual(['m1.md', 'm2.md']);
+    expect(q.unlinkedMentions('Beta.md').map((h) => h.path)).toEqual(['m3.md']);
+  });
+
+  test('matches an explicit frontmatter title but never an H1-derived one', () => {
+    insertNote(db, {
+      path: '2026-07-29.md',
+      title: 'Release Retro',
+      frontmatter: { title: 'Release Retro' },
+    });
+    // title column set, but derived from an H1 — not a name the note answers to
+    insertNote(db, { path: 'misc.md', title: 'Overview' });
+    insertNote(db, { path: 'm1.md', body: 'the Release Retro was useful' });
+    insertNote(db, { path: 'm2.md', body: 'a general Overview of things' });
+    const q = mkQuery();
+    expect(q.unlinkedMentions('2026-07-29.md').map((h) => h.path)).toEqual([
+      'm1.md',
+    ]);
+    expect(q.unlinkedMentions('misc.md')).toEqual([]);
+  });
+
+  test('needs the name contiguous, not its words scattered', () => {
+    insertNote(db, { path: 'Project Alpha.md' });
+    insertNote(db, {
+      path: 'scattered.md',
+      body: 'the project shipped. alpha builds followed.',
+    });
+    insertNote(db, { path: 'contiguous.md', body: 'Project Alpha shipped' });
+    expect(
+      mkQuery()
+        .unlinkedMentions('Project Alpha.md')
+        .map((h) => h.path),
+    ).toEqual(['contiguous.md']);
+  });
+
+  test('verifies fts candidates, so a punctuation name does not match its tokens', () => {
+    insertNote(db, { path: 'C++.md' });
+    insertNote(db, { path: 'letter.md', body: 'option c was chosen' });
+    insertNote(db, { path: 'real.md', body: 'written in C++ back then' });
+    expect(
+      mkQuery()
+        .unlinkedMentions('C++.md')
+        .map((h) => h.path),
+    ).toEqual(['real.md']);
+  });
+
+  test('is case-insensitive and never matches inside a longer word', () => {
+    insertNote(db, { path: 'cat.md' });
+    insertNote(db, { path: 'inside.md', body: 'the catalogue is long' });
+    insertNote(db, { path: 'whole.md', body: 'the CAT sat down' });
+    expect(
+      mkQuery()
+        .unlinkedMentions('cat.md')
+        .map((h) => h.path),
+    ).toEqual(['whole.md']);
+  });
+
+  test('honours the read scope on both ends, and unknown paths', () => {
+    insertNote(db, { path: 'Notes/Alpha.md' });
+    insertNote(db, { path: 'Private/secret.md', body: 'Alpha leaked here' });
+    insertNote(db, { path: 'Notes/ok.md', body: 'Alpha is fine' });
+    const q = mkQuery({ read: ['Notes/'] });
+    expect(q.unlinkedMentions('Notes/Alpha.md').map((h) => h.path)).toEqual([
+      'Notes/ok.md',
+    ]);
+    expect(q.unlinkedMentions('Private/secret.md')).toEqual([]);
+    expect(q.unlinkedMentions('Notes/nope.md')).toEqual([]);
+  });
+
+  test('paginates', () => {
+    insertNote(db, { path: 'Alpha.md' });
+    for (let i = 0; i < 4; i++) {
+      insertNote(db, { path: `m${i}.md`, body: 'Alpha again' });
+    }
+    const q = mkQuery();
+    expect(q.unlinkedMentions('Alpha.md', { limit: 2 })).toHaveLength(2);
+    expect(
+      q.unlinkedMentions('Alpha.md', { limit: 2, offset: 2 }),
+    ).toHaveLength(2);
+    expect(q.unlinkedMentions('Alpha.md', { limit: 2, offset: 4 })).toEqual([]);
   });
 });

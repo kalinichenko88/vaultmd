@@ -304,6 +304,105 @@ function isAttachmentTarget(target: string): boolean {
   return ATTACHMENT_EXTENSIONS.has(extname(target).slice(1).toLowerCase());
 }
 
+// A mention is a whole word, so `cat` is not a mention inside `catalogue`.
+// `\b` cannot express that: it is defined over ASCII `\w`, so `/\bАльфа\b/`
+// never matches "Проект Альфа" — a whole non-Latin vault would silently report
+// nothing. These lookarounds are Unicode-aware and cost nothing extra.
+const WORD_CHAR = '[\\p{L}\\p{N}_]';
+// Characters of context on each side of a mention, mirroring what fts5's
+// snippet() gives searchText.
+const MENTION_CONTEXT = 40;
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Finds whole-word, case-insensitive occurrences of a term in one body. Bound
+// to the body (and its lowercased twin) because the outbound direction probes
+// one body with every name in the vault — lowercasing it per term would undo
+// the point of the prefilter.
+//
+// The prefilter is load-bearing, not tidiness: on a miss the lookbehind regex
+// scans the entire body before conceding, and nearly every term IS a miss —
+// measured 12.5s vs 7.5ms over 30k probes against one 5KB body, on a
+// synchronous call.
+// ponytail: toLowerCase and the regex's Unicode simple case folding disagree on
+// a few exotic pairs (Greek final sigma ς/σ), where the prefilter rejects a
+// match the regex would have taken. Dropping it costs three orders of magnitude.
+function mentionMatcher(
+  body: string,
+): (term: string) => { index: number; length: number } | null {
+  const lower = body.toLowerCase();
+
+  return (term) => {
+    if (!lower.includes(term.toLowerCase())) {
+      return null;
+    }
+    // Escaped, not interpolated raw: a note named `C++` would otherwise throw a
+    // bare SyntaxError out of a method documented to fail with MdVaultError,
+    // and one named `Meeting [1]` would compile into a character class and
+    // quietly match the text "Meeting 1". Hand-rolled because `engines.bun`
+    // (>=1.1.0) predates RegExp.escape.
+    const match = new RegExp(
+      `(?<!${WORD_CHAR})${escapeRegExp(term)}(?!${WORD_CHAR})`,
+      'iu',
+    ).exec(body);
+
+    return match ? { index: match.index, length: match[0].length } : null;
+  };
+}
+
+// A one-line excerpt around the match, shaped like fts5's snippet(): the match
+// wrapped in <b>, '…' where the window cuts. Whitespace collapses so one hit
+// cannot drag a paragraph's worth of newlines into a list row.
+function mentionSnippet(body: string, index: number, length: number): string {
+  const from = Math.max(0, index - MENTION_CONTEXT);
+  const to = Math.min(body.length, index + length + MENTION_CONTEXT);
+  const head = body.slice(from, index).replace(/\s+/g, ' ');
+  const tail = body.slice(index + length, to).replace(/\s+/g, ' ');
+  const hit = body.slice(index, index + length);
+
+  return `${from > 0 ? '…' : ''}${head}<b>${hit}</b>${tail}${to < body.length ? '…' : ''}`;
+}
+
+// Every name a note answers to: its filename, an explicitly authored title, and
+// its aliases — Obsidian matches "name or alias". Deliberately NOT the indexed
+// `title`, which falls back to the first H1: a note headed "# Overview" would
+// turn every occurrence of that word in the vault into a mention of it. List
+// items are coerced the way deriveTags coerces tags, so `aliases: [2024]` is a
+// name rather than a crash.
+function mentionTerms(path: string, frontmatterJson: string): string[] {
+  const fm = JSON.parse(frontmatterJson) as Record<string, unknown>;
+  const raw: unknown[] = [
+    (path.split('/').at(-1) ?? path).replace(/\.md$/i, ''),
+  ];
+  if (typeof fm.title === 'string') {
+    raw.push(fm.title);
+  }
+  raw.push(...(Array.isArray(fm.aliases) ? fm.aliases : [fm.aliases]));
+
+  const seen = new Set<string>();
+  const terms: string[] = [];
+  for (const value of raw) {
+    if (
+      typeof value !== 'string' &&
+      typeof value !== 'number' &&
+      typeof value !== 'boolean'
+    ) {
+      continue;
+    }
+    const term = String(value).trim();
+    const key = term.toLowerCase();
+    if (term === '' || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    terms.push(term);
+  }
+
+  return terms;
+}
+
 function pathBaseLower(p: string): string {
   return (p.split('/').at(-1) ?? p).replace(/\.md$/i, '').toLowerCase();
 }
@@ -797,6 +896,88 @@ export function createQuery(
     return scoped;
   }
 
+  // The indexed body of a note. notes_fts is a standalone fts5 table, so it
+  // keeps its own copy of the text and hands it back — the only way to read a
+  // note's text without touching disk, which keeps these methods synchronous.
+  function bodyFor(pathKey: string): string | null {
+    const row = db
+      .query<{ body: string }, [string]>(
+        'SELECT f.body FROM notes_fts f JOIN notes n ON n.id = f.rowid WHERE n.path_key = ?',
+      )
+      .get(pathKey);
+
+    return row?.body ?? null;
+  }
+
+  // The row backing a mention query, or null when the path indexes nothing the
+  // instance may read.
+  function mentionSubject(
+    path: string,
+  ): { display: string; terms: string[] } | null {
+    if (!inScope(path)) {
+      return null;
+    }
+    const row = db
+      .query<{ path: string; frontmatter: string }, [string]>(
+        'SELECT path, frontmatter FROM notes WHERE path_key = ?',
+      )
+      .get(vaultIo.toKey(path));
+
+    return row
+      ? { display: row.path, terms: mentionTerms(row.path, row.frontmatter) }
+      : null;
+  }
+
+  function unlinkedMentions(
+    path: string,
+    opts: { limit?: number; offset?: number } = {},
+  ): SearchHit[] {
+    const { lim, off } = validatePagination(opts.limit, opts.offset);
+    const subject = mentionSubject(path);
+    if (subject === null) {
+      return [];
+    }
+    // A note that links here made a linked mention; so did this note's own body
+    // when it repeated its title. Neither is an *unlinked* one.
+    const excluded = new Set(backlinkSources(path));
+    excluded.add(subject.display);
+
+    const hits: SearchHit[] = [];
+    const seen = new Set<string>();
+    for (const term of subject.terms) {
+      // fts5 generates candidates; the JS matcher decides. Tokenisation is not
+      // verbatim matching — a note named `C++` tokenises to `c`, and trusting
+      // fts alone would report every note containing that letter.
+      // `phrase` is therefore a narrowing hint, not the correctness mechanism:
+      // it keeps a two-word name from dragging in every note that merely uses
+      // both words, so fewer candidates need their body read back. Verified by
+      // mutation — flipping it off changes no result, only the work done.
+      const candidates = searchScoped(
+        term,
+        {},
+        { phrase: true, snippet: false },
+      );
+      for (const candidate of candidates) {
+        if (excluded.has(candidate.path) || seen.has(candidate.path)) {
+          continue;
+        }
+        const body = bodyFor(vaultIo.toKey(candidate.path));
+        const match = body === null ? null : mentionMatcher(body)(term);
+        if (body === null || match === null) {
+          continue;
+        }
+        seen.add(candidate.path);
+        hits.push({
+          path: candidate.path,
+          title: candidate.title,
+          snippet: mentionSnippet(body, match.index, match.length),
+        });
+      }
+    }
+
+    return hits.slice(off, off + lim);
+  }
+
   function searchText(
     q: string,
     opts: NoteFilter & { limit?: number; offset?: number } = {},
@@ -891,6 +1072,7 @@ export function createQuery(
     backlinks,
     outboundLinks,
     danglingLinks,
+    unlinkedMentions,
     searchText,
     countSearch,
     tags,
