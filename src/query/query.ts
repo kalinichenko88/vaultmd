@@ -5,6 +5,7 @@ import type { IndexConfig } from '@/note-index/index.ts';
 import type { VaultIo } from '@/vault-io/index.ts';
 
 import type { Backlink } from './models/backlink.ts';
+import type { DanglingLink } from './models/dangling-link.ts';
 import type { NoteHit } from './models/note-hit.ts';
 import type { QueryOrder } from './models/order.ts';
 import type { OutboundLink } from './models/outbound-link.ts';
@@ -23,9 +24,12 @@ type RawNoteRow = {
   path_key: string;
   title: string;
   frontmatter: string;
+  mtime_ms: number;
+  size: number;
 };
 type TagRow = { tag: string };
 type LinkRow = { target: string; base: string | null };
+type SrcLinkRow = LinkRow & { from_path: string; kind: string };
 type SearchRow = { path: string; title: string; snippet: string };
 type PathRow = { path: string };
 
@@ -78,6 +82,61 @@ function pushFolderFilter(
 ): void {
   parts.push("(n.path = ? OR n.path LIKE ? ESCAPE '\\')");
   params.push(folder, `${escapeLike(folder)}/%`);
+}
+
+// Builds the row predicates shared by every note reader: tag membership,
+// frontmatter equality, folder subtree. Returned unjoined because searchText
+// appends them to an existing `WHERE notes_fts MATCH ?` with AND, while the
+// note-table readers open their own WHERE. The notes table is aliased `n` in
+// every caller.
+function buildNoteFilters(opts: {
+  tag?: string;
+  where?: WhereMap;
+  folder?: string;
+}): { parts: string[]; params: (string | number | boolean | null)[] } {
+  const { tag, where = {}, folder } = opts;
+  const parts: string[] = [];
+  const params: (string | number | boolean | null)[] = [];
+
+  if (tag !== undefined) {
+    parts.push(
+      'EXISTS (SELECT 1 FROM note_tags nt WHERE nt.path_key = n.path_key AND nt.tag = ?)',
+    );
+    params.push(tag);
+  }
+
+  for (const key of Object.keys(where)) {
+    if (!WHERE_KEY_RE.test(key)) {
+      throw new MdVaultError(
+        'VALIDATION_ERROR',
+        `where key contains invalid characters: ${key}`,
+      );
+    }
+    parts.push(`json_extract(n.frontmatter, '$."${key}"') = ?`);
+    params.push(where[key]);
+  }
+
+  if (folder !== undefined) {
+    pushFolderFilter(parts, params, folder);
+  }
+
+  return { parts, params };
+}
+
+function whereClause(parts: string[]): string {
+  return parts.length > 0 ? `WHERE ${parts.join(' AND ')}` : '';
+}
+
+// `![[diagram.png]]` is an attachment embed, not a broken note link — it can
+// never resolve to a `.md` note, so counting it as dangling would bury the real
+// breakage under every image in the vault. Only embeds are filtered, and only
+// when the target ends in a letter-led extension, so a transclusion of a note
+// titled `Chapter 1.2` (extension `.2`) still gets checked. Relative mode never
+// stores non-`.md` targets, so this only ever fires for wikilinks.
+// ponytail: extension heuristic; take an explicit attachment-extension config
+// if someone reports a real note title it misjudges.
+function isAttachmentEmbed(row: { target: string; kind: string }): boolean {
+  return row.kind === 'embed' && /\.[a-z][a-z0-9]{1,4}$/i.test(row.target);
 }
 
 function pathBaseLower(p: string): string {
@@ -149,7 +208,7 @@ export function createQuery(
       offset?: number;
     } = {},
   ): NoteHit[] {
-    const { tag, where = {}, folder, orderBy, limit, offset } = opts;
+    const { orderBy, limit, offset } = opts;
     const { lim, off } = validatePagination(limit, offset);
     const order: QueryOrder = orderBy ?? { field: 'mtime_ms', dir: 'desc' };
     if (!ORDER_FIELDS.has(order.field)) {
@@ -159,36 +218,12 @@ export function createQuery(
       );
     }
     const dir = order.dir === 'asc' ? 'ASC' : 'DESC';
-    const parts: string[] = [];
-    const params: (string | number | boolean | null)[] = [];
-
-    if (tag !== undefined) {
-      parts.push(
-        'EXISTS (SELECT 1 FROM note_tags nt WHERE nt.path_key = n.path_key AND nt.tag = ?)',
-      );
-      params.push(tag);
-    }
-
-    for (const key of Object.keys(where)) {
-      if (!WHERE_KEY_RE.test(key)) {
-        throw new MdVaultError(
-          'VALIDATION_ERROR',
-          `where key contains invalid characters: ${key}`,
-        );
-      }
-      parts.push(`json_extract(n.frontmatter, '$."${key}"') = ?`);
-      params.push(where[key]);
-    }
-
-    if (folder !== undefined) {
-      pushFolderFilter(parts, params, folder);
-    }
-
-    const clause = parts.length > 0 ? `WHERE ${parts.join(' AND ')}` : '';
+    const { parts, params } = buildNoteFilters(opts);
+    const clause = whereClause(parts);
     // Fetch all matching rows without LIMIT/OFFSET — scope-filter first, then
     // slice in JS to get exact page fills. (At personal-vault scale the full
     // scan is fine; a future optimisation can push read-prefixes into SQL.)
-    const sql = `SELECT n.path, n.path_key, n.title, n.frontmatter FROM notes n ${clause} ORDER BY n.${order.field} ${dir}, n.path ASC`;
+    const sql = `SELECT n.path, n.path_key, n.title, n.frontmatter, n.mtime_ms, n.size FROM notes n ${clause} ORDER BY n.${order.field} ${dir}, n.path ASC`;
     const rows = db
       .query<RawNoteRow, (string | number | boolean | null)[]>(sql)
       .all(...params);
@@ -202,10 +237,33 @@ export function createQuery(
         title: row.title,
         frontmatter: JSON.parse(row.frontmatter) as Record<string, unknown>,
         tags: tagsFor(row.path_key),
+        mtime_ms: row.mtime_ms,
+        size: row.size,
       });
     }
 
     return scoped.slice(off, off + lim);
+  }
+
+  function countNotes(
+    opts: { tag?: string; where?: WhereMap; folder?: string } = {},
+  ): number {
+    const { parts, params } = buildNoteFilters(opts);
+    // Path-only projection: the scope filter needs nothing else, so this skips
+    // the frontmatter JSON parse and the per-row tag lookup queryNotes pays for.
+    const rows = db
+      .query<PathRow, (string | number | boolean | null)[]>(
+        `SELECT n.path FROM notes n ${whereClause(parts)}`,
+      )
+      .all(...params);
+    let total = 0;
+    for (const row of rows) {
+      if (inScope(row.path)) {
+        total += 1;
+      }
+    }
+
+    return total;
   }
 
   function backlinks(
@@ -294,6 +352,37 @@ export function createQuery(
     return deduped.slice(off, off + lim);
   }
 
+  // In-scope note owning `pathKey`, or null when the key indexes nothing (or
+  // nothing the instance may read).
+  function readableNoteByKey(pathKey: string): string | null {
+    const hit = db
+      .query<PathRow, [string]>('SELECT path FROM notes WHERE path_key = ?')
+      .get(pathKey);
+
+    return hit && inScope(hit.path) ? hit.path : null;
+  }
+
+  // Resolves one stored link row to the note it points at, or null when it
+  // dangles. Shared by outboundLinks (one note) and danglingLinks (vault-wide),
+  // so both agree on what "resolved" means. `srcDisplay` is the linking note's
+  // canonical path — bare wikilinks tie-break toward the source's own folder.
+  function resolveLinkTarget(row: LinkRow, srcDisplay: string): string | null {
+    if (cfg.linkResolution === 'relative') {
+      return readableNoteByKey(row.target);
+    }
+    // path-qualified: [[Folder/Foo]] stored as target='Folder/Foo'
+    if (row.target.includes('/')) {
+      return readableNoteByKey(vaultIo.toKey(`${row.target}.md`));
+    }
+    if (row.base !== null) {
+      return (
+        tieBreakWinner(bareCandidates(row.base), pathFolder(srcDisplay)) ?? null
+      );
+    }
+
+    return null;
+  }
+
   function outboundLinks(
     path: string,
     opts: { limit?: number; offset?: number } = {},
@@ -304,78 +393,61 @@ export function createQuery(
     const { lim, off } = validatePagination(opts.limit, opts.offset);
     const srcKey = vaultIo.toKey(path);
     const display = vaultIo.toVaultRelative(path);
-    const rows = db
+
+    return db
       .query<LinkRow, [string]>(
         `SELECT target, base FROM note_links WHERE src_key = ?`,
       )
       .all(srcKey)
-      .slice(off, off + lim);
-
-    const results: { target: string; resolved: string | null }[] = [];
-    for (const row of rows) {
-      let resolved: string | null = null;
-
-      if (cfg.linkResolution === 'relative') {
-        const hit = db
-          .query<PathRow, [string]>('SELECT path FROM notes WHERE path_key = ?')
-          .get(row.target);
-        if (hit && inScope(hit.path)) {
-          resolved = hit.path;
-        }
-      } else if (row.target.includes('/')) {
-        const tKey = vaultIo.toKey(`${row.target}.md`);
-        const hit = db
-          .query<PathRow, [string]>('SELECT path FROM notes WHERE path_key = ?')
-          .get(tKey);
-        if (hit && inScope(hit.path)) {
-          resolved = hit.path;
-        }
-      } else if (row.base !== null) {
-        const winner = tieBreakWinner(
-          bareCandidates(row.base),
-          pathFolder(display),
-        );
-        if (winner !== undefined) {
-          resolved = winner;
-        }
-      }
-
-      results.push({ target: row.target, resolved });
-    }
-
-    return results;
+      .slice(off, off + lim)
+      .map((row) => ({
+        target: row.target,
+        resolved: resolveLinkTarget(row, display),
+      }));
   }
 
-  function searchText(
+  function danglingLinks(
+    opts: { limit?: number; offset?: number } = {},
+  ): DanglingLink[] {
+    const { lim, off } = validatePagination(opts.limit, opts.offset);
+    const rows = db
+      .query<SrcLinkRow, []>(
+        `SELECT n.path AS from_path, nl.target, nl.base, nl.kind
+         FROM note_links nl
+         JOIN notes n ON n.path_key = nl.src_key
+         ORDER BY n.path ASC, nl.target ASC`,
+      )
+      .all();
+    const broken: DanglingLink[] = [];
+    for (const row of rows) {
+      if (!inScope(row.from_path) || isAttachmentEmbed(row)) {
+        continue;
+      }
+      if (resolveLinkTarget(row, row.from_path) === null) {
+        broken.push({ from: row.from_path, target: row.target });
+      }
+    }
+
+    return broken.slice(off, off + lim);
+  }
+
+  // Every in-scope hit for `q`, unpaginated and rank-ordered — searchText slices
+  // it into a page, countSearch just takes its length, so a count can never
+  // disagree with the rows it counts.
+  function searchScoped(
     q: string,
-    opts: {
-      tag?: string;
-      folder?: string;
-      limit?: number;
-      offset?: number;
-    } = {},
+    opts: { tag?: string; folder?: string } = {},
   ): SearchHit[] {
-    const { tag, folder, limit, offset } = opts;
-    const { lim, off } = validatePagination(limit, offset);
     const ftsQ = sanitizeFts(q);
     if (ftsQ === null) {
       return [];
     }
 
-    const parts: string[] = [];
-    const params: (string | number | boolean | null)[] = [ftsQ];
-
-    if (tag !== undefined) {
-      parts.push(
-        'EXISTS (SELECT 1 FROM note_tags nt WHERE nt.path_key = n.path_key AND nt.tag = ?)',
-      );
-      params.push(tag);
-    }
-
-    if (folder !== undefined) {
-      pushFolderFilter(parts, params, folder);
-    }
-
+    const { parts, params: filterParams } = buildNoteFilters(opts);
+    const params: (string | number | boolean | null)[] = [
+      ftsQ,
+      ...filterParams,
+    ];
     const extra = parts.length > 0 ? `AND ${parts.join(' AND ')}` : '';
     // Fetch all matching rows without LIMIT/OFFSET — scope-filter first, then
     // slice in JS to get exact page fills. (At personal-vault scale the full
@@ -411,7 +483,28 @@ export function createQuery(
       });
     }
 
-    return scoped.slice(off, off + lim);
+    return scoped;
+  }
+
+  function searchText(
+    q: string,
+    opts: {
+      tag?: string;
+      folder?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): SearchHit[] {
+    const { lim, off } = validatePagination(opts.limit, opts.offset);
+
+    return searchScoped(q, opts).slice(off, off + lim);
+  }
+
+  function countSearch(
+    q: string,
+    opts: { tag?: string; folder?: string } = {},
+  ): number {
+    return searchScoped(q, opts).length;
   }
 
   function tags(
@@ -488,5 +581,14 @@ export function createQuery(
     return limit === undefined ? result : result.slice(0, limit);
   }
 
-  return { queryNotes, backlinks, outboundLinks, searchText, tags };
+  return {
+    queryNotes,
+    countNotes,
+    backlinks,
+    outboundLinks,
+    danglingLinks,
+    searchText,
+    countSearch,
+    tags,
+  };
 }

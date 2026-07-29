@@ -39,6 +39,7 @@ export type {
 } from '@/notes/index.ts';
 export type {
   Backlink,
+  DanglingLink,
   NoteHit,
   OrderField,
   OutboundLink,

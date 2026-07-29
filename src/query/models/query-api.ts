@@ -1,4 +1,5 @@
 import type { Backlink } from './backlink.ts';
+import type { DanglingLink } from './dangling-link.ts';
 import type { NoteHit } from './note-hit.ts';
 import type { QueryOrder } from './order.ts';
 import type { OutboundLink } from './outbound-link.ts';
@@ -26,6 +27,16 @@ export type QueryApi = {
     offset?: number;
   }): NoteHit[];
   /**
+   * Total number of readable notes matching the same `tag` / `where` / `folder`
+   * filters {@link queryNotes} accepts — the page-count companion to it. Not
+   * capped by `limit`, so `Math.ceil(countNotes(f) / pageSize)` is exact.
+   */
+  countNotes(opts?: {
+    tag?: string;
+    where?: WhereMap;
+    folder?: string;
+  }): number;
+  /**
    * Notes that link to `path` via `[[wikilink]]` or relative-link resolution.
    * Defaults to limit 100; hard cap 1000.
    */
@@ -42,6 +53,14 @@ export type QueryApi = {
     opts?: { limit?: number; offset?: number },
   ): OutboundLink[];
   /**
+   * Every link in the vault that resolves to no note — the vault-wide sweep for
+   * broken `[[wikilinks]]` and dead relative links, ordered by source path then
+   * target. Use it after a rename: {@link NotesApi.moveNote} moves a note
+   * byte-for-byte and never rewrites inbound links, so this is how the fallout
+   * is found. Defaults to limit 100; hard cap 1000.
+   */
+  danglingLinks(opts?: { limit?: number; offset?: number }): DanglingLink[];
+  /**
    * FTS5 keyword search over note bodies, returning highlighted snippets.
    * Defaults to limit 100; hard cap 1000.
    */
@@ -49,6 +68,12 @@ export type QueryApi = {
     q: string,
     opts?: { tag?: string; folder?: string; limit?: number; offset?: number },
   ): SearchHit[];
+  /**
+   * Total number of readable notes matching the same query and `tag` / `folder`
+   * filters {@link searchText} accepts — the page-count companion to it. Not
+   * capped by `limit`.
+   */
+  countSearch(q: string, opts?: { tag?: string; folder?: string }): number;
   /**
    * Every tag present on notes the instance can read, each with the number of
    * those notes that carry it, ranked most-used first (canonical tags float to

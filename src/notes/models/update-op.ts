@@ -19,6 +19,27 @@ export type UpdateOp =
       };
     }
   | {
-      /** Text to append verbatim to the end of the note body. */
+      /**
+       * Text to append verbatim to the end of the note body, with a newline
+       * inserted first when the existing content does not end in one. Creates
+       * the note when it does not exist.
+       */
       append: string;
+    }
+  | {
+      /**
+       * Text to insert at the START of the note body — after the frontmatter
+       * block, never before it — with a newline inserted between it and the
+       * existing body when it does not already end in one. Creates the note
+       * when it does not exist.
+       */
+      prepend: string;
+    }
+  | {
+      /**
+       * Replacement for the whole note body; the frontmatter block is preserved
+       * verbatim. Does NOT create a missing note (throws `REFUSE_CREATE`) — use
+       * {@link NotesApi.createNote} for that.
+       */
+      setBody: string;
     };

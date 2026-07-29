@@ -9,8 +9,8 @@ import type { UpdateOp } from './update-op.ts';
  * vault-relative path; the six mutating methods (`createNote`, `updateNote`,
  * `editFrontmatter`, `transformNote`, `deleteNote`, `moveNote`) run inside the
  * per-file lock so the `.md` file and its index row never drift (`moveNote`
- * holds both ends' locks). `readNote` is a consistent read and does not
- * acquire the lock.
+ * holds both ends' locks). `readNote` and `exists` are consistent reads and do
+ * not acquire the lock.
  */
 export type NotesApi = {
   /**
@@ -25,6 +25,17 @@ export type NotesApi = {
     opts?: { withLinks?: boolean },
   ): Promise<ReadNoteResult>;
   /**
+   * Whether a note exists at `path` — the non-throwing probe that turns the
+   * create-or-update dance into a plain branch instead of a `try`/`catch` on
+   * `ALREADY_EXISTS`. Checked against the READ allowlist.
+   * @param path Vault-relative path to the `.md` file.
+   * @returns `true` if a file is present, `false` if not.
+   * @throws {@link MdVaultError} `NOT_MARKDOWN` if `path` is not a `.md` path,
+   * or `ALLOWLIST_VIOLATION` if it is outside the read scope — an unreadable
+   * path is a caller bug, not an absent note.
+   */
+  exists(path: string): Promise<boolean>;
+  /**
    * Create a new note, writing frontmatter + body. Never clobbers an existing
    * file.
    * @throws {@link MdVaultError} `ALREADY_EXISTS` if the path is taken.
@@ -34,8 +45,12 @@ export type NotesApi = {
     input: { frontmatter?: Record<string, unknown>; body: string },
   ): Promise<void>;
   /**
-   * Mutate a note body — either append text or replace a single unique match.
-   * @throws {@link MdVaultError} `NO_MATCH` / `AMBIGUOUS_MATCH` for `editByMatch`.
+   * Mutate a note's body, leaving any frontmatter block verbatim: `append` and
+   * `prepend` add text at either end (both create the note when it is absent),
+   * `setBody` replaces the body wholesale, and `editByMatch` replaces a single
+   * unique substring.
+   * @throws {@link MdVaultError} `NO_MATCH` / `AMBIGUOUS_MATCH` for
+   * `editByMatch`, or `REFUSE_CREATE` when `setBody` targets a missing note.
    */
   updateNote(path: string, op: UpdateOp): Promise<void>;
   /**

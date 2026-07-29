@@ -8,4 +8,11 @@ export type NoteHit = {
   frontmatter: Record<string, unknown>;
   /** Normalised tag tokens from frontmatter. */
   tags: string[];
+  /**
+   * Last-modified time in milliseconds since the epoch, as recorded in the
+   * index — the same value {@link QueryOrder} sorts by with `field: 'mtime_ms'`.
+   */
+  mtime_ms: number;
+  /** File size in bytes, as recorded in the index. */
+  size: number;
 };
