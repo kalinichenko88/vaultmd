@@ -978,6 +978,72 @@ export function createQuery(
     return hits.slice(off, off + lim);
   }
 
+  function outboundMentions(
+    path: string,
+    opts: { limit?: number; offset?: number } = {},
+  ): SearchHit[] {
+    const { lim, off } = validatePagination(opts.limit, opts.offset);
+    const subject = mentionSubject(path);
+    if (subject === null) {
+      return [];
+    }
+    const body = bodyFor(vaultIo.toKey(path));
+    if (body === null) {
+      return [];
+    }
+    // Notes this one already links are linked mentions; outboundLinks reports
+    // them. Its own name would otherwise match its own H1.
+    const excluded = new Set<string>([subject.display]);
+    for (const row of db
+      .query<LinkRow, [string]>(
+        'SELECT target, base FROM note_links WHERE src_key = ?',
+      )
+      .all(vaultIo.toKey(path))) {
+      const target = resolveLinkTarget(row, subject.display);
+      if (target !== null) {
+        excluded.add(target);
+      }
+    }
+
+    // One matcher over this body, probed with every other note's names — the
+    // reverse of unlinkedMentions, and the reason the prefilter exists: a vault
+    // of names is thousands of probes against one string.
+    // ponytail: a full notes scan per call. If that ever shows up in a profile,
+    // precompute the names into a table at index time; the matching, which is
+    // the expensive half, would not change.
+    const match = mentionMatcher(body);
+    const found: (SearchHit & { at: number })[] = [];
+    for (const row of db
+      .query<{ path: string; title: string; frontmatter: string }, []>(
+        'SELECT path, title, frontmatter FROM notes',
+      )
+      .all()) {
+      if (excluded.has(row.path) || !inScope(row.path)) {
+        continue;
+      }
+      for (const term of mentionTerms(row.path, row.frontmatter)) {
+        const hit = match(term);
+        if (hit === null) {
+          continue;
+        }
+        found.push({
+          path: row.path,
+          title: row.title,
+          snippet: mentionSnippet(body, hit.index, hit.length),
+          at: hit.index,
+        });
+        break;
+      }
+    }
+
+    // Reading order: a UI walks the note top to bottom, so that is the order
+    // its mentions should arrive in. Path breaks ties deterministically.
+    return found
+      .sort((a, b) => a.at - b.at || (a.path < b.path ? -1 : 1))
+      .slice(off, off + lim)
+      .map(({ at: _at, ...hit }) => hit);
+  }
+
   function searchText(
     q: string,
     opts: NoteFilter & { limit?: number; offset?: number } = {},
@@ -1073,6 +1139,7 @@ export function createQuery(
     outboundLinks,
     danglingLinks,
     unlinkedMentions,
+    outboundMentions,
     searchText,
     countSearch,
     tags,

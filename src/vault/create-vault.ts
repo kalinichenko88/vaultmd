@@ -149,6 +149,7 @@ export async function createVault(config: CreateVaultConfig): Promise<Vault> {
     outboundLinks: reconciled(rawQuery.outboundLinks),
     danglingLinks: reconciled(rawQuery.danglingLinks),
     unlinkedMentions: reconciled(rawQuery.unlinkedMentions),
+    outboundMentions: reconciled(rawQuery.outboundMentions),
     searchText: reconciled(rawQuery.searchText),
     countSearch: reconciled(rawQuery.countSearch),
     tags: reconciled(rawQuery.tags),

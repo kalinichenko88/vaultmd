@@ -109,6 +109,7 @@ describe('createQuery factory', () => {
       'danglingLinks',
       'orphanNotes',
       'outboundLinks',
+      'outboundMentions',
       'queryNotes',
       'searchText',
       'tags',
@@ -2200,5 +2201,178 @@ describe('unlinkedMentions', () => {
       q.unlinkedMentions('Alpha.md', { limit: 2, offset: 2 }),
     ).toHaveLength(2);
     expect(q.unlinkedMentions('Alpha.md', { limit: 2, offset: 4 })).toEqual([]);
+  });
+});
+
+describe('outboundMentions', () => {
+  test('reports another note named in this body', () => {
+    insertNote(db, { path: 'journal.md', body: 'talked about Alpha at lunch' });
+    insertNote(db, { path: 'Alpha.md' });
+    expect(mkQuery().outboundMentions('journal.md')).toEqual([
+      {
+        path: 'Alpha.md',
+        title: 'Alpha',
+        snippet: 'talked about <b>Alpha</b> at lunch',
+      },
+    ]);
+  });
+
+  test('excludes a note this one already links', () => {
+    insertNote(db, {
+      path: 'journal.md',
+      body: 'see [[Alpha]] and also Beta',
+      links: [{ target: 'Alpha', base: 'alpha', kind: 'wikilink' }],
+    });
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, { path: 'Beta.md' });
+    expect(
+      mkQuery()
+        .outboundMentions('journal.md')
+        .map((h) => h.path),
+    ).toEqual(['Beta.md']);
+  });
+
+  test('excludes the note itself', () => {
+    insertNote(db, { path: 'Alpha.md', body: '# Alpha\n\nAlpha again' });
+    expect(mkQuery().outboundMentions('Alpha.md')).toEqual([]);
+  });
+
+  test('needs a word boundary, in Latin and in Cyrillic', () => {
+    insertNote(db, {
+      path: 'src.md',
+      body: 'the catalogue is long. Проект Альфа стартовал.',
+    });
+    insertNote(db, { path: 'cat.md' });
+    insertNote(db, { path: 'Альфа.md' });
+    expect(
+      mkQuery()
+        .outboundMentions('src.md')
+        .map((h) => h.path),
+    ).toEqual(['Альфа.md']);
+  });
+
+  test('survives regex metacharacters in a note name', () => {
+    insertNote(db, {
+      path: 'src.md',
+      body: 'written in C++ during Meeting 1, not Meeting [1]',
+    });
+    insertNote(db, { path: 'C++.md' });
+    insertNote(db, { path: 'Meeting [1].md' });
+    const hits = mkQuery().outboundMentions('src.md');
+    // `C++` matches literally; `Meeting [1]` must not be read as a character
+    // class and match the text "Meeting 1" — it matches its own literal text.
+    expect(hits.map((h) => h.path).sort()).toEqual([
+      'C++.md',
+      'Meeting [1].md',
+    ]);
+    expect(hits.find((h) => h.path === 'Meeting [1].md')?.snippet).toContain(
+      '<b>Meeting [1]</b>',
+    );
+  });
+
+  test('matches another note by alias', () => {
+    insertNote(db, { path: 'src.md', body: 'the AI thing shipped' });
+    insertNote(db, {
+      path: 'Alpha.md',
+      frontmatter: { aliases: ['AI thing'] },
+    });
+    expect(
+      mkQuery()
+        .outboundMentions('src.md')
+        .map((h) => h.path),
+    ).toEqual(['Alpha.md']);
+  });
+
+  test('orders by where the mention falls, not by path', () => {
+    insertNote(db, { path: 'src.md', body: 'Zeta came first, Alpha second' });
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, { path: 'Zeta.md' });
+    expect(
+      mkQuery()
+        .outboundMentions('src.md')
+        .map((h) => h.path),
+    ).toEqual(['Zeta.md', 'Alpha.md']);
+  });
+
+  test('never names a note outside the read scope', () => {
+    insertNote(db, {
+      path: 'Notes/src.md',
+      body: 'about secret and about ok',
+    });
+    insertNote(db, { path: 'Private/secret.md' });
+    insertNote(db, { path: 'Notes/ok.md' });
+    expect(
+      mkQuery({ read: ['Notes/'] })
+        .outboundMentions('Notes/src.md')
+        .map((h) => h.path),
+    ).toEqual(['Notes/ok.md']);
+  });
+
+  test('is [] for a note with no indexed body, and for unknown paths', () => {
+    insertNote(db, { path: 'empty.md' });
+    insertNote(db, { path: 'Alpha.md' });
+    const q = mkQuery();
+    expect(q.outboundMentions('empty.md')).toEqual([]);
+    expect(q.outboundMentions('nope.md')).toEqual([]);
+  });
+
+  test('excludes an already-linked note in relative mode too', () => {
+    insertNote(db, {
+      path: 'src.md',
+      body: 'see [Alpha](Alpha.md) and also Beta',
+      links: [{ target: 'Alpha.md', base: null, kind: 'mdlink' }],
+    });
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, { path: 'Beta.md' });
+    expect(
+      mkQuery({ linkResolution: 'relative' })
+        .outboundMentions('src.md')
+        .map((h) => h.path),
+    ).toEqual(['Beta.md']);
+  });
+
+  test('paginates', () => {
+    insertNote(db, { path: 'src.md', body: 'one two three four' });
+    for (const name of ['one', 'two', 'three', 'four']) {
+      insertNote(db, { path: `${name}.md` });
+    }
+    const q = mkQuery();
+    expect(
+      q.outboundMentions('src.md', { limit: 2 }).map((h) => h.path),
+    ).toEqual(['one.md', 'two.md']);
+    expect(
+      q.outboundMentions('src.md', { limit: 2, offset: 2 }).map((h) => h.path),
+    ).toEqual(['three.md', 'four.md']);
+  });
+});
+
+describe('mentions — documented limits and cross-method agreement', () => {
+  test('a name embedded in unsegmented CJK text is NOT found either way', () => {
+    // Locked, not aspirational: unicode61 makes 我去了东京旅行 one token, and the
+    // word-boundary matcher sees 了 as a letter. Obsidian finds these; we do
+    // not. Changing that means a trigram tokenizer and a schema bump.
+    insertNote(db, { path: '东京.md' });
+    insertNote(db, { path: 'trip.md', body: '我去了东京旅行' });
+    const q = mkQuery();
+    expect(q.unlinkedMentions('东京.md')).toEqual([]);
+    expect(q.outboundMentions('trip.md')).toEqual([]);
+    // …while a delimited occurrence is found, so the limit is the boundary,
+    // not the script.
+    insertNote(db, { path: 'spaced.md', body: '週末は 东京 に行った' });
+    expect(q.unlinkedMentions('东京.md').map((h) => h.path)).toEqual([
+      'spaced.md',
+    ]);
+  });
+
+  test('both methods report the same mention from opposite ends', () => {
+    insertNote(db, { path: 'journal.md', body: 'kicked off Alpha today' });
+    insertNote(db, { path: 'Alpha.md' });
+    const q = mkQuery();
+    const inbound = q.unlinkedMentions('Alpha.md');
+    const outbound = q.outboundMentions('journal.md');
+    expect(inbound.map((h) => h.path)).toEqual(['journal.md']);
+    expect(outbound.map((h) => h.path)).toEqual(['Alpha.md']);
+    // Same body, same matcher, so the excerpt is identical from either side.
+    expect(inbound[0].snippet).toBe(outbound[0].snippet);
   });
 });

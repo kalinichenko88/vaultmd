@@ -105,6 +105,26 @@ export type QueryApi = {
     opts?: { limit?: number; offset?: number },
   ): SearchHit[];
   /**
+   * Notes named in THIS note's body without being linked from it — Obsidian's
+   * "Unlinked mentions" in the Outgoing links pane, and the prose counterpart
+   * of {@link outboundLinks}. A hit is another note whose filename, explicit
+   * frontmatter `title` or alias appears in this note's body at a word
+   * boundary and case-insensitively, and which this note does not already
+   * link. Ordered by where the mention falls in the body, so hits arrive in
+   * reading order.
+   *
+   * The `snippet` quotes the *queried* note around the name — the hit is the
+   * note being named, the surrounding text is this one's.
+   *
+   * Carries the same unsegmented-text limitation as {@link unlinkedMentions}:
+   * a name embedded in Chinese or Japanese prose has no word boundary to
+   * match. Defaults to limit 100; hard cap 1000.
+   */
+  outboundMentions(
+    path: string,
+    opts?: { limit?: number; offset?: number },
+  ): SearchHit[];
+  /**
    * FTS5 keyword search over note bodies, returning highlighted snippets,
    * narrowed by the same {@link NoteFilter} the note readers take. Defaults to
    * limit 100; hard cap 1000.
