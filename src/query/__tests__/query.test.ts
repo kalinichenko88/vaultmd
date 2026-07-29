@@ -1480,3 +1480,107 @@ describe('danglingLinks', () => {
     ]);
   });
 });
+
+// ── review regressions ───────────────────────────────────────────────────────
+describe('danglingLinks — review regressions', () => {
+  function mkQuery(
+    linkResolution: 'wikilink' | 'relative' = 'wikilink',
+    caseSensitive = false,
+  ) {
+    const io = createVaultIo({
+      root: vaultDir,
+      prefixes: { read: [''], write: [''] },
+      caseSensitive,
+    });
+
+    return createQuery(db, io, { linkResolution, caseSensitive, ignore: [] });
+  }
+
+  test('a mixed-case relative link resolves on a case-insensitive vault', () => {
+    insertNote(db, { path: 'Notes/Target.md' });
+    insertNote(db, {
+      path: 'Source.md',
+      links: [{ target: 'Notes/Target.md', base: null, kind: 'mdlink' }],
+    });
+    const q = mkQuery('relative');
+    expect(q.outboundLinks('Source.md')).toEqual([
+      { target: 'Notes/Target.md', resolved: 'Notes/Target.md' },
+    ]);
+    expect(q.danglingLinks()).toEqual([]);
+  });
+
+  test('a broken transclusion whose title ends in a dot segment is reported', () => {
+    for (const target of [
+      'Meeting 2024.Q1',
+      'Draft.v2',
+      'Release notes.beta',
+      'config.prod',
+    ]) {
+      insertNote(db, {
+        path: `${target}-src.md`,
+        links: [{ target, base: target.toLowerCase(), kind: 'embed' }],
+      });
+    }
+    expect(
+      mkQuery()
+        .danglingLinks()
+        .map((d) => d.target)
+        .sort(),
+    ).toEqual([
+      'Draft.v2',
+      'Meeting 2024.Q1',
+      'Release notes.beta',
+      'config.prod',
+    ]);
+  });
+
+  test('a plain (non-embed) wikilink to an attachment is not reported', () => {
+    insertNote(db, {
+      path: 'a.md',
+      links: [
+        { target: 'diagram.png', base: 'diagram.png', kind: 'wikilink' },
+        { target: 'notes.pdf', base: 'notes.pdf', kind: 'wikilink' },
+      ],
+    });
+    expect(mkQuery().danglingLinks()).toEqual([]);
+  });
+
+  test('a note whose whole title is an extension word is still checked', () => {
+    insertNote(db, {
+      path: 'a.md',
+      links: [{ target: 'zip', base: 'zip', kind: 'wikilink' }],
+    });
+    expect(mkQuery().danglingLinks()).toEqual([
+      { from: 'a.md', target: 'zip' },
+    ]);
+  });
+
+  test('the same missing target linked and embedded is reported once', () => {
+    insertNote(db, {
+      path: 'a.md',
+      links: [
+        { target: 'ghost', base: 'ghost', kind: 'wikilink' },
+        { target: 'ghost', base: 'ghost', kind: 'embed' },
+      ],
+    });
+    expect(mkQuery().danglingLinks()).toEqual([
+      { from: 'a.md', target: 'ghost' },
+    ]);
+  });
+
+  test('the base index agrees with the per-link scan on tie-breaks', () => {
+    // Two notes share a basename; the bare link must win toward its own folder,
+    // the same way outboundLinks (which does not build the index) resolves it.
+    insertNote(db, { path: 'Notes/dup.md' });
+    insertNote(db, { path: 'Other/dup.md' });
+    insertNote(db, {
+      path: 'Other/src.md',
+      links: [{ target: 'dup', base: 'dup', kind: 'wikilink' }],
+    });
+    const q = mkQuery();
+    expect(q.outboundLinks('Other/src.md')).toEqual([
+      { target: 'dup', resolved: 'Other/dup.md' },
+    ]);
+    expect(q.danglingLinks()).toEqual([]);
+  });
+});

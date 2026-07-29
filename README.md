@@ -211,7 +211,8 @@ backlinks(path, opts?: { limit?: number; offset?: number }): Backlink[]
 outboundLinks(path, opts?: { limit?: number; offset?: number }): OutboundLink[]
 
 // Every link in the vault that resolves to nothing — the post-rename damage
-// report. Returns { from, target }[]; attachment embeds (![[x.png]]) excluded.
+// report. Returns { from, target }[]. Links naming an attachment file type
+// ([[x.png]], ![[x.pdf]]) are excluded: they can never resolve to a .md note.
 danglingLinks(opts?: { limit?: number; offset?: number }): DanglingLink[]
 
 // Full-text keyword search over bodies. Returns { path, title, snippet? }[].

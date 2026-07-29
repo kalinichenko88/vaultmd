@@ -51,8 +51,11 @@ for (const { from, target } of vault.query.danglingLinks()) {
 }
 ```
 
-Attachment embeds (`![[diagram.png]]`) are excluded — they can never resolve to
-a `.md` note, so they are not breakage.
+Links naming an attachment file type — `[[diagram.png]]`, `![[notes.pdf]]`,
+embedded or not — are excluded: they can never resolve to a `.md` note, so they
+are not breakage. Note this makes `danglingLinks` stricter than
+`outboundLinks`, which reports raw resolution and returns `resolved: null` for
+those same links.
 
 ## Create a note only if it is not there yet
 

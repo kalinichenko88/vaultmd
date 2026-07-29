@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import { stat } from 'node:fs/promises';
 
 import { MdVaultError } from '@/errors.ts';
 import {
@@ -61,7 +62,17 @@ export function createNotes(deps: NotesDeps): NotesApi {
   }
 
   async function exists(path: string): Promise<boolean> {
-    return (await vaultIo.stat(path)) !== null;
+    // resolveVaultPath keeps the NOT_MARKDOWN / ALLOWLIST_VIOLATION contract —
+    // an unreadable path is a caller bug. Everything the stat itself can fail
+    // with is just "no note here" and must not escape as a raw errno the
+    // caller's `switch (err.code)` cannot match: ENOENT, ENOTDIR when a parent
+    // segment is a file, ELOOP, EACCES. isFile() then rejects a DIRECTORY named
+    // `x.md`, which would otherwise answer true and send the caller down the
+    // update path straight into an EISDIR.
+    const full = vaultIo.resolveVaultPath(path, 'read');
+    const info = await stat(full).catch(() => null);
+
+    return info?.isFile() ?? false;
   }
 
   function runLocked<T>(key: string, fn: () => Promise<T>): Promise<T> {

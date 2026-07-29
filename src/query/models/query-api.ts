@@ -46,7 +46,11 @@ export type QueryApi = {
   ): Backlink[];
   /**
    * Links out of `path`, each with its `resolved` target (or `null` if the
-   * link dangles). Defaults to limit 100; hard cap 1000.
+   * link dangles). Reports raw resolution, so a link to an attachment
+   * (`[[diagram.png]]`) comes back `resolved: null` — nothing outside `.md` is
+   * indexed. {@link danglingLinks} filters those out, so treat `resolved: null`
+   * as "not a note in this vault", not as "broken". Defaults to limit 100;
+   * hard cap 1000.
    */
   outboundLinks(
     path: string,
@@ -57,7 +61,10 @@ export type QueryApi = {
    * broken `[[wikilinks]]` and dead relative links, ordered by source path then
    * target. Use it after a rename: {@link NotesApi.moveNote} moves a note
    * byte-for-byte and never rewrites inbound links, so this is how the fallout
-   * is found. Defaults to limit 100; hard cap 1000.
+   * is found. Links naming an attachment file type (`[[diagram.png]]`) are NOT
+   * reported: they can never resolve to a `.md` note, so they are not breakage
+   * — which is why this can return `[]` for a link {@link outboundLinks} shows
+   * as `resolved: null`. Defaults to limit 100; hard cap 1000.
    */
   danglingLinks(opts?: { limit?: number; offset?: number }): DanglingLink[];
   /**

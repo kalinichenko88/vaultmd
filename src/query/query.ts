@@ -29,7 +29,7 @@ type RawNoteRow = {
 };
 type TagRow = { tag: string };
 type LinkRow = { target: string; base: string | null };
-type SrcLinkRow = LinkRow & { from_path: string; kind: string };
+type SrcLinkRow = LinkRow & { from_path: string };
 type SearchRow = { path: string; title: string; snippet: string };
 type PathRow = { path: string };
 
@@ -127,16 +127,74 @@ function whereClause(parts: string[]): string {
   return parts.length > 0 ? `WHERE ${parts.join(' AND ')}` : '';
 }
 
-// `![[diagram.png]]` is an attachment embed, not a broken note link — it can
-// never resolve to a `.md` note, so counting it as dangling would bury the real
-// breakage under every image in the vault. Only embeds are filtered, and only
-// when the target ends in a letter-led extension, so a transclusion of a note
-// titled `Chapter 1.2` (extension `.2`) still gets checked. Relative mode never
-// stores non-`.md` targets, so this only ever fires for wikilinks.
-// ponytail: extension heuristic; take an explicit attachment-extension config
-// if someone reports a real note title it misjudges.
-function isAttachmentEmbed(row: { target: string; kind: string }): boolean {
-  return row.kind === 'embed' && /\.[a-z][a-z0-9]{1,4}$/i.test(row.target);
+// Attachment file types a vault links to but this package does not index. A
+// CLOSED list, not a shape test: an open "looks like an extension" rule cuts
+// both ways — it swallows real broken links whose title merely ends in a dot
+// segment (`[[Meeting 2024.Q1]]`, `[[Draft.v2]]`, `[[Release notes.beta]]`),
+// and a missed transclusion is worse than a listed one. Anything not named
+// here is treated as a note reference and gets checked.
+// ponytail: extend the list if a real vault links a type it lacks.
+const ATTACHMENT_EXTENSIONS = new Set([
+  // images
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'svg',
+  'webp',
+  'avif',
+  'bmp',
+  'ico',
+  'heic',
+  'tif',
+  'tiff',
+  // documents
+  'pdf',
+  'doc',
+  'docx',
+  'xls',
+  'xlsx',
+  'ppt',
+  'pptx',
+  'odt',
+  'ods',
+  'epub',
+  // audio / video
+  'mp3',
+  'wav',
+  'm4a',
+  'ogg',
+  'flac',
+  'aac',
+  'mp4',
+  'mov',
+  'webm',
+  'mkv',
+  'avi',
+  'm4v',
+  // archives + editor artefacts
+  'zip',
+  'gz',
+  'tar',
+  '7z',
+  'canvas',
+]);
+
+// `[[diagram.png]]` names an attachment, not a missing note — it can never
+// resolve to a `.md` note, so reporting it as broken would bury real breakage
+// under every image in the vault. Kind-independent on purpose: the plain
+// wikilink form is as common as the `![[...]]` embed for PDFs and images meant
+// to be clicked. Relative mode never stores non-`.md` targets, so in practice
+// this only fires for wikilinks.
+function isAttachmentTarget(target: string): boolean {
+  const dot = target.lastIndexOf('.');
+  // `dot <= 0` covers both a note with no extension at all and a leading-dot
+  // name — a note titled `zip` must not read as a zip archive.
+  if (dot <= 0) {
+    return false;
+  }
+
+  return ATTACHMENT_EXTENSIONS.has(target.slice(dot + 1).toLowerCase());
 }
 
 function pathBaseLower(p: string): string {
@@ -188,14 +246,47 @@ export function createQuery(
   }
 
   // In-scope notes whose basename (case-folded, sans .md) equals `base` — the
-  // bare-wikilink candidate set, shared by backlinks and outboundLinks.
-  function bareCandidates(base: string): PathRow[] {
+  // bare-wikilink candidate set, shared by backlinks, outboundLinks and
+  // danglingLinks. `index` short-circuits the per-base LIKE scan: see
+  // buildBaseIndex for when passing one is worth it.
+  function bareCandidates(
+    base: string,
+    index?: Map<string, PathRow[]>,
+  ): PathRow[] {
+    if (index) {
+      return index.get(base) ?? [];
+    }
+
     return db
       .query<PathRow, [string, string]>(
         'SELECT path FROM notes WHERE LOWER(path_key) = ? OR LOWER(path_key) LIKE ?',
       )
       .all(`${base}.md`, `%/${base}.md`)
       .filter((c) => pathBaseLower(c.path) === base && inScope(c.path));
+  }
+
+  // Every in-scope note grouped by basename, in ONE pass over `notes`. The
+  // per-base LIKE scan bareCandidates does otherwise is unindexed, so resolving
+  // a whole vault of links one at a time is quadratic — measured at ~4.5s for
+  // 3000 notes / 15000 links, on a synchronous call. Callers resolving a single
+  // page (outboundLinks) should NOT build this: one scan to save a handful of
+  // lookups is the worse trade.
+  function buildBaseIndex(): Map<string, PathRow[]> {
+    const index = new Map<string, PathRow[]>();
+    for (const row of db.query<PathRow, []>('SELECT path FROM notes').all()) {
+      if (!inScope(row.path)) {
+        continue;
+      }
+      const base = pathBaseLower(row.path);
+      const group = index.get(base);
+      if (group) {
+        group.push(row);
+      } else {
+        index.set(base, [row]);
+      }
+    }
+
+    return index;
   }
 
   function queryNotes(
@@ -366,9 +457,17 @@ export function createQuery(
   // dangles. Shared by outboundLinks (one note) and danglingLinks (vault-wide),
   // so both agree on what "resolved" means. `srcDisplay` is the linking note's
   // canonical path — bare wikilinks tie-break toward the source's own folder.
-  function resolveLinkTarget(row: LinkRow, srcDisplay: string): string | null {
+  function resolveLinkTarget(
+    row: LinkRow,
+    srcDisplay: string,
+    baseIndex?: Map<string, PathRow[]>,
+  ): string | null {
     if (cfg.linkResolution === 'relative') {
-      return readableNoteByKey(row.target);
+      // toKey, not the raw target: note_links.target holds the path as written
+      // in the link, while path_key is case-folded on a case-insensitive
+      // volume. Comparing the two directly makes every mixed-case relative
+      // link ([t](Notes/Target.md)) miss its own note.
+      return readableNoteByKey(vaultIo.toKey(row.target));
     }
     // path-qualified: [[Folder/Foo]] stored as target='Folder/Foo'
     if (row.target.includes('/')) {
@@ -376,7 +475,10 @@ export function createQuery(
     }
     if (row.base !== null) {
       return (
-        tieBreakWinner(bareCandidates(row.base), pathFolder(srcDisplay)) ?? null
+        tieBreakWinner(
+          bareCandidates(row.base, baseIndex),
+          pathFolder(srcDisplay),
+        ) ?? null
       );
     }
 
@@ -412,18 +514,33 @@ export function createQuery(
     const { lim, off } = validatePagination(opts.limit, opts.offset);
     const rows = db
       .query<SrcLinkRow, []>(
-        `SELECT n.path AS from_path, nl.target, nl.base, nl.kind
+        `SELECT n.path AS from_path, nl.target, nl.base
          FROM note_links nl
          JOIN notes n ON n.path_key = nl.src_key
          ORDER BY n.path ASC, nl.target ASC`,
       )
       .all();
+    // Only bare wikilinks consult it; relative mode resolves by path_key alone,
+    // so building it there would be a full scan nobody reads.
+    const baseIndex =
+      cfg.linkResolution === 'wikilink' ? buildBaseIndex() : undefined;
+    // One row per (src, target, kind), so a note carrying both [[ghost]] and
+    // ![[ghost]] reports the same breakage twice and burns two slots of the
+    // caller's page. backlinks dedupes for the same reason.
+    const seen = new Set<string>();
     const broken: DanglingLink[] = [];
     for (const row of rows) {
-      if (!inScope(row.from_path) || isAttachmentEmbed(row)) {
+      if (!inScope(row.from_path) || isAttachmentTarget(row.target)) {
         continue;
       }
-      if (resolveLinkTarget(row, row.from_path) === null) {
+      // NUL separator, not a space: a space would collide "a b" + "c"
+      // with "a" + "b c".
+      const key = `${row.from_path}\u0000${row.target}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      if (resolveLinkTarget(row, row.from_path, baseIndex) === null) {
+        seen.add(key);
         broken.push({ from: row.from_path, target: row.target });
       }
     }
@@ -433,10 +550,13 @@ export function createQuery(
 
   // Every in-scope hit for `q`, unpaginated and rank-ordered — searchText slices
   // it into a page, countSearch just takes its length, so a count can never
-  // disagree with the rows it counts.
+  // disagree with the rows it counts. `withSnippet` is off for the count: fts5
+  // `snippet()` builds a highlighted string per matching row, and a "page 1 of
+  // N" render would pay for one per hit only to discard it.
   function searchScoped(
     q: string,
     opts: { tag?: string; folder?: string } = {},
+    withSnippet = true,
   ): SearchHit[] {
     const ftsQ = sanitizeFts(q);
     if (ftsQ === null) {
@@ -449,12 +569,14 @@ export function createQuery(
       ...filterParams,
     ];
     const extra = parts.length > 0 ? `AND ${parts.join(' AND ')}` : '';
+    const snippetCol = withSnippet
+      ? `snippet(notes_fts, 0, '<b>', '</b>', '…', 10)`
+      : `''`;
     // Fetch all matching rows without LIMIT/OFFSET — scope-filter first, then
     // slice in JS to get exact page fills. (At personal-vault scale the full
     // scan is fine; a future optimisation can push read-prefixes into SQL.)
     const sql = `
-      SELECT n.path, n.title,
-             snippet(notes_fts, 0, '<b>', '</b>', '…', 10) AS snippet
+      SELECT n.path, n.title, ${snippetCol} AS snippet
       FROM notes_fts
       JOIN notes n ON notes_fts.rowid = n.id
       WHERE notes_fts MATCH ? ${extra}
@@ -504,7 +626,7 @@ export function createQuery(
     q: string,
     opts: { tag?: string; folder?: string } = {},
   ): number {
-    return searchScoped(q, opts).length;
+    return searchScoped(q, opts, false).length;
   }
 
   function tags(

@@ -624,3 +624,15 @@ describe('updateNote — setBody', () => {
     expect(query.searchText('blueberry').map((h) => h.path)).toEqual(['a.md']);
   });
 });
+
+describe('exists — review regressions', () => {
+  test('is false for a DIRECTORY named like a note', async () => {
+    await mkdir(join(vaultDir, 'dir.md'));
+    expect(await notes.exists('dir.md')).toBe(false);
+  });
+
+  test('is false when a parent segment is a file, not a raw ENOTDIR', async () => {
+    await writeFile(join(vaultDir, 'Notes'), 'i am a file');
+    expect(await notes.exists('Notes/today.md')).toBe(false);
+  });
+});
