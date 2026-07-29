@@ -312,15 +312,58 @@ const WORD_CHAR = '[\\p{L}\\p{N}_]';
 // Characters of context on each side of a mention, mirroring what fts5's
 // snippet() gives searchText.
 const MENTION_CONTEXT = 40;
+// Whether fts5's unicode61 tokenizer can index a name at all: it keeps letters
+// and digits and drops everything else, so a name made only of symbols is
+// unfindable through MATCH and has to be looked for the slow way.
+const TOKENIZABLE = /[\p{L}\p{N}]/u;
+
+// Wikilinks, embeds and md-links, whole. Blanked before matching: text sitting
+// inside link syntax is already a link, so reporting it as an *unlinked*
+// mention tells the reader to convert markup that is converted. Excluding the
+// note's own link targets is not enough — `[[Alpha Notes]]` contains the name
+// of a DIFFERENT note (`Alpha`), and in wikilink mode md-links are not stored
+// as links at all, so neither one is in any exclusion set.
+const LINK_SPAN = /!?\[\[[^\]]*\]\]|!?\[[^\]]*\]\([^)]*\)/g;
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// Finds whole-word, case-insensitive occurrences of a term in one body. Bound
-// to the body (and its lowercased twin) because the outbound direction probes
-// one body with every name in the vault — lowercasing it per term would undo
-// the point of the prefilter.
+// True for the trailing half of a surrogate pair. Cutting a window there yields
+// a lone surrogate: '�' in a UI, and a string that no longer round-trips
+// through TextEncoder/Buffer.
+function isTrailingSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
+// A one-line excerpt around the match, shaped like fts5's snippet(): the match
+// wrapped in <b>, '…' where the window cuts. Whitespace collapses so one hit
+// cannot drag a paragraph's worth of newlines into a list row.
+function mentionSnippet(body: string, index: number, length: number): string {
+  let from = Math.max(0, index - MENTION_CONTEXT);
+  let to = Math.min(body.length, index + length + MENTION_CONTEXT);
+  // The window is measured in UTF-16 code units, so either edge can land inside
+  // an emoji. Step off the pair rather than through it.
+  if (from > 0 && isTrailingSurrogate(body.charCodeAt(from))) {
+    from += 1;
+  }
+  if (to < body.length && isTrailingSurrogate(body.charCodeAt(to))) {
+    to -= 1;
+  }
+  const head = body.slice(from, index).replace(/\s+/g, ' ');
+  const tail = body.slice(index + length, to).replace(/\s+/g, ' ');
+  const hit = body.slice(index, index + length);
+
+  return `${from > 0 ? '…' : ''}${head}<b>${hit}</b>${tail}${to < body.length ? '…' : ''}`;
+}
+
+// Reads one note's body for every name it might contain. Bound to the body
+// because the outbound direction probes a single body with every name in the
+// vault: lowercasing and masking it per term would undo the point of the
+// prefilter.
+//
+// Matching runs against the link-masked text while the snippet is cut from the
+// original — LINK_SPAN blanking is length-preserving, so the indices agree.
 //
 // The prefilter is load-bearing, not tidiness: on a miss the lookbehind regex
 // scans the entire body before conceding, and nearly every term IS a miss —
@@ -329,10 +372,11 @@ function escapeRegExp(s: string): string {
 // ponytail: toLowerCase and the regex's Unicode simple case folding disagree on
 // a few exotic pairs (Greek final sigma ς/σ), where the prefilter rejects a
 // match the regex would have taken. Dropping it costs three orders of magnitude.
-function mentionMatcher(
+function mentionScanner(
   body: string,
-): (term: string) => { index: number; length: number } | null {
-  const lower = body.toLowerCase();
+): (term: string) => { at: number; snippet: string } | null {
+  const prose = body.replace(LINK_SPAN, (span) => ' '.repeat(span.length));
+  const lower = prose.toLowerCase();
 
   return (term) => {
     if (!lower.includes(term.toLowerCase())) {
@@ -346,23 +390,16 @@ function mentionMatcher(
     const match = new RegExp(
       `(?<!${WORD_CHAR})${escapeRegExp(term)}(?!${WORD_CHAR})`,
       'iu',
-    ).exec(body);
+    ).exec(prose);
+    if (match === null) {
+      return null;
+    }
 
-    return match ? { index: match.index, length: match[0].length } : null;
+    return {
+      at: match.index,
+      snippet: mentionSnippet(body, match.index, match[0].length),
+    };
   };
-}
-
-// A one-line excerpt around the match, shaped like fts5's snippet(): the match
-// wrapped in <b>, '…' where the window cuts. Whitespace collapses so one hit
-// cannot drag a paragraph's worth of newlines into a list row.
-function mentionSnippet(body: string, index: number, length: number): string {
-  const from = Math.max(0, index - MENTION_CONTEXT);
-  const to = Math.min(body.length, index + length + MENTION_CONTEXT);
-  const head = body.slice(from, index).replace(/\s+/g, ' ');
-  const tail = body.slice(index + length, to).replace(/\s+/g, ' ');
-  const hit = body.slice(index, index + length);
-
-  return `${from > 0 ? '…' : ''}${head}<b>${hit}</b>${tail}${to < body.length ? '…' : ''}`;
 }
 
 // Every name a note answers to: its filename, an explicitly authored title, and
@@ -558,92 +595,55 @@ export function createQuery(
   // backlinks slices it into a page; unlinkedMentions subtracts the whole set,
   // which must not be capped at some caller's page size — linker #101 is still
   // a linker, not an unlinked mention.
+  // Every readable note linking to `path`, deduplicated but UNPAGINATED.
+  // backlinks slices it into a page; unlinkedMentions subtracts the whole set,
+  // which must not be capped at some caller's page size — linker #101 is still
+  // a linker, not an unlinked mention.
+  //
+  // Stated as the exact inverse of resolveLinkTarget — a link points here iff
+  // resolving it lands on this note — rather than as a second resolver reading
+  // note_links its own way. The hand-rolled reverse direction disagreed with
+  // outboundLinks twice over: a BARE link compared the tie-break winner (a
+  // canonical `notes.path`) against whatever spelling the caller passed in, so
+  // `backlinks('alpha.md')` found nothing for `Alpha.md`; and a RELATIVE link
+  // compared `note_links.target` (the path as written) against a case-folded
+  // `path_key`, so a mixed-case link matched nothing on a case-insensitive
+  // volume. Both dropped real backlinks, and unlinkedMentions then advertised
+  // those linkers as notes that ought to be linked.
+  // ponytail: this trades an indexed lookup for the same vault-wide scan
+  // danglingLinks does. Per-note callers that feel it want a resolved-edge
+  // table maintained at index time, not a third resolution rule here.
   function backlinkSources(path: string): string[] {
-    if (!inScope(path)) {
+    const target = readableNoteByKey(vaultIo.toKey(path));
+    if (target === null) {
       return [];
     }
-    const display = vaultIo.toVaultRelative(path);
-    const targetKey = vaultIo.toKey(path);
-    const base = pathBaseLower(display);
-    const sources: string[] = [];
-
-    if (cfg.linkResolution === 'relative') {
-      // JOIN notes tn on the target side so dangling links (target not in index) yield no rows.
-      const rows = db
-        .query<{ from_path: string }, [string]>(
-          `SELECT n.path AS from_path
-           FROM note_links nl
-           JOIN notes n ON n.path_key = nl.src_key
-           JOIN notes tn ON tn.path_key = nl.target
-           WHERE nl.target = ?`,
-        )
-        .all(targetKey);
-      for (const r of rows) {
-        if (inScope(r.from_path)) {
-          sources.push(r.from_path);
-        }
-      }
-    } else {
-      // path-qualified: [[Folder/Foo]] stored as target='Folder/Foo'; resolves to Folder/Foo.md
-      const pqRows = db
-        .query<{ from_path: string; target: string }, []>(
-          `SELECT n.path AS from_path, nl.target
-           FROM note_links nl
-           JOIN notes n ON n.path_key = nl.src_key
-           WHERE nl.target LIKE '%/%'`,
-        )
-        .all();
-      for (const r of pqRows) {
-        if (!inScope(r.from_path)) {
-          continue;
-        }
-        if (vaultIo.toKey(`${r.target}.md`) === targetKey) {
-          sources.push(r.from_path);
-        }
-      }
-
-      // bare: [[Foo]] stored as base='foo'; win tie-break to be a backlink
-      const bareRows = db
-        .query<{ from_path: string }, [string]>(
-          `SELECT n.path AS from_path
-           FROM note_links nl
-           JOIN notes n ON n.path_key = nl.src_key
-           WHERE nl.base = ?`,
-        )
-        .all(base);
-
-      // candidates are the same for every source with this base, but tie-break winner
-      // differs per source folder — compute candidates once, winner per source
-      const candidates = bareCandidates(base);
-
-      for (const r of bareRows) {
-        if (!inScope(r.from_path)) {
-          continue;
-        }
-        const winner = tieBreakWinner(candidates, pathFolder(r.from_path));
-        if (winner === display) {
-          sources.push(r.from_path);
-        }
-      }
-    }
-
-    // deduplicate (a note could link via both path-qualified and bare)
+    const { rows, baseIndex } = linkRows();
     const seen = new Set<string>();
-    const deduped: string[] = [];
-    for (const s of sources) {
-      if (!seen.has(s)) {
-        seen.add(s);
-        deduped.push(s);
+    const sources: string[] = [];
+    for (const row of rows) {
+      if (seen.has(row.from_path) || !inScope(row.from_path)) {
+        continue;
+      }
+      if (resolveLinkTarget(row, row.from_path, baseIndex) === target) {
+        seen.add(row.from_path);
+        sources.push(row.from_path);
       }
     }
 
-    return deduped;
+    return sources;
   }
 
   function backlinks(
     path: string,
     opts: { limit?: number; offset?: number } = {},
   ): Backlink[] {
+    // Scope first, pagination second — outboundLinks answers an unreadable path
+    // with [] whatever the pagination says, and a UI drawing both panes for one
+    // path must not get a throw from this one and an empty list from that one.
+    if (!inScope(path)) {
+      return [];
+    }
     const { lim, off } = validatePagination(opts.limit, opts.offset);
 
     return backlinkSources(path)
@@ -781,11 +781,15 @@ export function createQuery(
       );
     }
     const { lim, off } = validatePagination(opts.limit, opts.offset);
+    // Notes first: scopedNotes validates `orderBy`, and a typo'd order field
+    // must not cost a full sweep of note_links and notes before it throws —
+    // queryNotes rejects it before doing any work.
+    const notes = scopedNotes(opts);
     const { inbound, outbound } = linkEdges();
 
     // Filter before slicing: paginating first would hand back pages thinned by
     // the orphan test instead of pages of orphans.
-    return scopedNotes(opts)
+    return notes
       .filter(
         (note) =>
           !inbound.has(note.path) &&
@@ -911,21 +915,51 @@ export function createQuery(
 
   // The row backing a mention query, or null when the path indexes nothing the
   // instance may read.
+  //
+  // Scope is judged on the row's own canonical path, never on the spelling the
+  // caller passed: `path_key` is case-folded on a case-insensitive volume, so
+  // `inScope('Notes/secret.md')` can pass the allowlist (a case-sensitive
+  // prefix match) while the key it folds to fetches the unreadable
+  // `notes/secret.md` — and this row's body is what the snippets quote.
+  // readableNoteByKey encodes the same rule for link targets.
   function mentionSubject(
     path: string,
-  ): { display: string; terms: string[] } | null {
-    if (!inScope(path)) {
-      return null;
-    }
+  ): { display: string; pathKey: string; terms: string[] } | null {
+    const pathKey = vaultIo.toKey(path);
     const row = db
       .query<{ path: string; frontmatter: string }, [string]>(
         'SELECT path, frontmatter FROM notes WHERE path_key = ?',
       )
-      .get(vaultIo.toKey(path));
+      .get(pathKey);
+    if (row === null || !inScope(row.path)) {
+      return null;
+    }
 
-    return row
-      ? { display: row.path, terms: mentionTerms(row.path, row.frontmatter) }
-      : null;
+    return {
+      display: row.path,
+      pathKey,
+      terms: mentionTerms(row.path, row.frontmatter),
+    };
+  }
+
+  // Notes worth checking for `term`. fts5 does the narrowing — except for a
+  // name it cannot index at all: unicode61 keeps only letters and digits, so a
+  // note filed as `→.md` or `📥.md` (an ordinary Obsidian inbox convention)
+  // tokenises to nothing and MATCH answers no rows, an empty result the caller
+  // cannot tell from "nobody mentions it". Such a name falls back to every
+  // readable note, which is affordable exactly because a name carrying no
+  // letter or digit is rare.
+  function mentionCandidates(term: string): SearchHit[] {
+    if (TOKENIZABLE.test(term)) {
+      return searchScoped(term, {}, { phrase: true, snippet: false });
+    }
+
+    return db
+      .query<{ path: string; title: string }, []>(
+        'SELECT path, title FROM notes',
+      )
+      .all()
+      .filter((row) => inScope(row.path));
   }
 
   function unlinkedMentions(
@@ -945,32 +979,27 @@ export function createQuery(
     const hits: SearchHit[] = [];
     const seen = new Set<string>();
     for (const term of subject.terms) {
-      // fts5 generates candidates; the JS matcher decides. Tokenisation is not
+      // fts5 generates candidates; the JS scanner decides. Tokenisation is not
       // verbatim matching — a note named `C++` tokenises to `c`, and trusting
       // fts alone would report every note containing that letter.
       // `phrase` is therefore a narrowing hint, not the correctness mechanism:
       // it keeps a two-word name from dragging in every note that merely uses
       // both words, so fewer candidates need their body read back. Verified by
       // mutation — flipping it off changes no result, only the work done.
-      const candidates = searchScoped(
-        term,
-        {},
-        { phrase: true, snippet: false },
-      );
-      for (const candidate of candidates) {
+      for (const candidate of mentionCandidates(term)) {
         if (excluded.has(candidate.path) || seen.has(candidate.path)) {
           continue;
         }
         const body = bodyFor(vaultIo.toKey(candidate.path));
-        const match = body === null ? null : mentionMatcher(body)(term);
-        if (body === null || match === null) {
+        const match = body === null ? null : mentionScanner(body)(term);
+        if (match === null) {
           continue;
         }
         seen.add(candidate.path);
         hits.push({
           path: candidate.path,
           title: candidate.title,
-          snippet: mentionSnippet(body, match.index, match.length),
+          snippet: match.snippet,
         });
       }
     }
@@ -987,31 +1016,36 @@ export function createQuery(
     if (subject === null) {
       return [];
     }
-    const body = bodyFor(vaultIo.toKey(path));
+    const body = bodyFor(subject.pathKey);
     if (body === null) {
       return [];
     }
     // Notes this one already links are linked mentions; outboundLinks reports
     // them. Its own name would otherwise match its own H1.
+    // The base index goes in for the same reason danglingLinks builds one: this
+    // resolves ALL of the note's links, and a bare one resolved without it pays
+    // an unindexed double-LIKE scan of `notes` EACH — quadratic on a hub note.
+    const baseIndex =
+      cfg.linkResolution === 'wikilink' ? buildBaseIndex() : undefined;
     const excluded = new Set<string>([subject.display]);
     for (const row of db
       .query<LinkRow, [string]>(
         'SELECT target, base FROM note_links WHERE src_key = ?',
       )
-      .all(vaultIo.toKey(path))) {
-      const target = resolveLinkTarget(row, subject.display);
+      .all(subject.pathKey)) {
+      const target = resolveLinkTarget(row, subject.display, baseIndex);
       if (target !== null) {
         excluded.add(target);
       }
     }
 
-    // One matcher over this body, probed with every other note's names — the
+    // One scanner over this body, probed with every other note's names — the
     // reverse of unlinkedMentions, and the reason the prefilter exists: a vault
     // of names is thousands of probes against one string.
     // ponytail: a full notes scan per call. If that ever shows up in a profile,
     // precompute the names into a table at index time; the matching, which is
     // the expensive half, would not change.
-    const match = mentionMatcher(body);
+    const scan = mentionScanner(body);
     const found: (SearchHit & { at: number })[] = [];
     for (const row of db
       .query<{ path: string; title: string; frontmatter: string }, []>(
@@ -1021,18 +1055,24 @@ export function createQuery(
       if (excluded.has(row.path) || !inScope(row.path)) {
         continue;
       }
+      // Every term, not the first that hits: a note is placed by its EARLIEST
+      // mention, and an alias can appear before the filename does. Stopping at
+      // the first match would order by which name we happened to try first and
+      // quote the wrong sentence.
+      let best: { at: number; snippet: string } | null = null;
       for (const term of mentionTerms(row.path, row.frontmatter)) {
-        const hit = match(term);
-        if (hit === null) {
-          continue;
+        const hit = scan(term);
+        if (hit !== null && (best === null || hit.at < best.at)) {
+          best = hit;
         }
+      }
+      if (best !== null) {
         found.push({
           path: row.path,
           title: row.title,
-          snippet: mentionSnippet(body, hit.index, hit.length),
-          at: hit.index,
+          snippet: best.snippet,
+          at: best.at,
         });
-        break;
       }
     }
 

@@ -2376,3 +2376,150 @@ describe('mentions — documented limits and cross-method agreement', () => {
     expect(inbound[0].snippet).toBe(outbound[0].snippet);
   });
 });
+
+// ── review round 1: verified findings ────────────────────────────────────────
+describe('mentions — read scope is judged on the canonical row, not the caller string', () => {
+  test('a case-variant path cannot reach an out-of-scope note body', () => {
+    // The allowlist matches the caller's spelling case-sensitively, but the row
+    // is fetched by the case-folded path_key — so 'Notes/secret.md' passes the
+    // prefix check and lands on the unreadable 'notes/secret.md'.
+    insertNote(db, {
+      path: 'notes/secret.md',
+      body: 'CONFIDENTIAL merger with pub closes Friday',
+    });
+    insertNote(db, { path: 'Notes/pub.md', body: 'nothing to see' });
+    const q = mkQuery({ read: ['Notes/'] });
+    // The scope filter works for the plain readers…
+    expect(q.queryNotes().map((n) => n.path)).toEqual(['Notes/pub.md']);
+    // …so a snippet quoting that unreadable body must not come back either.
+    expect(q.outboundMentions('Notes/secret.md')).toEqual([]);
+    expect(q.unlinkedMentions('Notes/secret.md')).toEqual([]);
+  });
+});
+
+describe('backlinks — resolution agrees with outboundLinks on casing', () => {
+  test('a bare wikilink is found however the caller spells the path', () => {
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, {
+      path: 'linker.md',
+      body: 'see [[Alpha]] here',
+      links: [{ target: 'Alpha', base: 'alpha', kind: 'wikilink' }],
+    });
+    const q = mkQuery();
+    expect(q.backlinks('Alpha.md')).toEqual([{ from: 'linker.md' }]);
+    expect(q.backlinks('alpha.md')).toEqual([{ from: 'linker.md' }]);
+    // …so the linker is never advertised as an unlinked mention.
+    expect(q.unlinkedMentions('alpha.md')).toEqual([]);
+  });
+
+  test('a relative link whose target differs in case from the path key', () => {
+    insertNote(db, { path: 'Notes/Target.md' });
+    insertNote(db, {
+      path: 'Notes/Src.md',
+      body: 'See [t](Target.md) and Target is important.',
+      links: [{ target: 'Notes/Target.md', base: null, kind: 'mdlink' }],
+    });
+    const q = mkQuery({ linkResolution: 'relative' });
+    expect(q.backlinks('Notes/Target.md')).toEqual([{ from: 'Notes/Src.md' }]);
+    expect(q.unlinkedMentions('Notes/Target.md')).toEqual([]);
+  });
+
+  test('answers an unreadable path with [] whatever the pagination says', () => {
+    insertNote(db, { path: 'Private/target.md' });
+    const q = mkQuery({ read: ['Notes/'] });
+    // outboundLinks has always done this; backlinks must not throw where its
+    // sibling stays quiet, or a two-pane UI breaks on one side only.
+    expect(q.backlinks('Private/target.md', { limit: -1 })).toEqual([]);
+    expect(q.outboundLinks('Private/target.md', { limit: -1 })).toEqual([]);
+  });
+});
+
+describe('mentions — link markup is not prose', () => {
+  test('a name inside a link to a DIFFERENT note is not a mention', () => {
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, { path: 'Alpha Notes.md' });
+    insertNote(db, {
+      path: 'journal.md',
+      body: 'see [[Alpha Notes]] for details',
+      links: [{ target: 'Alpha Notes', base: 'alpha notes', kind: 'wikilink' }],
+    });
+    const q = mkQuery();
+    expect(q.unlinkedMentions('Alpha.md')).toEqual([]);
+    expect(q.outboundMentions('journal.md')).toEqual([]);
+  });
+
+  test('md-link syntax counts as a link even where it is not indexed', () => {
+    // In wikilink mode storedLinksFor discards md-links, so this one is in no
+    // exclusion set — only masking keeps it out of the results.
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, {
+      path: 'journal.md',
+      body: 'see [Alpha](Alpha.md) please',
+    });
+    expect(mkQuery().unlinkedMentions('Alpha.md')).toEqual([]);
+  });
+
+  test('prose around the markup is still matched', () => {
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, {
+      path: 'journal.md',
+      body: 'see [[Other]] and Alpha shipped',
+      links: [{ target: 'Other', base: 'other', kind: 'wikilink' }],
+    });
+    expect(
+      mkQuery()
+        .unlinkedMentions('Alpha.md')
+        .map((h) => h.path),
+    ).toEqual(['journal.md']);
+  });
+});
+
+describe('outboundMentions — earliest mention wins', () => {
+  test('an alias earlier in the body beats the filename later in it', () => {
+    insertNote(db, {
+      path: 'src.md',
+      body: 'The AI thing kicked off, then Beta, and later Alpha shipped',
+    });
+    insertNote(db, {
+      path: 'Alpha.md',
+      frontmatter: { aliases: ['AI thing'] },
+    });
+    insertNote(db, { path: 'Beta.md' });
+    const hits = mkQuery().outboundMentions('src.md');
+    expect(hits.map((h) => h.path)).toEqual(['Alpha.md', 'Beta.md']);
+    expect(hits[0].snippet).toContain('<b>AI thing</b>');
+  });
+});
+
+describe('mentions — names the fts tokenizer cannot index', () => {
+  test('a symbol-only name is still found', () => {
+    insertNote(db, { path: '→.md' });
+    insertNote(db, { path: 'other.md', body: 'the → arrow note explains it' });
+    expect(
+      mkQuery()
+        .unlinkedMentions('→.md')
+        .map((h) => h.path),
+    ).toEqual(['other.md']);
+  });
+});
+
+describe('mentionSnippet — window edges', () => {
+  test('never cuts a surrogate pair in half', () => {
+    const pad = '🎉'.repeat(30);
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, { path: 'j.md', body: `${pad} Alpha ${pad}` });
+    const snippet = mkQuery().unlinkedMentions('Alpha.md')[0].snippet ?? '';
+    expect(snippet.isWellFormed()).toBe(true);
+    expect(snippet).toContain('<b>Alpha</b>');
+  });
+});
+
+describe('orphanNotes — validation before work', () => {
+  test('rejects an unknown orderBy field like queryNotes does', () => {
+    expect(() =>
+      mkQuery().orphanNotes({
+        orderBy: { field: 'bogus' as 'path', dir: 'asc' },
+      }),
+    ).toThrow(expect.objectContaining({ code: 'VALIDATION_ERROR' }));
+  });
+});

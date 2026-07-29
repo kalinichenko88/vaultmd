@@ -32,11 +32,30 @@ never found inside `catalogue`, and it is Unicode-aware, so Cyrillic and other
 non-Latin names match. A note that already links is reported by `backlinks` /
 `outboundLinks`, never as a mention.
 
+Text sitting inside link markup is not prose: `[[Alpha Notes]]` is not reported
+as an unlinked mention of `Alpha`, and neither is the visible text of a
+markdown link. A name made only of symbols (`→.md`, an emoji inbox note) is
+found too, even though FTS5 cannot index it.
+
 **Known limitation:** a name embedded in unsegmented text — Chinese and
 Japanese prose, written without spaces — is not found, because there is no word
 boundary to match; only space- or punctuation-delimited occurrences are.
 Obsidian finds those. Closing the gap needs a different FTS5 tokenizer, which
 is an index-schema change and so its own release.
+
+### Fixed
+
+- **`query.backlinks()` missed real backlinks on a case-insensitive vault.** It
+  resolved the reverse direction its own way instead of inverting the resolver
+  `outboundLinks` uses, and disagreed with it twice: a bare `[[Alpha]]` was
+  dropped unless the caller spelled the path exactly as the index stores it
+  (`backlinks('alpha.md')` found nothing for `Alpha.md`), and in
+  `linkResolution: 'relative'` a link whose stored target differed in case from
+  the folded path key matched nothing at all. Both directions now share one
+  resolution rule, so they cannot drift again.
+- **`query.backlinks()` threw on an out-of-scope path with invalid
+  pagination** where `outboundLinks` returned `[]` for the same inputs. The
+  scope check runs first again, as it did before.
 
 ## 0.6.0 — 2026-07-29
 
