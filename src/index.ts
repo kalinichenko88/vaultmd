@@ -40,14 +40,18 @@ export type {
 export type {
   Backlink,
   DanglingLink,
+  NoteFilter,
   NoteHit,
   OrderField,
   OutboundLink,
   QueryApi,
   QueryOrder,
   SearchHit,
+  TagFilter,
   TagInfo,
+  WhereCondition,
   WhereMap,
+  WhereValue,
 } from '@/query/index.ts';
 export type { CreateVaultConfig, Vault } from '@/vault/index.ts';
 export { createVault } from '@/vault/index.ts';

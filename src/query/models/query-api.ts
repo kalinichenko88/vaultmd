@@ -1,11 +1,11 @@
 import type { Backlink } from './backlink.ts';
 import type { DanglingLink } from './dangling-link.ts';
+import type { NoteFilter } from './note-filter.ts';
 import type { NoteHit } from './note-hit.ts';
 import type { QueryOrder } from './order.ts';
 import type { OutboundLink } from './outbound-link.ts';
 import type { SearchHit } from './search-hit.ts';
 import type { TagInfo } from './tag-info.ts';
-import type { WhereMap } from './where-map.ts';
 
 /**
  * The read-only query surface over the derived SQLite index, exposed as
@@ -14,28 +14,23 @@ import type { WhereMap } from './where-map.ts';
  */
 export type QueryApi = {
   /**
-   * Filter notes by tag, frontmatter field, and/or folder, with ordering and
-   * pagination. Defaults to newest-first (`mtime_ms` desc), limit 100; hard
-   * cap 1000.
+   * Filter notes by tag, frontmatter field and/or folder — see
+   * {@link NoteFilter} — with ordering and pagination. Defaults to newest-first
+   * (`mtime_ms` desc), limit 100; hard cap 1000.
    */
-  queryNotes(opts?: {
-    tag?: string;
-    where?: WhereMap;
-    folder?: string;
-    orderBy?: QueryOrder;
-    limit?: number;
-    offset?: number;
-  }): NoteHit[];
+  queryNotes(
+    opts?: NoteFilter & {
+      orderBy?: QueryOrder;
+      limit?: number;
+      offset?: number;
+    },
+  ): NoteHit[];
   /**
-   * Total number of readable notes matching the same `tag` / `where` / `folder`
-   * filters {@link queryNotes} accepts — the page-count companion to it. Not
-   * capped by `limit`, so `Math.ceil(countNotes(f) / pageSize)` is exact.
+   * Total number of readable notes matching the same {@link NoteFilter}
+   * {@link queryNotes} accepts — the page-count companion to it. Not capped by
+   * `limit`, so `Math.ceil(countNotes(f) / pageSize)` is exact.
    */
-  countNotes(opts?: {
-    tag?: string;
-    where?: WhereMap;
-    folder?: string;
-  }): number;
+  countNotes(opts?: NoteFilter): number;
   /**
    * Notes that link to `path` via `[[wikilink]]` or relative-link resolution.
    * Defaults to limit 100; hard cap 1000.
@@ -68,19 +63,20 @@ export type QueryApi = {
    */
   danglingLinks(opts?: { limit?: number; offset?: number }): DanglingLink[];
   /**
-   * FTS5 keyword search over note bodies, returning highlighted snippets.
-   * Defaults to limit 100; hard cap 1000.
+   * FTS5 keyword search over note bodies, returning highlighted snippets,
+   * narrowed by the same {@link NoteFilter} the note readers take. Defaults to
+   * limit 100; hard cap 1000.
    */
   searchText(
     q: string,
-    opts?: { tag?: string; folder?: string; limit?: number; offset?: number },
+    opts?: NoteFilter & { limit?: number; offset?: number },
   ): SearchHit[];
   /**
-   * Total number of readable notes matching the same query and `tag` / `folder`
-   * filters {@link searchText} accepts — the page-count companion to it. Not
-   * capped by `limit`.
+   * Total number of readable notes matching the same query and
+   * {@link NoteFilter} {@link searchText} accepts — the page-count companion to
+   * it. Not capped by `limit`.
    */
-  countSearch(q: string, opts?: { tag?: string; folder?: string }): number;
+  countSearch(q: string, opts?: NoteFilter): number;
   /**
    * Every tag present on notes the instance can read, each with the number of
    * those notes that carry it, ranked most-used first (canonical tags float to

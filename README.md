@@ -196,19 +196,39 @@ default to `limit: 100` and are hard-capped at `1000` per call; `tags()` is the
 exception — it has no default cap and returns everything unless you pass `limit`.
 
 ```ts
+// The row filters every note reader takes. All of it is AND-ed.
+type NoteFilter = {
+  tag?: string;                                // one tag (shorthand for tags)
+  tags?: { all?: string[]; any?: string[] };   // multi-tag matching
+  where?: WhereMap;                            // see below
+  folder?: string;                             // folder + its subtree
+}
+
+// A `where` value is either a scalar (equality) or an operator object; every
+// operator given is AND-ed. `ne` also matches notes MISSING the field ("unset"
+// is not the value) — add `exists: true` to require it. Match the operand's
+// type to the stored one: SQLite holds differing types to be never equal, so
+// `{ ne: '5' }` against a numeric field excludes nothing.
+type WhereMap = Record<string, WhereValue | {
+  ne?: WhereValue; lt?: WhereValue; lte?: WhereValue;
+  gt?: WhereValue; gte?: WhereValue;
+  in?: WhereValue[];    // empty list matches nothing
+  exists?: boolean;     // false = notes lacking the field
+}>
+
+// Malformed filters throw VALIDATION_ERROR: non-scalar operand, non-boolean
+// `exists`, non-array tag list, or a condition with nothing left to apply.
+
 // Filter the collection. Defaults to newest-first (mtime_ms desc).
 // Returns NoteHit[] = { path, title, frontmatter, tags, mtime_ms, size }[].
-queryNotes(opts?: {
-  tag?: string;
-  where?: Record<string, string | number | boolean>; // frontmatter equality
-  folder?: string;
+queryNotes(opts?: NoteFilter & {
   orderBy?: { field: 'mtime_ms' | 'path' | 'title'; dir: 'asc' | 'desc' };
   limit?: number;
   offset?: number;
 }): NoteHit[]
 
 // Total matches for the same filters — uncapped, so page counts are exact.
-countNotes(opts?: { tag?: string; where?: WhereMap; folder?: string }): number
+countNotes(opts?: NoteFilter): number
 
 // Notes linking TO this path. Returns { from: string }[].
 backlinks(path, opts?: { limit?: number; offset?: number }): Backlink[]
@@ -224,10 +244,10 @@ outboundLinks(path, opts?: { limit?: number; offset?: number }): OutboundLink[]
 danglingLinks(opts?: { limit?: number; offset?: number }): DanglingLink[]
 
 // Full-text keyword search over bodies. Returns { path, title, snippet? }[].
-searchText(q, opts?: { tag?: string; folder?: string; limit?: number; offset?: number }): SearchHit[]
+searchText(q, opts?: NoteFilter & { limit?: number; offset?: number }): SearchHit[]
 
 // Total hits for the same query — the page-count companion to searchText.
-countSearch(q, opts?: { tag?: string; folder?: string }): number
+countSearch(q, opts?: NoteFilter): number
 
 // Existing tags ranked by use. Returns TagInfo[] = { tag, count }[] (count desc, tag asc).
 // prefix = case-sensitive hierarchy prefix; contains = ASCII case-insensitive substring.

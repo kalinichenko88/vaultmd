@@ -11,6 +11,60 @@ const recent = vault.query.queryNotes({
 });
 ```
 
+## Filter on ranges, sets and missing fields
+
+A `where` value is an equality test when it is a scalar, and an operator object
+otherwise. Everything given — across keys and within one key — is AND-ed.
+
+```ts
+const overdue = vault.query.queryNotes({
+  where: {
+    due: { lt: '2026-08-01' },        // ranges: lt / lte / gt / gte
+    kind: { in: ['task', 'bug'] },    // set membership
+    status: { ne: 'done' },           // negation
+    archived: { exists: false },      // no such frontmatter field
+  },
+});
+```
+
+Comparisons run over the indexed frontmatter JSON and follow SQLite's type
+ordering, so compare strings with strings and numbers with numbers — ISO dates
+sort correctly as strings. This matters most for `ne`: SQLite holds values of
+differing types to be never equal, so `{ ne: '5' }` against a numeric field
+excludes nothing and quietly returns everything.
+
+`ne` also matches notes that never set the field at all, since "unset" is not
+the value. Require the field alongside it: `{ ne: 'done', exists: true }`.
+
+A malformed filter throws `VALIDATION_ERROR` rather than degrading into a
+wrong-but-plausible result — a non-scalar operand, a non-boolean `exists`, a
+non-array tag list, or an operator object with nothing left to apply (`{}`, or
+`{ lt: cutoff }` where `cutoff` came in `undefined`, which would otherwise drop
+the filter and return the whole vault). To match nothing on purpose, use
+`{ in: [] }`.
+
+## Match several tags at once
+
+`tag` is the one-tag shorthand; `tags` takes a set. `all` requires every tag,
+`any` requires at least one, and both may be combined.
+
+```ts
+// tagged #project AND #active, and at least one of #q3 / #q4
+const active = vault.query.queryNotes({
+  tags: { all: ['project', 'active'], any: ['q3', 'q4'] },
+});
+```
+
+`tag`, `tags`, `where` and `folder` make up `NoteFilter`, which every note
+reader accepts — so the same filter narrows a keyword search:
+
+```ts
+const hits = vault.query.searchText('deadline', {
+  tags: { all: ['project'] },
+  where: { status: { ne: 'done' } },
+});
+```
+
 ## Paginate a collection
 
 `queryNotes` returns one page; `countNotes` takes the same filters and returns

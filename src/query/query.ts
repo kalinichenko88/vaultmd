@@ -7,13 +7,14 @@ import type { VaultIo } from '@/vault-io/index.ts';
 
 import type { Backlink } from './models/backlink.ts';
 import type { DanglingLink } from './models/dangling-link.ts';
+import type { NoteFilter } from './models/note-filter.ts';
 import type { NoteHit } from './models/note-hit.ts';
 import type { QueryOrder } from './models/order.ts';
 import type { OutboundLink } from './models/outbound-link.ts';
 import type { QueryApi } from './models/query-api.ts';
 import type { SearchHit } from './models/search-hit.ts';
 import type { TagInfo } from './models/tag-info.ts';
-import type { WhereMap } from './models/where-map.ts';
+import type { WhereCondition, WhereValue } from './models/where-map.ts';
 
 const ORDER_FIELDS = new Set<string>(['mtime_ms', 'path', 'title']);
 const WHERE_KEY_RE = /^[A-Za-z0-9_.-]+$/;
@@ -85,25 +86,166 @@ function pushFolderFilter(
   params.push(folder, `${escapeLike(folder)}/%`);
 }
 
+// Comparison operators that take one scalar operand. `ne` is `IS NOT`, not
+// `!=`: json_extract yields NULL for a field the note never sets, and `!=`
+// would drop those rows — "status is not done" reads as including a note with
+// no status at all. Callers who want the field present add `exists: true`.
+// A Map, not an object literal: a plain object would resolve an operator named
+// `toString` (or any other prototype member) to an inherited function and
+// splice it into the SQL text instead of falling through to the unknown-operator
+// throw.
+const WHERE_COMPARISONS = new Map<string, string>([
+  ['ne', 'IS NOT'],
+  ['lt', '<'],
+  ['lte', '<='],
+  ['gt', '>'],
+  ['gte', '>='],
+]);
+
+function placeholders(n: number): string {
+  return Array(n).fill('?').join(', ');
+}
+
+// Filters arrive from HTTP query strings, CLIs and JSON configs as often as
+// from typed call sites, and `exactOptionalPropertyTypes` is off, so an
+// `undefined` operand type-checks. Every operand is therefore shape-checked
+// here rather than trusted: an unvalidated one either binds as a raw Error
+// with no `.code` (breaking the documented catch-on-code contract) or, worse,
+// widens the query silently.
+function assertWhereValue(value: unknown, label: string): WhereValue {
+  if (!['string', 'number', 'boolean'].includes(typeof value)) {
+    throw new MdVaultError(
+      'VALIDATION_ERROR',
+      `${label} must be a string, number or boolean`,
+    );
+  }
+
+  return value as WhereValue;
+}
+
+function assertTagList(value: unknown, label: string): string[] {
+  if (!Array.isArray(value) || value.some((t) => typeof t !== 'string')) {
+    throw new MdVaultError(
+      'VALIDATION_ERROR',
+      `${label} must be an array of strings`,
+    );
+  }
+
+  return value;
+}
+
+// One `where` entry as SQL over the frontmatter JSON: a bare value is equality,
+// an object is a set of operators AND-ed together. Only `key` reaches the SQL
+// text (WHERE_KEY_RE-guarded by the caller) — every operand stays a parameter.
+function pushWhereFilter(
+  parts: string[],
+  params: (string | number | boolean | null)[],
+  key: string,
+  cond: WhereValue | WhereCondition,
+): void {
+  const col = `json_extract(n.frontmatter, '$."${key}"')`;
+  if (typeof cond !== 'object' || cond === null) {
+    parts.push(`${col} = ?`);
+    params.push(assertWhereValue(cond, `where ${key}`));
+
+    return;
+  }
+
+  // An operator object that would contribute no predicate — `{}`, or
+  // `{ lt: cutoff }` where `cutoff` came in undefined — drops the whole entry
+  // and silently widens the query to the entire vault. Refuse it: an empty
+  // `in` list is how you ask for "match nothing".
+  if (Object.values(cond).every((v) => v === undefined)) {
+    throw new MdVaultError(
+      'VALIDATION_ERROR',
+      `where ${key} has no operator to apply; use { in: [] } to match nothing`,
+    );
+  }
+
+  for (const op of Object.keys(cond)) {
+    const value = cond[op as keyof WhereCondition];
+    if (value === undefined) {
+      continue;
+    }
+    const comparison = WHERE_COMPARISONS.get(op);
+    if (comparison !== undefined) {
+      parts.push(`${col} ${comparison} ?`);
+      params.push(assertWhereValue(value, `where ${key}.${op}`));
+      continue;
+    }
+    if (op === 'in') {
+      if (!Array.isArray(value)) {
+        throw new MdVaultError(
+          'VALIDATION_ERROR',
+          `where ${key}.in must be an array`,
+        );
+      }
+      // `IN ()` is legal in SQLite and matches nothing — the right answer for
+      // "any of no values", so an empty list needs no special case.
+      parts.push(`${col} IN (${placeholders(value.length)})`);
+      for (const item of value) {
+        params.push(assertWhereValue(item, `where ${key}.in`));
+      }
+      continue;
+    }
+    if (op === 'exists') {
+      // Not truthiness: a string 'false' off a query string would read as
+      // `true` and hand back the exact inverse of what was asked for.
+      if (typeof value !== 'boolean') {
+        throw new MdVaultError(
+          'VALIDATION_ERROR',
+          `where ${key}.exists must be a boolean`,
+        );
+      }
+      parts.push(`${col} IS ${value ? 'NOT NULL' : 'NULL'}`);
+      continue;
+    }
+    throw new MdVaultError(
+      'VALIDATION_ERROR',
+      `unknown where operator on ${key}: ${op}`,
+    );
+  }
+}
+
+// Membership in a tag set: one row in note_tags carrying any of `list`. Used
+// once per tag for `all` (each must match) and once for the whole list for
+// `any`. note paths are aliased `n` in every query.
+function pushTagFilter(
+  parts: string[],
+  params: (string | number | boolean | null)[],
+  list: string[],
+): void {
+  parts.push(
+    `EXISTS (SELECT 1 FROM note_tags nt WHERE nt.path_key = n.path_key AND nt.tag IN (${placeholders(list.length)}))`,
+  );
+  params.push(...list);
+}
+
 // Builds the row predicates shared by every note reader: tag membership,
-// frontmatter equality, folder subtree. Returned unjoined because searchText
+// frontmatter filters, folder subtree. Returned unjoined because searchText
 // appends them to an existing `WHERE notes_fts MATCH ?` with AND, while the
 // note-table readers open their own WHERE. The notes table is aliased `n` in
 // every caller.
-function buildNoteFilters(opts: {
-  tag?: string;
-  where?: WhereMap;
-  folder?: string;
-}): { parts: string[]; params: (string | number | boolean | null)[] } {
-  const { tag, where = {}, folder } = opts;
+function buildNoteFilters(opts: NoteFilter): {
+  parts: string[];
+  params: (string | number | boolean | null)[];
+} {
+  const { tag, tags, where = {}, folder } = opts;
   const parts: string[] = [];
   const params: (string | number | boolean | null)[] = [];
 
   if (tag !== undefined) {
-    parts.push(
-      'EXISTS (SELECT 1 FROM note_tags nt WHERE nt.path_key = n.path_key AND nt.tag = ?)',
-    );
-    params.push(tag);
+    pushTagFilter(parts, params, [tag]);
+  }
+
+  if (tags?.all !== undefined) {
+    for (const t of assertTagList(tags.all, 'tags.all')) {
+      pushTagFilter(parts, params, [t]);
+    }
+  }
+
+  if (tags?.any !== undefined) {
+    pushTagFilter(parts, params, assertTagList(tags.any, 'tags.any'));
   }
 
   for (const key of Object.keys(where)) {
@@ -113,8 +255,7 @@ function buildNoteFilters(opts: {
         `where key contains invalid characters: ${key}`,
       );
     }
-    parts.push(`json_extract(n.frontmatter, '$."${key}"') = ?`);
-    params.push(where[key]);
+    pushWhereFilter(parts, params, key, where[key]);
   }
 
   if (folder !== undefined) {
@@ -240,10 +381,7 @@ export function createQuery(
   }
 
   function queryNotes(
-    opts: {
-      tag?: string;
-      where?: WhereMap;
-      folder?: string;
+    opts: NoteFilter & {
       orderBy?: QueryOrder;
       limit?: number;
       offset?: number;
@@ -286,9 +424,7 @@ export function createQuery(
     return scoped.slice(off, off + lim);
   }
 
-  function countNotes(
-    opts: { tag?: string; where?: WhereMap; folder?: string } = {},
-  ): number {
+  function countNotes(opts: NoteFilter = {}): number {
     const { parts, params } = buildNoteFilters(opts);
     // Path-only projection: the scope filter needs nothing else, so this skips
     // the frontmatter JSON parse and the per-row tag lookup queryNotes pays for.
@@ -499,7 +635,7 @@ export function createQuery(
   // N" render would pay for one per hit only to discard it.
   function searchScoped(
     q: string,
-    opts: { tag?: string; folder?: string } = {},
+    opts: NoteFilter = {},
     withSnippet = true,
   ): SearchHit[] {
     const ftsQ = sanitizeFts(q);
@@ -532,8 +668,18 @@ export function createQuery(
       rows = db
         .query<SearchRow, (string | number | boolean | null)[]>(sql)
         .all(...params);
-    } catch {
-      // malformed FTS query that slipped through sanitizer → safe empty result
+    } catch (error) {
+      // Only a malformed FTS query that slipped through the sanitizer is
+      // expected here → safe empty result. SQLite reports those with a numeric
+      // `errno`; a bind-arity or programming fault carries none, and must NOT
+      // be flattened into "no hits" — buildNoteFilters splices its parts into
+      // this same statement, so a fault in a tag/where filter would otherwise
+      // read as an empty search instead of surfacing, and diverge from
+      // queryNotes on the identical filter.
+      if (typeof (error as { errno?: unknown }).errno !== 'number') {
+        throw error;
+      }
+
       return [];
     }
 
@@ -554,22 +700,14 @@ export function createQuery(
 
   function searchText(
     q: string,
-    opts: {
-      tag?: string;
-      folder?: string;
-      limit?: number;
-      offset?: number;
-    } = {},
+    opts: NoteFilter & { limit?: number; offset?: number } = {},
   ): SearchHit[] {
     const { lim, off } = validatePagination(opts.limit, opts.offset);
 
     return searchScoped(q, opts).slice(off, off + lim);
   }
 
-  function countSearch(
-    q: string,
-    opts: { tag?: string; folder?: string } = {},
-  ): number {
+  function countSearch(q: string, opts: NoteFilter = {}): number {
     return searchScoped(q, opts, false).length;
   }
 
