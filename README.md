@@ -3,7 +3,7 @@
 > A headless markdown-vault data layer for [Bun](https://bun.sh) — CRUD over `.md` notes plus a derived SQLite index for collection queries, backlinks, and full-text search. No Obsidian, no Electron, no plugin.
 
 [![npm](https://img.shields.io/badge/npm-vaultmd-cb3837?logo=npm)](https://www.npmjs.com/package/vaultmd)
-[![runtime: Bun](https://img.shields.io/badge/runtime-Bun%20%E2%89%A5%201.1-f9f1e1?logo=bun)](https://bun.sh)
+[![runtime: Bun](https://img.shields.io/badge/runtime-Bun%20%E2%89%A5%201.3.14-f9f1e1?logo=bun)](https://bun.sh)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![status: published](https://img.shields.io/badge/status-published-brightgreen.svg)](#status)
 [![docs](https://img.shields.io/badge/docs-VaultMD-3451b2.svg)](https://kalinichenko88.github.io/vaultmd/)
@@ -48,7 +48,7 @@ still evolve before `1.0`; see [CHANGELOG.md](./CHANGELOG.md) for what changed.
 
 ## Requirements
 
-- **[Bun](https://bun.sh) ≥ 1.1.0.** VaultMD uses `bun:sqlite`, `Bun.file`, and
+- **[Bun](https://bun.sh) ≥ 1.3.14.** VaultMD uses `bun:sqlite`, `Bun.file`, and
   other Bun built-ins — it does **not** run under Node.
 
 ## Install

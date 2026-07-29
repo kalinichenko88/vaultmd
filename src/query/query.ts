@@ -325,10 +325,6 @@ const TOKENIZABLE = /[\p{L}\p{N}]/u;
 // as links at all, so neither one is in any exclusion set.
 const LINK_SPAN = /!?\[\[[^\]]*\]\]|!?\[[^\]]*\]\([^)]*\)/g;
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 // A one-line excerpt around the match, shaped like fts5's snippet(): the match
 // wrapped in <b>, '…' where the window cuts. Whitespace collapses so one hit
 // cannot drag a paragraph's worth of newlines into a list row.
@@ -375,10 +371,9 @@ function mentionScanner(
     // Escaped, not interpolated raw: a note named `C++` would otherwise throw a
     // bare SyntaxError out of a method documented to fail with MdVaultError,
     // and one named `Meeting [1]` would compile into a character class and
-    // quietly match the text "Meeting 1". Hand-rolled because `engines.bun`
-    // (>=1.1.0) predates RegExp.escape.
+    // quietly match the text "Meeting 1".
     const match = new RegExp(
-      `(?<!${WORD_CHAR})${escapeRegExp(term)}(?!${WORD_CHAR})`,
+      `(?<!${WORD_CHAR})${RegExp.escape(term)}(?!${WORD_CHAR})`,
       'iu',
     ).exec(prose);
     if (match === null) {

@@ -13,7 +13,7 @@ schemas, and sync logic live in whatever you build on top.
 
 - You want a queryable layer over plain markdown without adopting Obsidian.
 - You need backlinks / outbound-link resolution and full-text search over notes.
-- You're on [Bun](https://bun.sh) (≥ 1.1.0) — VaultMD uses `bun:sqlite` and does
+- You're on [Bun](https://bun.sh) (≥ 1.3.14) — VaultMD uses `bun:sqlite` and does
   not run under Node.
 
 Next: [Quick start](./quick-start).
