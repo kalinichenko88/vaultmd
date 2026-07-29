@@ -96,6 +96,7 @@ describe('createQuery factory', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const q = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -121,6 +122,7 @@ describe('createQuery factory', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -137,6 +139,7 @@ describe('queryNotes — validation', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -152,6 +155,7 @@ describe('queryNotes — validation', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -172,6 +176,7 @@ describe('queryNotes — validation', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -189,6 +194,7 @@ describe('queryNotes — validation', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -204,6 +210,7 @@ describe('queryNotes — validation', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -219,6 +226,7 @@ describe('queryNotes — validation', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -239,6 +247,7 @@ describe('queryNotes — filtering', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -270,6 +279,7 @@ describe('queryNotes — filtering', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -287,6 +297,7 @@ describe('queryNotes — filtering', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -307,6 +318,7 @@ describe('queryNotes — filtering', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -329,6 +341,7 @@ describe('queryNotes — filtering', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -346,6 +359,7 @@ describe('queryNotes — filtering', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -376,6 +390,7 @@ describe('queryNotes — filtering', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: ['public'], write: ['public'] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -392,6 +407,7 @@ describe('queryNotes — filtering', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -409,6 +425,7 @@ describe('queryNotes — filtering', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -746,6 +763,7 @@ describe('backlinks — relative mode', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { backlinks } = createQuery(db, io, {
       linkResolution: 'relative',
@@ -766,6 +784,7 @@ describe('backlinks — relative mode', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { backlinks } = createQuery(db, io, {
       linkResolution: 'relative',
@@ -785,6 +804,7 @@ describe('backlinks — relative mode', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: ['public'], write: ['public'] },
+      caseSensitive: false,
     });
     const { backlinks } = createQuery(db, io, {
       linkResolution: 'relative',
@@ -808,6 +828,7 @@ describe('backlinks — wikilink mode', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { backlinks } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -828,6 +849,7 @@ describe('backlinks — wikilink mode', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { backlinks } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -851,6 +873,7 @@ describe('backlinks — wikilink mode', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { backlinks } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -872,6 +895,7 @@ describe('backlinks — wikilink mode', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { backlinks } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -891,6 +915,7 @@ describe('backlinks — wikilink mode', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: ['public'], write: ['public'] },
+      caseSensitive: false,
     });
     const { backlinks } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -918,6 +943,7 @@ describe('outboundLinks', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { outboundLinks } = createQuery(db, io, {
       linkResolution: 'relative',
@@ -960,6 +986,7 @@ describe('outboundLinks', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { outboundLinks } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -979,6 +1006,7 @@ describe('outboundLinks', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: ['public'], write: ['public'] },
+      caseSensitive: false,
     });
     const { outboundLinks } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -999,6 +1027,7 @@ describe('outboundLinks', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { outboundLinks } = createQuery(db, io, {
       linkResolution: 'relative',
@@ -1026,6 +1055,7 @@ describe('searchText — sanitization: adversarial FTS5 input never throws', () 
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1040,6 +1070,7 @@ describe('searchText — sanitization: adversarial FTS5 input never throws', () 
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1053,6 +1084,7 @@ describe('searchText — sanitization: adversarial FTS5 input never throws', () 
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1068,6 +1100,7 @@ describe('searchText — sanitization: adversarial FTS5 input never throws', () 
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1083,6 +1116,7 @@ describe('searchText — sanitization: adversarial FTS5 input never throws', () 
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1100,6 +1134,7 @@ describe('searchText — basic search + filters + read-scope', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1122,6 +1157,7 @@ describe('searchText — basic search + filters + read-scope', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1137,6 +1173,7 @@ describe('searchText — basic search + filters + read-scope', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1153,6 +1190,7 @@ describe('searchText — basic search + filters + read-scope', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1169,6 +1207,7 @@ describe('searchText — basic search + filters + read-scope', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1186,6 +1225,7 @@ describe('searchText — basic search + filters + read-scope', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: ['public'], write: ['public'] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1202,6 +1242,7 @@ describe('searchText — basic search + filters + read-scope', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1223,6 +1264,7 @@ describe('searchText — basic search + filters + read-scope', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1245,6 +1287,7 @@ describe('queryNotes — mixed-scope pagination (Finding 1 regression)', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: ['pub'], write: ['pub'] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1278,6 +1321,7 @@ describe('queryNotes — mixed-scope pagination (Finding 1 regression)', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: ['pub'], write: ['pub'] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1317,6 +1361,7 @@ describe('tags', () => {
     io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     }),
   ) {
     return createQuery(db, io, {
@@ -1365,6 +1410,7 @@ describe('tags', () => {
       createVaultIo({
         root: vaultDir,
         prefixes: { read: ['public'], write: ['public'] },
+        caseSensitive: false,
       }),
     );
     insertNote(db, { path: 'public/a.md', tags: ['shared', 'pub'] });
@@ -1492,6 +1538,7 @@ describe('searchText — mixed-scope pagination (Finding 1 regression)', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: ['pub'], write: ['pub'] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1516,6 +1563,7 @@ describe('searchText — mixed-scope pagination (Finding 1 regression)', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: ['pub'], write: ['pub'] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -2521,5 +2569,27 @@ describe('orphanNotes — validation before work', () => {
         orderBy: { field: 'bogus' as 'path', dir: 'asc' },
       }),
     ).toThrow(expect.objectContaining({ code: 'VALIDATION_ERROR' }));
+  });
+});
+
+describe('backlinks — case-sensitive vault', () => {
+  test('resolves through path keys that keep their case', () => {
+    // The configuration CI runs under, and the one nothing covered: on a
+    // case-sensitive volume path_key preserves case, so a resolver that looks
+    // the target up by key only works if the two agree. Every other test in
+    // this file pins caseSensitive: false, which hid that.
+    insertNote(db, { path: 'Folder/Foo.md', pathKey: 'Folder/Foo.md' });
+    insertNote(db, {
+      path: 'source.md',
+      pathKey: 'source.md',
+      body: 'see [[Folder/Foo]], and Foo came up again',
+      links: [{ target: 'Folder/Foo', base: 'foo', kind: 'wikilink' }],
+    });
+    const q = mkQuery({ caseSensitive: true });
+    expect(q.backlinks('Folder/Foo.md')).toEqual([{ from: 'source.md' }]);
+    // …and a linker is never re-reported as an unlinked mention.
+    expect(q.unlinkedMentions('Folder/Foo.md')).toEqual([]);
+    // A wrong-case path is a different note here, so it resolves to nothing.
+    expect(q.backlinks('folder/foo.md')).toEqual([]);
   });
 });
