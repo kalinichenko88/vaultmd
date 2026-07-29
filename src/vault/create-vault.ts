@@ -144,6 +144,7 @@ export async function createVault(config: CreateVaultConfig): Promise<Vault> {
   const query: ReturnType<typeof createQuery> = {
     queryNotes: reconciled(rawQuery.queryNotes),
     countNotes: reconciled(rawQuery.countNotes),
+    orphanNotes: reconciled(rawQuery.orphanNotes),
     backlinks: reconciled(rawQuery.backlinks),
     outboundLinks: reconciled(rawQuery.outboundLinks),
     danglingLinks: reconciled(rawQuery.danglingLinks),

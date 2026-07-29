@@ -17,6 +17,7 @@ import type { TagInfo } from './models/tag-info.ts';
 import type { WhereCondition, WhereValue } from './models/where-map.ts';
 
 const ORDER_FIELDS = new Set<string>(['mtime_ms', 'path', 'title']);
+const ORPHAN_MODES = new Set<string>(['disconnected', 'unreferenced']);
 const WHERE_KEY_RE = /^[A-Za-z0-9_.-]+$/;
 const DEFAULT_LIMIT = 100;
 const HARD_MAX = 1000;
@@ -616,10 +617,13 @@ export function createQuery(
       }));
   }
 
-  function danglingLinks(
-    opts: { limit?: number; offset?: number } = {},
-  ): DanglingLink[] {
-    const { lim, off } = validatePagination(opts.limit, opts.offset);
+  // Every stored link joined to the note it came from, plus the base index bare
+  // wikilinks resolve through. Shared by danglingLinks and linkEdges so the two
+  // vault-wide sweeps cannot drift apart on what they read or how they resolve.
+  function linkRows(): {
+    rows: SrcLinkRow[];
+    baseIndex?: Map<string, PathRow[]>;
+  } {
     const rows = db
       .query<SrcLinkRow, []>(
         `SELECT n.path AS from_path, nl.target, nl.base
@@ -632,6 +636,70 @@ export function createQuery(
     // so building it there would be a full scan nobody reads.
     const baseIndex =
       cfg.linkResolution === 'wikilink' ? buildBaseIndex() : undefined;
+
+    return { rows, baseIndex };
+  }
+
+  // The note-graph edges, both directions, in one pass. Only readable notes are
+  // nodes: an out-of-scope source is invisible, and resolveLinkTarget already
+  // refuses an out-of-scope target. A link naming an attachment is no edge at
+  // all (Obsidian hides attachments from the graph), while a link that dangles
+  // still gives its source an outgoing edge (Obsidian draws it as a ghost node)
+  // and gives nothing an inbound one — there is no target to receive it.
+  function linkEdges(): { inbound: Set<string>; outbound: Set<string> } {
+    const { rows, baseIndex } = linkRows();
+    const inbound = new Set<string>();
+    const outbound = new Set<string>();
+    for (const row of rows) {
+      if (!inScope(row.from_path) || isAttachmentTarget(row.target)) {
+        continue;
+      }
+      outbound.add(row.from_path);
+      const target = resolveLinkTarget(row, row.from_path, baseIndex);
+      if (target !== null) {
+        inbound.add(target);
+      }
+    }
+
+    return { inbound, outbound };
+  }
+
+  function orphanNotes(
+    opts: NoteFilter & {
+      mode?: 'disconnected' | 'unreferenced';
+      orderBy?: QueryOrder;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): NoteHit[] {
+    const mode = opts.mode ?? 'disconnected';
+    // Not a silent fallback to the default: a typo'd mode arriving from a query
+    // string would otherwise answer a different question than the caller asked.
+    if (!ORPHAN_MODES.has(mode)) {
+      throw new MdVaultError(
+        'VALIDATION_ERROR',
+        `mode must be one of ${[...ORPHAN_MODES].join(', ')}, got: ${mode}`,
+      );
+    }
+    const { lim, off } = validatePagination(opts.limit, opts.offset);
+    const { inbound, outbound } = linkEdges();
+
+    // Filter before slicing: paginating first would hand back pages thinned by
+    // the orphan test instead of pages of orphans.
+    return scopedNotes(opts)
+      .filter(
+        (note) =>
+          !inbound.has(note.path) &&
+          (mode === 'unreferenced' || !outbound.has(note.path)),
+      )
+      .slice(off, off + lim);
+  }
+
+  function danglingLinks(
+    opts: { limit?: number; offset?: number } = {},
+  ): DanglingLink[] {
+    const { lim, off } = validatePagination(opts.limit, opts.offset);
+    const { rows, baseIndex } = linkRows();
     // One row per (src, target, kind), so a note carrying both [[ghost]] and
     // ![[ghost]] reports the same breakage twice and burns two slots of the
     // caller's page. backlinks dedupes for the same reason.
@@ -819,6 +887,7 @@ export function createQuery(
   return {
     queryNotes,
     countNotes,
+    orphanNotes,
     backlinks,
     outboundLinks,
     danglingLinks,

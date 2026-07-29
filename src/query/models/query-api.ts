@@ -32,6 +32,29 @@ export type QueryApi = {
    */
   countNotes(opts?: NoteFilter): number;
   /**
+   * Notes with no place in the link graph, narrowed by the same
+   * {@link NoteFilter}, ordering and pagination {@link queryNotes} accepts.
+   *
+   * `mode: 'disconnected'` (the default) returns notes with no links in either
+   * direction — Obsidian's graph "Orphans" filter. `mode: 'unreferenced'`
+   * returns notes nothing links TO, whatever they link out to, so it is the
+   * wider set: every disconnected note is also unreferenced.
+   *
+   * A link naming an attachment (`![[diagram.png]]`) is not a graph edge, so a
+   * note carrying only those is still an orphan. A link that resolves to
+   * nothing still counts as an outgoing edge, so a note carrying only broken
+   * links is `'unreferenced'` but not `'disconnected'`. Links from notes
+   * outside the read scope are invisible and never rescue a note.
+   */
+  orphanNotes(
+    opts?: NoteFilter & {
+      mode?: 'disconnected' | 'unreferenced';
+      orderBy?: QueryOrder;
+      limit?: number;
+      offset?: number;
+    },
+  ): NoteHit[];
+  /**
    * Notes that link to `path` via `[[wikilink]]` or relative-link resolution.
    * Defaults to limit 100; hard cap 1000.
    */

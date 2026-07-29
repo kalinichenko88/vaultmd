@@ -107,6 +107,7 @@ describe('createQuery factory', () => {
       'countNotes',
       'countSearch',
       'danglingLinks',
+      'orphanNotes',
       'outboundLinks',
       'queryNotes',
       'searchText',
@@ -1870,5 +1871,184 @@ describe('danglingLinks — review regressions', () => {
       { target: 'dup', resolved: 'Other/dup.md' },
     ]);
     expect(q.danglingLinks()).toEqual([]);
+  });
+});
+
+// ── issue #10: link-graph gaps ───────────────────────────────────────────────
+describe('orphanNotes', () => {
+  test('is [] on an empty DB', () => {
+    expect(mkQuery().orphanNotes()).toEqual([]);
+  });
+
+  test('reports a note with no links at all in both modes', () => {
+    insertNote(db, { path: 'lonely.md' });
+    const q = mkQuery();
+    expect(q.orphanNotes().map((n) => n.path)).toEqual(['lonely.md']);
+    expect(q.orphanNotes({ mode: 'unreferenced' }).map((n) => n.path)).toEqual([
+      'lonely.md',
+    ]);
+  });
+
+  test('reports a note with an inbound link in neither mode', () => {
+    insertNote(db, {
+      path: 'src.md',
+      links: [{ target: 'target', base: 'target', kind: 'wikilink' }],
+    });
+    insertNote(db, { path: 'target.md' });
+    const q = mkQuery();
+    expect(q.orphanNotes().map((n) => n.path)).not.toContain('target.md');
+    expect(
+      q.orphanNotes({ mode: 'unreferenced' }).map((n) => n.path),
+    ).not.toContain('target.md');
+  });
+
+  test('a note with only outbound links is unreferenced but not disconnected', () => {
+    insertNote(db, {
+      path: 'src.md',
+      links: [{ target: 'target', base: 'target', kind: 'wikilink' }],
+    });
+    insertNote(db, { path: 'target.md' });
+    const q = mkQuery();
+    expect(q.orphanNotes().map((n) => n.path)).toEqual([]);
+    expect(q.orphanNotes({ mode: 'unreferenced' }).map((n) => n.path)).toEqual([
+      'src.md',
+    ]);
+  });
+
+  test('a dangling link still counts as an outgoing edge', () => {
+    insertNote(db, {
+      path: 'src.md',
+      links: [{ target: 'ghost', base: 'ghost', kind: 'wikilink' }],
+    });
+    const q = mkQuery();
+    expect(q.orphanNotes().map((n) => n.path)).toEqual([]);
+    expect(q.orphanNotes({ mode: 'unreferenced' }).map((n) => n.path)).toEqual([
+      'src.md',
+    ]);
+  });
+
+  test('an attachment link is not a graph edge in either direction', () => {
+    insertNote(db, {
+      path: 'src.md',
+      links: [{ target: 'diagram.png', base: 'diagram.png', kind: 'embed' }],
+    });
+    expect(
+      mkQuery()
+        .orphanNotes()
+        .map((n) => n.path),
+    ).toEqual(['src.md']);
+  });
+
+  test('an embed of a note is an edge, exactly like a wikilink', () => {
+    insertNote(db, {
+      path: 'src.md',
+      links: [{ target: 'target', base: 'target', kind: 'embed' }],
+    });
+    insertNote(db, { path: 'target.md' });
+    expect(mkQuery().orphanNotes()).toEqual([]);
+  });
+
+  test('a self-link keeps a note out of both modes', () => {
+    insertNote(db, {
+      path: 'self.md',
+      links: [{ target: 'self', base: 'self', kind: 'wikilink' }],
+    });
+    const q = mkQuery();
+    expect(q.orphanNotes()).toEqual([]);
+    expect(q.orphanNotes({ mode: 'unreferenced' })).toEqual([]);
+  });
+
+  test('an inbound link from an out-of-scope source does not count', () => {
+    insertNote(db, {
+      path: 'Private/src.md',
+      links: [{ target: 'Notes/target', base: 'target', kind: 'wikilink' }],
+    });
+    insertNote(db, { path: 'Notes/target.md' });
+    expect(
+      mkQuery({ read: ['Notes/'] })
+        .orphanNotes({ mode: 'unreferenced' })
+        .map((n) => n.path),
+    ).toEqual(['Notes/target.md']);
+  });
+
+  test('a bare wikilink leaves the tie-break loser unreferenced', () => {
+    insertNote(db, { path: 'dup.md' });
+    insertNote(db, { path: 'Deep/dup.md' });
+    insertNote(db, {
+      path: 'src.md',
+      links: [{ target: 'dup', base: 'dup', kind: 'wikilink' }],
+    });
+    // `dup.md` wins the tie-break toward the source's own folder, so only the
+    // loser is left without an inbound edge (as is the linking note itself).
+    expect(
+      mkQuery()
+        .orphanNotes({ mode: 'unreferenced' })
+        .map((n) => n.path)
+        .sort(),
+    ).toEqual(['Deep/dup.md', 'src.md']);
+  });
+
+  test('resolves inbound edges by path key in relative mode', () => {
+    insertNote(db, {
+      path: 'src.md',
+      links: [{ target: 'Notes/Target.md', base: null, kind: 'mdlink' }],
+    });
+    insertNote(db, { path: 'Notes/Target.md', pathKey: 'notes/target.md' });
+    expect(
+      mkQuery({ linkResolution: 'relative' })
+        .orphanNotes({ mode: 'unreferenced' })
+        .map((n) => n.path),
+    ).toEqual(['src.md']);
+  });
+
+  test('applies the same NoteFilter and orderBy as queryNotes', () => {
+    insertNote(db, { path: 'Notes/a.md', tags: ['idea'] });
+    insertNote(db, { path: 'Notes/b.md' });
+    insertNote(db, { path: 'Other/c.md', tags: ['idea'] });
+    const q = mkQuery();
+    expect(
+      q
+        .orphanNotes({ tag: 'idea' })
+        .map((n) => n.path)
+        .sort(),
+    ).toEqual(['Notes/a.md', 'Other/c.md']);
+    expect(
+      q
+        .orphanNotes({ folder: 'Notes' })
+        .map((n) => n.path)
+        .sort(),
+    ).toEqual(['Notes/a.md', 'Notes/b.md']);
+    expect(
+      q
+        .orphanNotes({ orderBy: { field: 'path', dir: 'asc' } })
+        .map((n) => n.path),
+    ).toEqual(['Notes/a.md', 'Notes/b.md', 'Other/c.md']);
+  });
+
+  test('fills pages exactly after the orphan filter', () => {
+    // Orphans and linked notes interleave by path order; a page must carry
+    // `limit` orphans, not `limit` rows thinned down by the filter.
+    for (let i = 0; i < 4; i++) {
+      insertNote(db, { path: `orphan${i}.md` });
+      insertNote(db, {
+        path: `linked${i}.md`,
+        links: [{ target: `hub${i}`, base: `hub${i}`, kind: 'wikilink' }],
+      });
+      insertNote(db, { path: `hub${i}.md` });
+    }
+    const q = mkQuery();
+    const order = { field: 'path', dir: 'asc' } as const;
+    expect(
+      q.orphanNotes({ orderBy: order, limit: 2 }).map((n) => n.path),
+    ).toEqual(['orphan0.md', 'orphan1.md']);
+    expect(
+      q.orphanNotes({ orderBy: order, limit: 2, offset: 2 }).map((n) => n.path),
+    ).toEqual(['orphan2.md', 'orphan3.md']);
+  });
+
+  test('throws VALIDATION_ERROR on an unknown mode', () => {
+    expect(() =>
+      mkQuery().orphanNotes({ mode: 'lonely' as 'disconnected' }),
+    ).toThrow(expect.objectContaining({ code: 'VALIDATION_ERROR' }));
   });
 });
