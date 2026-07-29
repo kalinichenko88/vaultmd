@@ -1,5 +1,48 @@
 # Changelog
 
+## Unreleased
+
+Five additions closing the gaps the 1.0 surface implied but could not serve.
+Public API freeze goes 45 → 46 names (`DanglingLink`).
+
+- **`notes.exists(path)`** — a non-throwing presence probe, turning
+  create-or-update from a `try`/`catch` on `ALREADY_EXISTS` into a plain branch.
+  Checked against the READ allowlist, so an unreadable or non-`.md` path still
+  throws (`ALLOWLIST_VIOLATION` / `NOT_MARKDOWN`) — that is a caller bug, not an
+  absent note. Every other stat failure answers `false`, and a *directory* named
+  `x.md` answers `false` rather than sending the documented recipe down the
+  update path.
+- **`query.danglingLinks()`** — the vault-wide sweep for links that resolve to
+  no note, returning `{ from, target }[]` ordered by source path then target.
+  `moveNote` deliberately never rewrites inbound links, and until now the only
+  way to find the fallout was `outboundLinks()` over every note. Links naming an
+  attachment file type (`[[diagram.png]]`, `![[notes.pdf]]`, embedded or not)
+  are excluded — they can never resolve to a `.md` note, so they are not
+  breakage. This makes it stricter than `outboundLinks`, which reports raw
+  resolution and still returns `resolved: null` for those same links; both
+  TSDocs now say so and point at each other. A note carrying both `[[ghost]]`
+  and `![[ghost]]` reports one row, not two, as `backlinks` already did.
+- **`query.countNotes()` / `query.countSearch()`** — the uncapped totals for the
+  same filters `queryNotes` and `searchText` take, so
+  `Math.ceil(countNotes(f) / pageSize)` is exact. Read-scope filtering happens
+  in JS after the scan, so callers had no cheap way to compute a page count
+  themselves.
+- **`NoteHit` now carries `mtime_ms` and `size`** — the values already sitting
+  in the index. `queryNotes` could sort on `mtime_ms` but never returned it, so
+  any "recently changed" list needed an extra `vault.io.stat()` per row.
+- **`updateNote` gains `prepend` and `setBody`** — `prepend` inserts at the
+  start of the BODY (after the frontmatter block, never above it) and creates
+  the note when absent; `setBody` replaces the body wholesale, keeps the
+  frontmatter verbatim, and refuses to create a missing note
+  (`REFUSE_CREATE`). Both share `append`'s guard against welding text onto a
+  closing fence.
+- Internals are shared rather than re-copied: `buildNoteFilters` backs
+  `queryNotes` / `countNotes` / `searchText`, and `resolveLinkTarget` backs
+  `outboundLinks` / `danglingLinks`, so a link cannot count as resolved in one
+  and dangling in the other.
+- Chores: bumped biome and typedoc, and moved the release workflow's Node pin to
+  24 (`actions/setup-node@v7`).
+
 ## 0.5.0 — 2026-07-21
 
 - **`notes.moveNote(from, to)`** — relocate a note to a new vault-relative path

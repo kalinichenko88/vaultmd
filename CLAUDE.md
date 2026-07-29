@@ -4,16 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`vaultmd` is a headless markdown-vault data layer for **Bun**: CRUD over `.md`
-notes plus a derived `bun:sqlite` index (collection queries, backlinks, keyword
-search). The `.md` files on disk are the **source of truth**; the SQLite index is
-a **rebuildable cache**. No Obsidian, no Electron. Internal imports use `@/`
-tsconfig-path aliases; **`tsup` bundles `src/index.ts` → `dist/`** (ESM `.js` +
-`.d.ts`, with `bun:sqlite` externalized), so the aliases are resolved in the
-shipped artifact. `exports` points at `./dist/index.js`. The package publishes to
-npm via a **tag-driven** GitHub Actions workflow (push a `v*` tag → `npm publish
---provenance`); the local `release` skill drives the version/CHANGELOG/README/tag
-flow. It stays **Bun-only at runtime** (the bundle imports `bun:sqlite`).
+VaultMD (`vaultmd` on npm) is a headless markdown-vault data layer for **Bun**:
+CRUD over `.md` notes plus a derived `bun:sqlite` index (collection queries,
+backlinks, keyword search). The `.md` files on disk are the **source of truth**;
+the SQLite index is a **rebuildable cache**. No Obsidian, no Electron. Internal
+imports use `@/` tsconfig-path aliases; **`tsup` bundles `src/index.ts` →
+`dist/`** (ESM `.js` + `.d.ts`, with `bun:sqlite` externalized), so the aliases
+are resolved in the shipped artifact. `exports` points at `./dist/index.js`. The
+package publishes to npm via a **tag-driven** GitHub Actions workflow (push a
+`v*` tag → `npm publish --provenance`); the local `release` skill drives the
+version/CHANGELOG/README/tag flow. It stays **Bun-only at runtime** (the bundle
+imports `bun:sqlite`).
 
 ## Commands
 

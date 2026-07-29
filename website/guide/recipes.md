@@ -67,6 +67,54 @@ if (await vault.notes.exists('Notes/today.md')) {
 }
 ```
 
+## Reuse existing tags instead of inventing new ones
+
+`tags()` returns every tag on readable notes with its use count, most-used
+first. `prefix` navigates a hierarchy (case-sensitive), `contains` is an ASCII
+case-insensitive substring search. Unlike the paginated queries it has no
+default cap — pass `limit` for a top-N.
+
+```ts
+const top = vault.query.tags({ limit: 10 });
+const projects = vault.query.tags({ prefix: 'project/' });
+```
+
+## Edit frontmatter and body in one atomic commit
+
+`transformNote` runs a whole-note transform inside the per-file lock, so a
+combined frontmatter + body change lands as a single write and a single index
+update. Return `null` for a no-op. The callback is **re-invoked** on write
+contention, so keep it pure — and it never creates a missing note
+(`REFUSE_CREATE`).
+
+```ts
+const outcome = await vault.notes.transformNote('Notes/today.md', (current) => {
+  if (current === null || current.includes('status: done')) {
+    return null; // 'unchanged'
+  }
+
+  return current.replace('status: open', 'status: done') + '\n- closed out\n';
+});
+```
+
+## Mirror every committed change
+
+`onCommit` fires after each committed mutation — `{ op: 'create' | 'update',
+path, content }` or `{ op: 'delete', path }` (a `moveNote` emits `delete` then
+`create`). Anything it throws surfaces as `COMMIT_FAILED` *after* the file write
+has already landed, so treat it as best-effort mirroring, not a veto.
+
+```ts
+const vault = await createVault({
+  root: '/path/to/vault',
+  prefixes: { read: [''], write: ['Notes/'] },
+  indexPath: './data/vault-index.db',
+  onCommit: (e) => {
+    console.log(e.op, e.path);
+  },
+});
+```
+
 ## Rewrite a body, keep the frontmatter
 
 `setBody` replaces everything after the frontmatter block and leaves the block

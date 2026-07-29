@@ -1,4 +1,4 @@
-# vaultmd
+# VaultMD
 
 > A headless markdown-vault data layer for [Bun](https://bun.sh) — CRUD over `.md` notes plus a derived SQLite index for collection queries, backlinks, and full-text search. No Obsidian, no Electron, no plugin.
 
@@ -6,15 +6,15 @@
 [![runtime: Bun](https://img.shields.io/badge/runtime-Bun%20%E2%89%A5%201.1-f9f1e1?logo=bun)](https://bun.sh)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![status: published](https://img.shields.io/badge/status-published-brightgreen.svg)](#status)
-[![docs](https://img.shields.io/badge/docs-vaultmd-3451b2.svg)](https://kalinichenko88.github.io/vaultmd/)
+[![docs](https://img.shields.io/badge/docs-VaultMD-3451b2.svg)](https://kalinichenko88.github.io/vaultmd/)
 
 📖 **[Documentation & API reference](https://kalinichenko88.github.io/vaultmd/)**
 
-`vaultmd` is an npm package that gives your Bun app a programmatic data layer
-over a folder of markdown notes. Your `.md` files on disk stay the **single
-source of truth**; vaultmd maintains a rebuildable `bun:sqlite` index alongside
-them so you can query notes by tag or frontmatter, walk backlinks, and run
-keyword search — all without an editor, sync engine, or background daemon.
+VaultMD (`vaultmd` on npm) gives your Bun app a programmatic data layer over a
+folder of markdown notes. Your `.md` files on disk stay the **single source of
+truth**; VaultMD maintains a rebuildable `bun:sqlite` index alongside them so
+you can query notes by tag or frontmatter, walk backlinks, and run keyword
+search — all without an editor, sync engine, or background daemon.
 
 It's the engine, not the app: generic vault mechanics only. Personas, domain
 schemas, and sync logic live in whatever you build on top.
@@ -24,6 +24,10 @@ schemas, and sync logic live in whatever you build on top.
 Released (`0.5.0`) — live on npm. The public API is frozen and tested, and the
 package ships as a bundled `dist/` (ESM + types). Being `0.x`, the surface may
 still evolve before `1.0`; see [CHANGELOG.md](./CHANGELOG.md) for what changed.
+
+> **Unreleased on `main`:** `notes.exists`, `query.countNotes`,
+> `query.countSearch`, and `query.danglingLinks` are documented below but are
+> not in `0.5.0` yet — they ship in the next release.
 
 ## Features
 
@@ -48,7 +52,7 @@ still evolve before `1.0`; see [CHANGELOG.md](./CHANGELOG.md) for what changed.
 
 ## Requirements
 
-- **[Bun](https://bun.sh) ≥ 1.1.0.** vaultmd uses `bun:sqlite`, `Bun.file`, and
+- **[Bun](https://bun.sh) ≥ 1.1.0.** VaultMD uses `bun:sqlite`, `Bun.file`, and
   other Bun built-ins — it does **not** run under Node.
 
 ## Install
@@ -133,7 +137,7 @@ The only public entry point is `createVault`. Everything below hangs off the
 
 | Option                   | Type                                   | Default      | Description                                                                 |
 | ------------------------ | -------------------------------------- | ------------ | --------------------------------------------------------------------------- |
-| `root`                   | `string`                               | *(required)* | Absolute path to the vault directory.                                       |
+| `root`                   | `string`                               | *(required)* | Absolute (or process-relative) path to the vault directory.                 |
 | `prefixes`               | `{ read: string[]; write: string[] }`  | *(required)* | Read/write path-prefix allowlists (`''` = whole vault).                     |
 | `indexPath`              | `string`                               | *(required)* | Where the SQLite index lives. Keep it **out** of the vault.                 |
 | `caseSensitive`          | `boolean`                              | *(auto)*     | Override filesystem case sensitivity detection.                             |
@@ -178,8 +182,10 @@ transformNote(path, transform: (current: string | null) => string | null): Promi
 deleteNote(path): Promise<boolean>
 
 // Move a note to a new path, byte-for-byte (frontmatter untouched); the index
-// row follows. Both ends are allowlist-checked, and the destination is never
-// clobbered. Throws NOT_FOUND / ALREADY_EXISTS / VALIDATION_ERROR (from === to).
+// row follows, under BOTH ends' locks. Both ends are allowlist-checked, and the
+// destination is never clobbered. Throws NOT_FOUND / ALREADY_EXISTS /
+// VALIDATION_ERROR (from === to) / MTIME_CONFLICT (source changed mid-move —
+// the destination is rolled back). Emits `delete` then `create` on onCommit.
 // Inbound links are NOT rewritten — use query.danglingLinks() to find what broke.
 moveNote(from, to): Promise<void>
 ```
@@ -189,8 +195,12 @@ where `valid` is `'flat' | 'present-but-invalid' | 'none'`.
 
 ### `vault.query`
 
+Every method here is **synchronous** and read-scope filtered. Paginated methods
+default to `limit: 100` and are hard-capped at `1000` per call; `tags()` is the
+exception — it has no default cap and returns everything unless you pass `limit`.
+
 ```ts
-// Filter the collection.
+// Filter the collection. Defaults to newest-first (mtime_ms desc).
 // Returns NoteHit[] = { path, title, frontmatter, tags, mtime_ms, size }[].
 queryNotes(opts?: {
   tag?: string;
@@ -207,7 +217,9 @@ countNotes(opts?: { tag?: string; where?: WhereMap; folder?: string }): number
 // Notes linking TO this path. Returns { from: string }[].
 backlinks(path, opts?: { limit?: number; offset?: number }): Backlink[]
 
-// Links FROM this path. Returns { target, resolved }[] (resolved is null if dangling).
+// Links FROM this path. Returns { target, resolved }[]. `resolved: null` means
+// "no .md note matched" — that includes attachment links ([[diagram.png]]),
+// which are NOT breakage. This is raw resolution; danglingLinks() is the filtered view.
 outboundLinks(path, opts?: { limit?: number; offset?: number }): OutboundLink[]
 
 // Every link in the vault that resolves to nothing — the post-rename damage
@@ -234,6 +246,21 @@ vault.reconcilePaths(rels: string[]): Promise<void>  // reconcile specific paths
 vault.rebuild(): Promise<void>              // drop & rebuild the index from disk
 vault.close(): void                         // close the db handle
 ```
+
+### `vault.io`
+
+The `VaultIo` chokepoint the vault was built on, exposed for the escape hatch:
+`io.can(path, 'read' | 'write')` to test scope without throwing, plus the
+canonicalizing path/read/write helpers every other surface routes through. You
+rarely need it — `notes` and `query` already go through it.
+
+### `onCommit`
+
+Fired after each committed mutation with a `CommitEvent`:
+`{ op: 'create' | 'update', path, content }` or `{ op: 'delete', path }`. A
+`moveNote` emits `delete` then `create`. Anything thrown here surfaces as
+`MdVaultError('COMMIT_FAILED')` — the file write has already landed at that
+point, so treat the hook as best-effort mirroring, not a veto.
 
 ### Lower-level primitives
 

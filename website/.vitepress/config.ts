@@ -4,7 +4,7 @@ import typedocSidebar from '../api/typedoc-sidebar.json';
 
 export default defineConfig({
   base: '/vaultmd/',
-  title: 'vaultmd',
+  title: 'VaultMD',
   description:
     'Headless markdown-vault data layer for Bun — CRUD + SQLite index.',
   themeConfig: {
