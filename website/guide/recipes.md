@@ -121,6 +121,45 @@ if (await vault.notes.exists('Notes/today.md')) {
 }
 ```
 
+## Import a few thousand notes
+
+Every mutator locks on the note's own path, so writes to *different* notes never
+contend — a bulk import is bound by filesystem syscalls, not by the lock. A
+serial `for await` loop leaves that on the table; a bounded pool over the same
+`createNote` roughly halves the wall-clock.
+
+```ts
+async function importAll(
+  entries: Array<{ path: string; body: string }>,
+  concurrency = 32,
+) {
+  const queue = [...entries];
+  const failed: Array<{ path: string; error: unknown }> = [];
+
+  const worker = async () => {
+    for (let entry = queue.pop(); entry; entry = queue.pop()) {
+      try {
+        await vault.notes.createNote(entry.path, { body: entry.body });
+      } catch (error) {
+        // One unwritable note must not sink the other 4999.
+        failed.push({ path: entry.path, error });
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: concurrency }, worker));
+
+  return failed;
+}
+```
+
+Keep the pool bounded. An unbounded `Promise.all` over a few thousand entries
+holds a file descriptor per in-flight write and will hit `EMFILE`.
+
+If the importing process is the only writer on the machine, opening the vault
+with `crossProcessWriterLock: false` drops a lockfile create + unlink from every
+note as well. Turn it back on for normal operation — it is what keeps a second
+process from writing the same note underneath you.
+
 ## Reuse existing tags instead of inventing new ones
 
 `tags()` returns every tag on readable notes with its use count, most-used
