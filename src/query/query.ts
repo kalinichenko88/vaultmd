@@ -56,7 +56,11 @@ function validatePagination(
   return { lim: Math.min(lim, HARD_MAX), off };
 }
 
-function sanitizeFts(q: string): string | null {
+// Quotes each whitespace-separated token so caller text cannot reach the fts5
+// query grammar. Whitespace-joined the tokens are separate phrases — an
+// implicit AND that matches words in different sentences; `phrase` joins them
+// with fts5's `+` instead, which demands the tokens be adjacent in that order.
+function sanitizeFts(q: string, phrase = false): string | null {
   const tokens = q
     .trim()
     .split(/\s+/)
@@ -65,7 +69,9 @@ function sanitizeFts(q: string): string | null {
     return null;
   }
 
-  return tokens.map((t) => `"${t.replace(/"/g, '""')}"`).join(' ');
+  return tokens
+    .map((t) => `"${t.replace(/"/g, '""')}"`)
+    .join(phrase ? ' + ' : ' ');
 }
 
 // Escapes LIKE metacharacters (\, %, _) so caller-supplied text matches
@@ -380,15 +386,14 @@ export function createQuery(
     return Map.groupBy(rows, (row) => pathBaseLower(row.path));
   }
 
-  function queryNotes(
-    opts: NoteFilter & {
-      orderBy?: QueryOrder;
-      limit?: number;
-      offset?: number;
-    } = {},
+  // Every readable note matching `opts`, ordered but UNPAGINATED. queryNotes
+  // slices it straight into a page; orphanNotes filters it first — so both fill
+  // pages exactly off one scan, instead of orphanNotes thinning an already
+  // sliced page.
+  function scopedNotes(
+    opts: NoteFilter & { orderBy?: QueryOrder } = {},
   ): NoteHit[] {
-    const { orderBy, limit, offset } = opts;
-    const { lim, off } = validatePagination(limit, offset);
+    const { orderBy } = opts;
     const order: QueryOrder = orderBy ?? { field: 'mtime_ms', dir: 'desc' };
     if (!ORDER_FIELDS.has(order.field)) {
       throw new MdVaultError(
@@ -399,9 +404,9 @@ export function createQuery(
     const dir = order.dir === 'asc' ? 'ASC' : 'DESC';
     const { parts, params } = buildNoteFilters(opts);
     const clause = whereClause(parts);
-    // Fetch all matching rows without LIMIT/OFFSET — scope-filter first, then
-    // slice in JS to get exact page fills. (At personal-vault scale the full
-    // scan is fine; a future optimisation can push read-prefixes into SQL.)
+    // Fetch all matching rows without LIMIT/OFFSET — the caller scope-filters
+    // and slices in JS to get exact page fills. (At personal-vault scale the
+    // full scan is fine; a future optimisation can push read-prefixes into SQL.)
     const sql = `SELECT n.path, n.path_key, n.title, n.frontmatter, n.mtime_ms, n.size FROM notes n ${clause} ORDER BY n.${order.field} ${dir}, n.path ASC`;
     const rows = db
       .query<RawNoteRow, (string | number | boolean | null)[]>(sql)
@@ -421,7 +426,19 @@ export function createQuery(
       });
     }
 
-    return scoped.slice(off, off + lim);
+    return scoped;
+  }
+
+  function queryNotes(
+    opts: NoteFilter & {
+      orderBy?: QueryOrder;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): NoteHit[] {
+    const { lim, off } = validatePagination(opts.limit, opts.offset);
+
+    return scopedNotes(opts).slice(off, off + lim);
   }
 
   function countNotes(opts: NoteFilter = {}): number {
@@ -437,14 +454,14 @@ export function createQuery(
     return rows.filter((row) => inScope(row.path)).length;
   }
 
-  function backlinks(
-    path: string,
-    opts: { limit?: number; offset?: number } = {},
-  ): Backlink[] {
+  // Every readable note linking to `path`, deduplicated but UNPAGINATED.
+  // backlinks slices it into a page; unlinkedMentions subtracts the whole set,
+  // which must not be capped at some caller's page size — linker #101 is still
+  // a linker, not an unlinked mention.
+  function backlinkSources(path: string): string[] {
     if (!inScope(path)) {
       return [];
     }
-    const { lim, off } = validatePagination(opts.limit, opts.offset);
     const display = vaultIo.toVaultRelative(path);
     const targetKey = vaultIo.toKey(path);
     const base = pathBaseLower(display);
@@ -512,15 +529,26 @@ export function createQuery(
 
     // deduplicate (a note could link via both path-qualified and bare)
     const seen = new Set<string>();
-    const deduped: { from: string }[] = [];
+    const deduped: string[] = [];
     for (const s of sources) {
       if (!seen.has(s)) {
         seen.add(s);
-        deduped.push({ from: s });
+        deduped.push(s);
       }
     }
 
-    return deduped.slice(off, off + lim);
+    return deduped;
+  }
+
+  function backlinks(
+    path: string,
+    opts: { limit?: number; offset?: number } = {},
+  ): Backlink[] {
+    const { lim, off } = validatePagination(opts.limit, opts.offset);
+
+    return backlinkSources(path)
+      .slice(off, off + lim)
+      .map((from) => ({ from }));
   }
 
   // In-scope note owning `pathKey`, or null when the key indexes nothing (or
@@ -630,15 +658,18 @@ export function createQuery(
 
   // Every in-scope hit for `q`, unpaginated and rank-ordered — searchText slices
   // it into a page, countSearch just takes its length, so a count can never
-  // disagree with the rows it counts. `withSnippet` is off for the count: fts5
+  // disagree with the rows it counts. `snippet` is off for the count: fts5
   // `snippet()` builds a highlighted string per matching row, and a "page 1 of
-  // N" render would pay for one per hit only to discard it.
+  // N" render would pay for one per hit only to discard it. `phrase` demands
+  // adjacent tokens instead of the default implicit AND — mention lookup needs
+  // a contiguous name, not its words scattered across the note.
   function searchScoped(
     q: string,
     opts: NoteFilter = {},
-    withSnippet = true,
+    flags: { snippet?: boolean; phrase?: boolean } = {},
   ): SearchHit[] {
-    const ftsQ = sanitizeFts(q);
+    const withSnippet = flags.snippet ?? true;
+    const ftsQ = sanitizeFts(q, flags.phrase ?? false);
     if (ftsQ === null) {
       return [];
     }
@@ -708,7 +739,7 @@ export function createQuery(
   }
 
   function countSearch(q: string, opts: NoteFilter = {}): number {
-    return searchScoped(q, opts, false).length;
+    return searchScoped(q, opts, { snippet: false }).length;
   }
 
   function tags(
