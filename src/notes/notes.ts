@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import { stat } from 'node:fs/promises';
 
 import { MdVaultError } from '@/errors.ts';
 import {
@@ -58,6 +59,16 @@ export function createNotes(deps: NotesDeps): NotesApi {
     }
 
     return result;
+  }
+
+  async function exists(path: string): Promise<boolean> {
+    // resolveVaultPath keeps the NOT_MARKDOWN / ALLOWLIST_VIOLATION contract;
+    // any stat failure just means "no note here" and must not escape as a raw
+    // errno, and isFile() rejects a DIRECTORY named `x.md`.
+    const full = vaultIo.resolveVaultPath(path, 'read');
+    const info = await stat(full).catch(() => null);
+
+    return info?.isFile() ?? false;
   }
 
   function runLocked<T>(key: string, fn: () => Promise<T>): Promise<T> {
@@ -183,6 +194,20 @@ export function createNotes(deps: NotesDeps): NotesApi {
 
         return `${existing}${needsNl ? '\n' : ''}${op.append}`;
       }
+      // Both body-position writers below insert AFTER `prefix`, so they share
+      // append's fence hazard from the other side: when the prefix is a
+      // frontmatter block with no trailing newline, text placed straight after
+      // it would weld onto the closing `---`.
+      const fenceNl = prefix.length > 0 && !prefix.endsWith('\n') ? '\n' : '';
+      if ('prepend' in op) {
+        const rest = body ?? '';
+        const sep = rest.length > 0 && !op.prepend.endsWith('\n') ? '\n' : '';
+
+        return `${prefix}${fenceNl}${op.prepend}${sep}${rest}`;
+      }
+      if ('setBody' in op) {
+        return `${prefix}${fenceNl}${op.setBody}`;
+      }
       const { old, new: replacement } = op.editByMatch;
       if (body === null) {
         throw new MdVaultError(
@@ -209,7 +234,9 @@ export function createNotes(deps: NotesDeps): NotesApi {
         prefix + body.slice(0, at) + replacement + body.slice(at + old.length)
       );
     };
-    await transformLocked(path, transform, 'append' in op);
+    // Only the two additive ops create a missing note; setBody and editByMatch
+    // need something to act on (REFUSE_CREATE / NO_MATCH respectively).
+    await transformLocked(path, transform, 'append' in op || 'prepend' in op);
   }
 
   async function editFrontmatter(
@@ -280,6 +307,7 @@ export function createNotes(deps: NotesDeps): NotesApi {
 
   return {
     readNote,
+    exists,
     createNote,
     updateNote,
     editFrontmatter,

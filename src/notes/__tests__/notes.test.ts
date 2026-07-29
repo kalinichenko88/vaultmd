@@ -515,3 +515,124 @@ describe('moveNote', () => {
     expect(await readFile(join(vaultDir, 'b.md'), 'utf8')).toBe('B');
   });
 });
+
+describe('exists', () => {
+  test('is false for a missing note and true once it is created', async () => {
+    expect(await notes.exists('a.md')).toBe(false);
+    await notes.createNote('a.md', { body: 'hi' });
+    expect(await notes.exists('a.md')).toBe(true);
+  });
+
+  test('is false again after the note is deleted', async () => {
+    await notes.createNote('a.md', { body: 'hi' });
+    await notes.deleteNote('a.md');
+    expect(await notes.exists('a.md')).toBe(false);
+  });
+
+  test('throws rather than answering false for a non-markdown path', async () => {
+    await expect(notes.exists('a.txt')).rejects.toThrow(
+      expect.objectContaining({ code: 'NOT_MARKDOWN' }),
+    );
+  });
+
+  test('throws for a path outside the read allowlist', async () => {
+    const scoped = createNotes({
+      db,
+      vaultIo: createVaultIo({
+        root: vaultDir,
+        prefixes: { read: ['Notes/'], write: ['Notes/'] },
+        caseSensitive: true,
+        ignore: [],
+      }),
+      cfg,
+      query,
+      cross: false,
+    });
+    await expect(scoped.exists('Other/a.md')).rejects.toThrow(
+      expect.objectContaining({ code: 'ALLOWLIST_VIOLATION' }),
+    );
+  });
+});
+
+describe('updateNote — prepend', () => {
+  test('inserts at the top of the body, after the frontmatter', async () => {
+    await notes.createNote('a.md', {
+      frontmatter: { tags: ['x'] },
+      body: 'old line\n',
+    });
+    await notes.updateNote('a.md', { prepend: 'new line' });
+    const content = await readFile(join(vaultDir, 'a.md'), 'utf8');
+    expect(content).toBe('---\ntags:\n  - x\n---\nnew line\nold line\n');
+  });
+
+  test('does not weld onto a frontmatter fence with no trailing newline', async () => {
+    await writeFile(join(vaultDir, 'a.md'), '---\ntags:\n  - x\n---');
+    await notes.updateNote('a.md', { prepend: 'first' });
+    const content = await readFile(join(vaultDir, 'a.md'), 'utf8');
+    expect(content).toBe('---\ntags:\n  - x\n---\nfirst');
+    expect((await notes.readNote('a.md')).tags).toEqual(['x']);
+  });
+
+  test('does not double the separator when the text already ends in a newline', async () => {
+    await notes.createNote('a.md', { body: 'old\n' });
+    await notes.updateNote('a.md', { prepend: 'new\n' });
+    expect(await readFile(join(vaultDir, 'a.md'), 'utf8')).toBe('new\nold\n');
+  });
+
+  test('creates the note when it is absent', async () => {
+    await notes.updateNote('fresh.md', { prepend: 'hello' });
+    expect(await readFile(join(vaultDir, 'fresh.md'), 'utf8')).toBe('hello');
+  });
+
+  test('write-through indexes the prepended text for search', async () => {
+    await notes.createNote('a.md', { body: 'old\n' });
+    await notes.updateNote('a.md', { prepend: 'strawberry\n' });
+    expect(query.searchText('strawberry').map((h) => h.path)).toEqual(['a.md']);
+  });
+});
+
+describe('updateNote — setBody', () => {
+  test('replaces the body and preserves the frontmatter verbatim', async () => {
+    await notes.createNote('a.md', {
+      frontmatter: { tags: ['x'], status: 'open' },
+      body: 'gone\n',
+    });
+    await notes.updateNote('a.md', { setBody: 'fresh body\n' });
+    const content = await readFile(join(vaultDir, 'a.md'), 'utf8');
+    expect(content).toBe('---\ntags:\n  - x\nstatus: open\n---\nfresh body\n');
+    const read = await notes.readNote('a.md');
+    expect(read.frontmatter).toEqual({ tags: ['x'], status: 'open' });
+    expect(read.body).toBe('fresh body\n');
+  });
+
+  test('replaces the whole file when there is no frontmatter', async () => {
+    await notes.createNote('a.md', { body: '# old\n' });
+    await notes.updateNote('a.md', { setBody: '# new\n' });
+    expect(await readFile(join(vaultDir, 'a.md'), 'utf8')).toBe('# new\n');
+  });
+
+  test('refuses to create a missing note', async () => {
+    await expect(
+      notes.updateNote('ghost.md', { setBody: 'x' }),
+    ).rejects.toThrow(expect.objectContaining({ code: 'REFUSE_CREATE' }));
+  });
+
+  test('write-through reindexes, dropping the old body from search', async () => {
+    await notes.createNote('a.md', { body: 'strawberry\n' });
+    await notes.updateNote('a.md', { setBody: 'blueberry\n' });
+    expect(query.searchText('strawberry')).toEqual([]);
+    expect(query.searchText('blueberry').map((h) => h.path)).toEqual(['a.md']);
+  });
+});
+
+describe('exists — review regressions', () => {
+  test('is false for a DIRECTORY named like a note', async () => {
+    await mkdir(join(vaultDir, 'dir.md'));
+    expect(await notes.exists('dir.md')).toBe(false);
+  });
+
+  test('is false when a parent segment is a file, not a raw ENOTDIR', async () => {
+    await writeFile(join(vaultDir, 'Notes'), 'i am a file');
+    expect(await notes.exists('Notes/today.md')).toBe(false);
+  });
+});

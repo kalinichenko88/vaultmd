@@ -140,11 +140,15 @@ export async function createVault(config: CreateVaultConfig): Promise<Vault> {
       return fn(...args);
     };
   }
+  // Explicit, not a loop: tsc fails this literal when QueryApi grows a method.
   const query: ReturnType<typeof createQuery> = {
     queryNotes: reconciled(rawQuery.queryNotes),
+    countNotes: reconciled(rawQuery.countNotes),
     backlinks: reconciled(rawQuery.backlinks),
     outboundLinks: reconciled(rawQuery.outboundLinks),
+    danglingLinks: reconciled(rawQuery.danglingLinks),
     searchText: reconciled(rawQuery.searchText),
+    countSearch: reconciled(rawQuery.countSearch),
     tags: reconciled(rawQuery.tags),
   };
 

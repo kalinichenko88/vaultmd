@@ -74,6 +74,8 @@ const ALL_EXPORTS = [
   // — 0.5.0 (new 2) —
   'MoveTarget',
   'withFileMove',
+  // — 1.0 API completeness (new 1) —
+  'DanglingLink',
 ].sort();
 
 function exportedNames(source: string): string[] {
@@ -94,7 +96,7 @@ function exportedNames(source: string): string[] {
 }
 
 describe('package public API freeze', () => {
-  test('src/index.ts exports exactly the frozen 45 names (Plan 1 + Plan 2 + Plan 3 + 0.2.0 + 0.3.0 + tags + 0.5.0)', () => {
+  test('src/index.ts exports exactly the frozen 46 names (Plan 1 + Plan 2 + Plan 3 + 0.2.0 + 0.3.0 + tags + 0.5.0 + 1.0)', () => {
     const src = readFileSync(new URL('../index.ts', import.meta.url), 'utf8');
     expect(exportedNames(src)).toEqual(ALL_EXPORTS);
   });

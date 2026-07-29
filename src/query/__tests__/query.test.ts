@@ -91,7 +91,7 @@ afterEach(async () => {
 
 // ── Cycle 1: scaffold ─────────────────────────────────────────────────────────
 describe('createQuery factory', () => {
-  test('returns an object with all five methods', () => {
+  test('returns an object with every QueryApi method', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
@@ -101,11 +101,16 @@ describe('createQuery factory', () => {
       caseSensitive: false,
       ignore: [],
     });
-    expect(typeof q.queryNotes).toBe('function');
-    expect(typeof q.backlinks).toBe('function');
-    expect(typeof q.outboundLinks).toBe('function');
-    expect(typeof q.searchText).toBe('function');
-    expect(typeof q.tags).toBe('function');
+    expect(Object.keys(q).sort()).toEqual([
+      'backlinks',
+      'countNotes',
+      'countSearch',
+      'danglingLinks',
+      'outboundLinks',
+      'queryNotes',
+      'searchText',
+      'tags',
+    ]);
   });
 
   test('queryNotes returns [] on an empty DB', () => {
@@ -1222,5 +1227,318 @@ describe('searchText — mixed-scope pagination (Finding 1 regression)', () => {
     }
     const paths = [...page1, ...page2].map((h) => h.path);
     expect(new Set(paths).size).toBe(3); // no duplicates
+  });
+});
+
+// Query instance over the shared fixture db: whole-vault scope, wikilink
+// resolution, case-INSENSITIVE. Not auto-detected — insertNote always stores
+// path_key lower-cased, so the fixture is a case-insensitive vault by
+// construction, and letting the io detect the host filesystem instead would
+// make every path_key lookup in this file pass on macOS and fail on Linux CI.
+function mkQuery(
+  opts: {
+    read?: string[];
+    linkResolution?: 'wikilink' | 'relative';
+    caseSensitive?: boolean;
+  } = {},
+) {
+  const {
+    read = [''],
+    linkResolution = 'wikilink',
+    caseSensitive = false,
+  } = opts;
+  const io = createVaultIo({
+    root: vaultDir,
+    prefixes: { read, write: [''] },
+    caseSensitive,
+  });
+
+  return createQuery(db, io, { linkResolution, caseSensitive, ignore: [] });
+}
+
+// ── 1.0 API completeness ─────────────────────────────────────────────────────
+describe('queryNotes — mtime_ms / size passthrough', () => {
+  test('carries the indexed mtime_ms and size the order field sorts by', () => {
+    insertNote(db, { path: 'a.md', body: 'hello' });
+    db.query('UPDATE notes SET mtime_ms = ? WHERE path = ?').run(1234, 'a.md');
+    const [hit] = mkQuery().queryNotes();
+    expect(hit.mtime_ms).toBe(1234);
+    expect(hit.size).toBe(5);
+  });
+});
+
+describe('countNotes', () => {
+  test('is 0 on an empty DB', () => {
+    expect(mkQuery().countNotes()).toBe(0);
+  });
+
+  test('counts every match, not just the first page', () => {
+    for (let i = 0; i < 5; i++) {
+      insertNote(db, { path: `n${i}.md`, tags: ['idea'] });
+    }
+    const q = mkQuery();
+    expect(q.queryNotes({ limit: 2 })).toHaveLength(2);
+    expect(q.countNotes()).toBe(5);
+    expect(q.countNotes({ tag: 'idea' })).toBe(5);
+    expect(q.countNotes({ tag: 'missing' })).toBe(0);
+  });
+
+  test('applies the same tag / where / folder filters as queryNotes', () => {
+    insertNote(db, {
+      path: 'Notes/a.md',
+      tags: ['idea'],
+      frontmatter: { status: 'open' },
+    });
+    insertNote(db, {
+      path: 'Notes/b.md',
+      tags: ['idea'],
+      frontmatter: { status: 'done' },
+    });
+    insertNote(db, { path: 'Other/c.md', tags: ['idea'] });
+    const q = mkQuery();
+    const filters = { tag: 'idea', where: { status: 'open' } };
+    expect(q.countNotes(filters)).toBe(q.queryNotes(filters).length);
+    expect(q.countNotes(filters)).toBe(1);
+    expect(q.countNotes({ folder: 'Notes' })).toBe(2);
+  });
+
+  test('excludes notes outside the read scope', () => {
+    insertNote(db, { path: 'Notes/a.md' });
+    insertNote(db, { path: 'Private/b.md' });
+    expect(mkQuery({ read: ['Notes/'] }).countNotes()).toBe(1);
+  });
+
+  test('rejects an invalid where key like queryNotes does', () => {
+    expect(() => mkQuery().countNotes({ where: { 'bad key!': 1 } })).toThrow(
+      expect.objectContaining({ code: 'VALIDATION_ERROR' }),
+    );
+  });
+});
+
+describe('countSearch', () => {
+  test('counts all hits beyond the requested page', () => {
+    for (let i = 0; i < 4; i++) {
+      insertNote(db, { path: `n${i}.md`, body: 'shared keyword here' });
+    }
+    const q = mkQuery();
+    expect(q.searchText('keyword', { limit: 2 })).toHaveLength(2);
+    expect(q.countSearch('keyword')).toBe(4);
+  });
+
+  test('honours tag / folder filters and the read scope', () => {
+    insertNote(db, { path: 'Notes/a.md', body: 'keyword', tags: ['idea'] });
+    insertNote(db, { path: 'Notes/b.md', body: 'keyword' });
+    insertNote(db, { path: 'Private/c.md', body: 'keyword' });
+    expect(mkQuery().countSearch('keyword')).toBe(3);
+    expect(mkQuery().countSearch('keyword', { tag: 'idea' })).toBe(1);
+    expect(mkQuery().countSearch('keyword', { folder: 'Notes' })).toBe(2);
+    expect(mkQuery({ read: ['Notes/'] }).countSearch('keyword')).toBe(2);
+  });
+
+  test('is 0 for a query that sanitizes to nothing', () => {
+    insertNote(db, { path: 'a.md', body: 'keyword' });
+    expect(mkQuery().countSearch('   ')).toBe(0);
+  });
+});
+
+describe('danglingLinks', () => {
+  test('is [] when every link resolves', () => {
+    insertNote(db, {
+      path: 'a.md',
+      links: [{ target: 'b', base: 'b', kind: 'wikilink' }],
+    });
+    insertNote(db, { path: 'b.md' });
+    expect(mkQuery().danglingLinks()).toEqual([]);
+  });
+
+  test('reports a wikilink pointing at no note', () => {
+    insertNote(db, {
+      path: 'a.md',
+      links: [{ target: 'ghost', base: 'ghost', kind: 'wikilink' }],
+    });
+    expect(mkQuery().danglingLinks()).toEqual([
+      { from: 'a.md', target: 'ghost' },
+    ]);
+  });
+
+  test('reports a path-qualified wikilink whose folder target is gone', () => {
+    insertNote(db, {
+      path: 'a.md',
+      links: [{ target: 'Folder/Gone', base: 'gone', kind: 'wikilink' }],
+    });
+    expect(mkQuery().danglingLinks()).toEqual([
+      { from: 'a.md', target: 'Folder/Gone' },
+    ]);
+  });
+
+  test('reports a dead relative link in relative mode', () => {
+    insertNote(db, {
+      path: 'a.md',
+      links: [{ target: 'gone.md', base: null, kind: 'mdlink' }],
+    });
+    expect(mkQuery({ linkResolution: 'relative' }).danglingLinks()).toEqual([
+      { from: 'a.md', target: 'gone.md' },
+    ]);
+  });
+
+  test('ignores attachment embeds, which can never resolve to a note', () => {
+    insertNote(db, {
+      path: 'a.md',
+      links: [
+        { target: 'diagram.png', base: 'diagram.png', kind: 'embed' },
+        { target: 'clip.mp4', base: 'clip.mp4', kind: 'embed' },
+      ],
+    });
+    expect(mkQuery().danglingLinks()).toEqual([]);
+  });
+
+  test('still reports a transclusion of a missing note, extension-free', () => {
+    insertNote(db, {
+      path: 'a.md',
+      links: [{ target: 'Ghost Note', base: 'ghost note', kind: 'embed' }],
+    });
+    expect(mkQuery().danglingLinks()).toEqual([
+      { from: 'a.md', target: 'Ghost Note' },
+    ]);
+  });
+
+  test('a note title ending in a numeric segment is not mistaken for a file', () => {
+    insertNote(db, {
+      path: 'a.md',
+      links: [{ target: 'Chapter 1.2', base: 'chapter 1.2', kind: 'embed' }],
+    });
+    expect(mkQuery().danglingLinks()).toEqual([
+      { from: 'a.md', target: 'Chapter 1.2' },
+    ]);
+  });
+
+  test('skips links from notes outside the read scope', () => {
+    insertNote(db, {
+      path: 'Private/a.md',
+      links: [{ target: 'ghost', base: 'ghost', kind: 'wikilink' }],
+    });
+    insertNote(db, {
+      path: 'Notes/b.md',
+      links: [{ target: 'ghost', base: 'ghost', kind: 'wikilink' }],
+    });
+    expect(mkQuery({ read: ['Notes/'] }).danglingLinks()).toEqual([
+      { from: 'Notes/b.md', target: 'ghost' },
+    ]);
+  });
+
+  test('a link resolving only to an out-of-scope note counts as dangling', () => {
+    insertNote(db, {
+      path: 'Notes/a.md',
+      links: [{ target: 'secret', base: 'secret', kind: 'wikilink' }],
+    });
+    insertNote(db, { path: 'Private/secret.md' });
+    expect(mkQuery({ read: ['Notes/'] }).danglingLinks()).toEqual([
+      { from: 'Notes/a.md', target: 'secret' },
+    ]);
+  });
+
+  test('paginates after the scope filter', () => {
+    for (let i = 0; i < 3; i++) {
+      insertNote(db, {
+        path: `n${i}.md`,
+        links: [{ target: `ghost${i}`, base: `ghost${i}`, kind: 'wikilink' }],
+      });
+    }
+    const q = mkQuery();
+    expect(q.danglingLinks({ limit: 2 })).toHaveLength(2);
+    expect(q.danglingLinks({ limit: 2, offset: 2 })).toEqual([
+      { from: 'n2.md', target: 'ghost2' },
+    ]);
+  });
+});
+
+// ── review regressions ───────────────────────────────────────────────────────
+describe('danglingLinks — review regressions', () => {
+  test('a mixed-case relative link resolves on a case-insensitive vault', () => {
+    insertNote(db, { path: 'Notes/Target.md' });
+    insertNote(db, {
+      path: 'Source.md',
+      links: [{ target: 'Notes/Target.md', base: null, kind: 'mdlink' }],
+    });
+    const q = mkQuery({ linkResolution: 'relative' });
+    expect(q.outboundLinks('Source.md')).toEqual([
+      { target: 'Notes/Target.md', resolved: 'Notes/Target.md' },
+    ]);
+    expect(q.danglingLinks()).toEqual([]);
+  });
+
+  test('a broken transclusion whose title ends in a dot segment is reported', () => {
+    for (const target of [
+      'Meeting 2024.Q1',
+      'Draft.v2',
+      'Release notes.beta',
+      'config.prod',
+    ]) {
+      insertNote(db, {
+        path: `${target}-src.md`,
+        links: [{ target, base: target.toLowerCase(), kind: 'embed' }],
+      });
+    }
+    expect(
+      mkQuery()
+        .danglingLinks()
+        .map((d) => d.target)
+        .sort(),
+    ).toEqual([
+      'Draft.v2',
+      'Meeting 2024.Q1',
+      'Release notes.beta',
+      'config.prod',
+    ]);
+  });
+
+  test('a plain (non-embed) wikilink to an attachment is not reported', () => {
+    insertNote(db, {
+      path: 'a.md',
+      links: [
+        { target: 'diagram.png', base: 'diagram.png', kind: 'wikilink' },
+        { target: 'notes.pdf', base: 'notes.pdf', kind: 'wikilink' },
+      ],
+    });
+    expect(mkQuery().danglingLinks()).toEqual([]);
+  });
+
+  test('a note whose whole title is an extension word is still checked', () => {
+    insertNote(db, {
+      path: 'a.md',
+      links: [{ target: 'zip', base: 'zip', kind: 'wikilink' }],
+    });
+    expect(mkQuery().danglingLinks()).toEqual([
+      { from: 'a.md', target: 'zip' },
+    ]);
+  });
+
+  test('the same missing target linked and embedded is reported once', () => {
+    insertNote(db, {
+      path: 'a.md',
+      links: [
+        { target: 'ghost', base: 'ghost', kind: 'wikilink' },
+        { target: 'ghost', base: 'ghost', kind: 'embed' },
+      ],
+    });
+    expect(mkQuery().danglingLinks()).toEqual([
+      { from: 'a.md', target: 'ghost' },
+    ]);
+  });
+
+  test('the base index agrees with the per-link scan on tie-breaks', () => {
+    // Two notes share a basename; the bare link must win toward its own folder,
+    // the same way outboundLinks (which does not build the index) resolves it.
+    insertNote(db, { path: 'Notes/dup.md' });
+    insertNote(db, { path: 'Other/dup.md' });
+    insertNote(db, {
+      path: 'Other/src.md',
+      links: [{ target: 'dup', base: 'dup', kind: 'wikilink' }],
+    });
+    const q = mkQuery();
+    expect(q.outboundLinks('Other/src.md')).toEqual([
+      { target: 'dup', resolved: 'Other/dup.md' },
+    ]);
+    expect(q.danglingLinks()).toEqual([]);
   });
 });

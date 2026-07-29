@@ -33,7 +33,8 @@ still evolve before `1.0`; see [CHANGELOG.md](./CHANGELOG.md) for what changed.
   Delete it and it rebuilds from disk.
 - **Collection queries** — filter notes by tag, frontmatter field, or folder;
   order and paginate.
-- **Backlinks & outbound links** — `[[wikilink]]` or relative-link resolution.
+- **Backlinks & outbound links** — `[[wikilink]]` or relative-link resolution,
+  plus a vault-wide sweep for links that resolve to nothing.
 - **Full-text search** — keyword search over note bodies (SQLite FTS5) with
   highlighted snippets.
 - **Write-through indexing** — every mutation updates the index inside the same
@@ -150,11 +151,20 @@ The only public entry point is `createVault`. Everything below hangs off the
 // Read a note; pass { withLinks: true } to include outbound + backlinks.
 readNote(path, opts?: { withLinks?: boolean }): Promise<ReadNoteResult>
 
+// Is there a note here? Non-throwing probe, so create-or-update is a plain branch.
+exists(path): Promise<boolean>
+
 // Create a note. Throws ALREADY_EXISTS rather than clobbering.
 createNote(path, input: { frontmatter?: Record<string, unknown>; body: string }): Promise<void>
 
-// Mutate body: append text, or replace an exact, unambiguous match.
-updateNote(path, op: { append: string } | { editByMatch: { old: string; new: string } }): Promise<void>
+// Mutate the body; the frontmatter block is left verbatim by every variant.
+// append/prepend create the note when absent; setBody throws REFUSE_CREATE.
+updateNote(path, op:
+  | { append: string }      // at the end of the note
+  | { prepend: string }     // at the top of the BODY, after any frontmatter
+  | { setBody: string }     // replace the body, keep the frontmatter
+  | { editByMatch: { old: string; new: string } }  // exact, unambiguous
+): Promise<void>
 
 // Edit flat frontmatter via a mutator callback. Returns 'edited' | 'unchanged' | 'unverifiable'.
 editFrontmatter(path, mutate: (fm: Record<string, unknown>) => void): Promise<EditOutcome>
@@ -170,6 +180,7 @@ deleteNote(path): Promise<boolean>
 // Move a note to a new path, byte-for-byte (frontmatter untouched); the index
 // row follows. Both ends are allowlist-checked, and the destination is never
 // clobbered. Throws NOT_FOUND / ALREADY_EXISTS / VALIDATION_ERROR (from === to).
+// Inbound links are NOT rewritten — use query.danglingLinks() to find what broke.
 moveNote(from, to): Promise<void>
 ```
 
@@ -179,7 +190,8 @@ where `valid` is `'flat' | 'present-but-invalid' | 'none'`.
 ### `vault.query`
 
 ```ts
-// Filter the collection. Returns NoteHit[] = { path, title, frontmatter, tags }[].
+// Filter the collection.
+// Returns NoteHit[] = { path, title, frontmatter, tags, mtime_ms, size }[].
 queryNotes(opts?: {
   tag?: string;
   where?: Record<string, string | number | boolean>; // frontmatter equality
@@ -189,14 +201,25 @@ queryNotes(opts?: {
   offset?: number;
 }): NoteHit[]
 
+// Total matches for the same filters — uncapped, so page counts are exact.
+countNotes(opts?: { tag?: string; where?: WhereMap; folder?: string }): number
+
 // Notes linking TO this path. Returns { from: string }[].
 backlinks(path, opts?: { limit?: number; offset?: number }): Backlink[]
 
 // Links FROM this path. Returns { target, resolved }[] (resolved is null if dangling).
 outboundLinks(path, opts?: { limit?: number; offset?: number }): OutboundLink[]
 
+// Every link in the vault that resolves to nothing — the post-rename damage
+// report. Returns { from, target }[]. Links naming an attachment file type
+// ([[x.png]], ![[x.pdf]]) are excluded: they can never resolve to a .md note.
+danglingLinks(opts?: { limit?: number; offset?: number }): DanglingLink[]
+
 // Full-text keyword search over bodies. Returns { path, title, snippet? }[].
 searchText(q, opts?: { tag?: string; folder?: string; limit?: number; offset?: number }): SearchHit[]
+
+// Total hits for the same query — the page-count companion to searchText.
+countSearch(q, opts?: { tag?: string; folder?: string }): number
 
 // Existing tags ranked by use. Returns TagInfo[] = { tag, count }[] (count desc, tag asc).
 // prefix = case-sensitive hierarchy prefix; contains = ASCII case-insensitive substring.
