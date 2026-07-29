@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 — 2026-07-29
 
 Five additions closing the gaps the 1.0 surface implied but could not serve.
 Public API freeze goes 45 → 46 names (`DanglingLink`).
