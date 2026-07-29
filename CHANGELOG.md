@@ -1,11 +1,41 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 — 2026-07-29
 
-Three read-only `QueryApi` methods closing the link-graph gaps (#10), modelled
-on Obsidian so a UI built here behaves the way users already expect. No new
-public type and no schema change — the API freeze stays at 50 names and no
-index rebuild is triggered.
+Two bodies of query work: richer filtering on every read (#8), and three
+read-only `QueryApi` methods closing the link-graph gaps (#10), modelled on
+Obsidian so a UI built here behaves the way users already expect. No schema
+change, so no index rebuild is triggered. Public API freeze goes 46 → 50 names
+(`NoteFilter`, `TagFilter`, `WhereCondition`, `WhereValue`).
+
+**Now requires Bun ≥ 1.3.14** (was ≥ 1.1.0) — the mention matcher uses
+`RegExp.escape` rather than a hand-rolled escaper.
+
+### Richer filters
+
+- **`where` values accept an operator object** alongside the existing scalar
+  equality: `ne`, `lt`, `lte`, `gt`, `gte`, `in` and `exists`, all AND-ed within
+  a key and across keys. `{ in: [] }` is the way to match nothing; an operator
+  object contributing no predicate at all (`{}`, or `{ lt: x }` where `x` came
+  in `undefined`) throws rather than quietly dropping the entry and returning
+  the whole vault. Operands are type-checked and stay bound parameters, so a
+  malformed filter errors as a `MdVaultError` with a `.code` instead of
+  widening, inverting, or silently matching nothing.
+- **`tags: { all, any }`** joins the singular `tag` as the plural form.
+- Both land in the shared filter builder, so `queryNotes`, `countNotes`,
+  `searchText` and `countSearch` pick them up together — `searchText` and
+  `countSearch` now *declare* `where`, which the builder they call had already
+  been applying through an undeclared path.
+- The `{ tag, tags, where, folder }` bag was hand-written at ten call sites and
+  had already diverged; it is now the exported **`NoteFilter`** type, which
+  every filtering method takes.
+- `ne` is `IS NOT`, not `!=`: `json_extract` yields `NULL` for a field a note
+  never sets, so "status is not done" includes a note with no `status` — add
+  `exists: true` to require the field. Likewise `ne` against a type-mismatched
+  operand matches every row, SQLite holding differing types to be never equal.
+  Both are now documented rather than left to be discovered.
+
+### Link graph
 
 - **`query.orphanNotes()`** — notes with no place in the link graph, taking the
   same `NoteFilter`, ordering and pagination as `queryNotes`. Defaults to
@@ -56,6 +86,15 @@ is an index-schema change and so its own release.
 - **`query.backlinks()` threw on an out-of-scope path with invalid
   pagination** where `outboundLinks` returned `[]` for the same inputs. The
   scope check runs first again, as it did before.
+
+### Docs
+
+- A **bulk-import recipe** (#9) for loading many notes at once: a bounded pool
+  over `createNote` roughly halves the wall-clock against a serial loop, since
+  the filesystem syscalls dominate and distinct paths never contend for a lock.
+  It collects per-entry failures so one bad note cannot sink the run, and warns
+  about `EMFILE` on an unbounded `Promise.all`. No new API — the existing one
+  already covers it.
 
 ## 0.6.0 — 2026-07-29
 
