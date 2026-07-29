@@ -1230,9 +1230,11 @@ describe('searchText — mixed-scope pagination (Finding 1 regression)', () => {
   });
 });
 
-// Query instance over the shared fixture db. Defaults match the vault the older
-// blocks above build by hand: whole-vault scope, wikilink resolution, and
-// filesystem-detected case sensitivity (undefined = auto-detect).
+// Query instance over the shared fixture db: whole-vault scope, wikilink
+// resolution, case-INSENSITIVE. Not auto-detected — insertNote always stores
+// path_key lower-cased, so the fixture is a case-insensitive vault by
+// construction, and letting the io detect the host filesystem instead would
+// make every path_key lookup in this file pass on macOS and fail on Linux CI.
 function mkQuery(
   opts: {
     read?: string[];
@@ -1240,18 +1242,18 @@ function mkQuery(
     caseSensitive?: boolean;
   } = {},
 ) {
-  const { read = [''], linkResolution = 'wikilink', caseSensitive } = opts;
+  const {
+    read = [''],
+    linkResolution = 'wikilink',
+    caseSensitive = false,
+  } = opts;
   const io = createVaultIo({
     root: vaultDir,
     prefixes: { read, write: [''] },
     caseSensitive,
   });
 
-  return createQuery(db, io, {
-    linkResolution,
-    caseSensitive: caseSensitive ?? false,
-    ignore: [],
-  });
+  return createQuery(db, io, { linkResolution, caseSensitive, ignore: [] });
 }
 
 // ── 1.0 API completeness ─────────────────────────────────────────────────────
