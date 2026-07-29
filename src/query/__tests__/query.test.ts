@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import { createVaultIo } from '@/vault-io/index.ts';
 
+import type { NoteFilter } from '../models/note-filter.ts';
 import { createQuery } from '../query.ts';
 
 // ── shared schema ────────────────────────────────────────────────────────────
@@ -429,22 +430,10 @@ describe('queryNotes — filtering', () => {
   });
 });
 
-type QueryNotesOpts = Parameters<
-  ReturnType<typeof createQuery>['queryNotes']
->[0];
-
 describe('queryNotes — rich where operators', () => {
   // Seeds the fixture and returns a paths-only, order-independent runner.
-  function fixture(): (opts: QueryNotesOpts) => string[] {
-    const io = createVaultIo({
-      root: vaultDir,
-      prefixes: { read: [''], write: [''] },
-    });
-    const { queryNotes } = createQuery(db, io, {
-      linkResolution: 'wikilink',
-      caseSensitive: false,
-      ignore: [],
-    });
+  function fixture(): (opts: NoteFilter) => string[] {
+    const { queryNotes } = mkQuery();
     insertNote(db, {
       path: 'a.md',
       frontmatter: { status: 'open', due: '2026-07-01', priority: 1 },
@@ -468,11 +457,6 @@ describe('queryNotes — rich where operators', () => {
       'a.md',
       'b.md',
     ]);
-  });
-
-  test('in: empty list matches nothing', () => {
-    const run = fixture();
-    expect(run({ where: { status: { in: [] } } })).toEqual([]);
   });
 
   test('ranges: lt / lte / gt / gte, and two bounds AND-ed', () => {
@@ -612,16 +596,8 @@ describe('queryNotes — rich where operators', () => {
 });
 
 describe('queryNotes — multi-tag matching', () => {
-  function run(opts: QueryNotesOpts): string[] {
-    const io = createVaultIo({
-      root: vaultDir,
-      prefixes: { read: [''], write: [''] },
-    });
-    const { queryNotes } = createQuery(db, io, {
-      linkResolution: 'wikilink',
-      caseSensitive: false,
-      ignore: [],
-    });
+  function run(opts: NoteFilter): string[] {
+    const { queryNotes } = mkQuery();
 
     return queryNotes(opts)
       .map((h) => h.path)

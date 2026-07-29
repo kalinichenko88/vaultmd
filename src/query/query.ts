@@ -103,7 +103,7 @@ const WHERE_COMPARISONS = new Map<string, string>([
 ]);
 
 function placeholders(n: number): string {
-  return Array.from({ length: n }, () => '?').join(', ');
+  return Array(n).fill('?').join(', ');
 }
 
 // Filters arrive from HTTP query strings, CLIs and JSON configs as often as
@@ -113,18 +113,14 @@ function placeholders(n: number): string {
 // with no `.code` (breaking the documented catch-on-code contract) or, worse,
 // widens the query silently.
 function assertWhereValue(value: unknown, label: string): WhereValue {
-  if (
-    typeof value !== 'string' &&
-    typeof value !== 'number' &&
-    typeof value !== 'boolean'
-  ) {
+  if (!['string', 'number', 'boolean'].includes(typeof value)) {
     throw new MdVaultError(
       'VALIDATION_ERROR',
       `${label} must be a string, number or boolean`,
     );
   }
 
-  return value;
+  return value as WhereValue;
 }
 
 function assertTagList(value: unknown, label: string): string[] {
@@ -155,7 +151,17 @@ function pushWhereFilter(
     return;
   }
 
-  const before = parts.length;
+  // An operator object that would contribute no predicate — `{}`, or
+  // `{ lt: cutoff }` where `cutoff` came in undefined — drops the whole entry
+  // and silently widens the query to the entire vault. Refuse it: an empty
+  // `in` list is how you ask for "match nothing".
+  if (Object.values(cond).every((v) => v === undefined)) {
+    throw new MdVaultError(
+      'VALIDATION_ERROR',
+      `where ${key} has no operator to apply; use { in: [] } to match nothing`,
+    );
+  }
+
   for (const op of Object.keys(cond)) {
     const value = cond[op as keyof WhereCondition];
     if (value === undefined) {
@@ -197,17 +203,6 @@ function pushWhereFilter(
     throw new MdVaultError(
       'VALIDATION_ERROR',
       `unknown where operator on ${key}: ${op}`,
-    );
-  }
-
-  // An operator object that contributes no predicate — `{}`, or `{ lt: cutoff }`
-  // where `cutoff` came in undefined — would drop the whole entry and silently
-  // widen the query to the entire vault. Refuse it instead: an empty `in` list
-  // is how you ask for "match nothing".
-  if (parts.length === before) {
-    throw new MdVaultError(
-      'VALIDATION_ERROR',
-      `where ${key} has no operator to apply; use { in: [] } to match nothing`,
     );
   }
 }

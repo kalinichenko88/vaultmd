@@ -216,11 +216,8 @@ type WhereMap = Record<string, WhereValue | {
   exists?: boolean;     // false = notes lacking the field
 }>
 
-// Malformed filters throw VALIDATION_ERROR rather than degrading: a non-scalar
-// operand, a non-boolean `exists`, a non-array tag list, and an operator object
-// that ends up with nothing to apply ({} or an all-undefined one, which would
-// otherwise widen the query to the whole vault). Use `{ in: [] }` for "match
-// nothing".
+// Malformed filters throw VALIDATION_ERROR: non-scalar operand, non-boolean
+// `exists`, non-array tag list, or a condition with nothing left to apply.
 
 // Filter the collection. Defaults to newest-first (mtime_ms desc).
 // Returns NoteHit[] = { path, title, frontmatter, tags, mtime_ms, size }[].
