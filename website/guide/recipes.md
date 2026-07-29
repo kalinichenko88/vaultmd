@@ -111,6 +111,43 @@ are not breakage. Note this makes `danglingLinks` stricter than
 `outboundLinks`, which reports raw resolution and returns `resolved: null` for
 those same links.
 
+## Reconnect the notes nothing points at
+
+A note nobody links to is invisible to the graph, but it is rarely unrelated to
+anything — usually someone wrote its name in prose and never made it a link.
+`orphanNotes` finds the first half, `unlinkedMentions` the second.
+
+```ts
+for (const note of vault.query.orphanNotes()) {
+  const mentions = vault.query.unlinkedMentions(note.path);
+  if (mentions.length === 0) {
+    console.log(`${note.path} — nothing references it, in links or prose`);
+    continue;
+  }
+  for (const { path, snippet } of mentions) {
+    console.log(`${note.path} ← named in ${path}: ${snippet}`);
+  }
+}
+```
+
+The default `orphanNotes()` is Obsidian's graph "Orphans" filter — notes with
+no links in either direction. Pass `mode: 'unreferenced'` for the wider set of
+notes nothing links *to*, however many links they make themselves; that is the
+one you want when hunting for pages that dropped out of navigation.
+
+Going the other way, `outboundMentions` reads one note and reports the notes it
+names without linking — the write-up pass after drafting:
+
+```ts
+for (const { path, snippet } of vault.query.outboundMentions('Journal/today.md')) {
+  console.log(`could link ${path}: ${snippet}`);
+}
+```
+
+Neither method rewrites anything. Turning a mention into a link is a
+`notes.updateNote` call you make deliberately, because only you know whether
+the sentence meant that note.
+
 ## Create a note only if it is not there yet
 
 ```ts

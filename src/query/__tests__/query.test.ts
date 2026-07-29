@@ -96,6 +96,7 @@ describe('createQuery factory', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const q = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -107,10 +108,13 @@ describe('createQuery factory', () => {
       'countNotes',
       'countSearch',
       'danglingLinks',
+      'orphanNotes',
       'outboundLinks',
+      'outboundMentions',
       'queryNotes',
       'searchText',
       'tags',
+      'unlinkedMentions',
     ]);
   });
 
@@ -118,6 +122,7 @@ describe('createQuery factory', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -134,6 +139,7 @@ describe('queryNotes — validation', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -149,6 +155,7 @@ describe('queryNotes — validation', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -169,6 +176,7 @@ describe('queryNotes — validation', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -186,6 +194,7 @@ describe('queryNotes — validation', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -201,6 +210,7 @@ describe('queryNotes — validation', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -216,6 +226,7 @@ describe('queryNotes — validation', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -236,6 +247,7 @@ describe('queryNotes — filtering', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -267,6 +279,7 @@ describe('queryNotes — filtering', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -284,6 +297,7 @@ describe('queryNotes — filtering', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -304,6 +318,7 @@ describe('queryNotes — filtering', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -326,6 +341,7 @@ describe('queryNotes — filtering', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -343,6 +359,7 @@ describe('queryNotes — filtering', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -373,6 +390,7 @@ describe('queryNotes — filtering', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: ['public'], write: ['public'] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -389,6 +407,7 @@ describe('queryNotes — filtering', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -406,6 +425,7 @@ describe('queryNotes — filtering', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -743,6 +763,7 @@ describe('backlinks — relative mode', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { backlinks } = createQuery(db, io, {
       linkResolution: 'relative',
@@ -763,6 +784,7 @@ describe('backlinks — relative mode', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { backlinks } = createQuery(db, io, {
       linkResolution: 'relative',
@@ -782,6 +804,7 @@ describe('backlinks — relative mode', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: ['public'], write: ['public'] },
+      caseSensitive: false,
     });
     const { backlinks } = createQuery(db, io, {
       linkResolution: 'relative',
@@ -805,6 +828,7 @@ describe('backlinks — wikilink mode', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { backlinks } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -825,6 +849,7 @@ describe('backlinks — wikilink mode', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { backlinks } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -848,6 +873,7 @@ describe('backlinks — wikilink mode', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { backlinks } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -869,6 +895,7 @@ describe('backlinks — wikilink mode', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { backlinks } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -888,6 +915,7 @@ describe('backlinks — wikilink mode', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: ['public'], write: ['public'] },
+      caseSensitive: false,
     });
     const { backlinks } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -915,6 +943,7 @@ describe('outboundLinks', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { outboundLinks } = createQuery(db, io, {
       linkResolution: 'relative',
@@ -957,6 +986,7 @@ describe('outboundLinks', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { outboundLinks } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -976,6 +1006,7 @@ describe('outboundLinks', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: ['public'], write: ['public'] },
+      caseSensitive: false,
     });
     const { outboundLinks } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -996,6 +1027,7 @@ describe('outboundLinks', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { outboundLinks } = createQuery(db, io, {
       linkResolution: 'relative',
@@ -1023,6 +1055,7 @@ describe('searchText — sanitization: adversarial FTS5 input never throws', () 
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1037,6 +1070,7 @@ describe('searchText — sanitization: adversarial FTS5 input never throws', () 
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1050,6 +1084,7 @@ describe('searchText — sanitization: adversarial FTS5 input never throws', () 
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1065,6 +1100,7 @@ describe('searchText — sanitization: adversarial FTS5 input never throws', () 
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1080,6 +1116,7 @@ describe('searchText — sanitization: adversarial FTS5 input never throws', () 
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1097,6 +1134,7 @@ describe('searchText — basic search + filters + read-scope', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1119,6 +1157,7 @@ describe('searchText — basic search + filters + read-scope', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1134,6 +1173,7 @@ describe('searchText — basic search + filters + read-scope', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1150,6 +1190,7 @@ describe('searchText — basic search + filters + read-scope', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1166,6 +1207,7 @@ describe('searchText — basic search + filters + read-scope', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1183,6 +1225,7 @@ describe('searchText — basic search + filters + read-scope', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: ['public'], write: ['public'] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1199,6 +1242,7 @@ describe('searchText — basic search + filters + read-scope', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1220,6 +1264,7 @@ describe('searchText — basic search + filters + read-scope', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1242,6 +1287,7 @@ describe('queryNotes — mixed-scope pagination (Finding 1 regression)', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: ['pub'], write: ['pub'] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1275,6 +1321,7 @@ describe('queryNotes — mixed-scope pagination (Finding 1 regression)', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: ['pub'], write: ['pub'] },
+      caseSensitive: false,
     });
     const { queryNotes } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1314,6 +1361,7 @@ describe('tags', () => {
     io = createVaultIo({
       root: vaultDir,
       prefixes: { read: [''], write: [''] },
+      caseSensitive: false,
     }),
   ) {
     return createQuery(db, io, {
@@ -1362,6 +1410,7 @@ describe('tags', () => {
       createVaultIo({
         root: vaultDir,
         prefixes: { read: ['public'], write: ['public'] },
+        caseSensitive: false,
       }),
     );
     insertNote(db, { path: 'public/a.md', tags: ['shared', 'pub'] });
@@ -1489,6 +1538,7 @@ describe('searchText — mixed-scope pagination (Finding 1 regression)', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: ['pub'], write: ['pub'] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1513,6 +1563,7 @@ describe('searchText — mixed-scope pagination (Finding 1 regression)', () => {
     const io = createVaultIo({
       root: vaultDir,
       prefixes: { read: ['pub'], write: ['pub'] },
+      caseSensitive: false,
     });
     const { searchText } = createQuery(db, io, {
       linkResolution: 'wikilink',
@@ -1870,5 +1921,675 @@ describe('danglingLinks — review regressions', () => {
       { target: 'dup', resolved: 'Other/dup.md' },
     ]);
     expect(q.danglingLinks()).toEqual([]);
+  });
+});
+
+// ── issue #10: link-graph gaps ───────────────────────────────────────────────
+describe('orphanNotes', () => {
+  test('is [] on an empty DB', () => {
+    expect(mkQuery().orphanNotes()).toEqual([]);
+  });
+
+  test('reports a note with no links at all in both modes', () => {
+    insertNote(db, { path: 'lonely.md' });
+    const q = mkQuery();
+    expect(q.orphanNotes().map((n) => n.path)).toEqual(['lonely.md']);
+    expect(q.orphanNotes({ mode: 'unreferenced' }).map((n) => n.path)).toEqual([
+      'lonely.md',
+    ]);
+  });
+
+  test('reports a note with an inbound link in neither mode', () => {
+    insertNote(db, {
+      path: 'src.md',
+      links: [{ target: 'target', base: 'target', kind: 'wikilink' }],
+    });
+    insertNote(db, { path: 'target.md' });
+    const q = mkQuery();
+    expect(q.orphanNotes().map((n) => n.path)).not.toContain('target.md');
+    expect(
+      q.orphanNotes({ mode: 'unreferenced' }).map((n) => n.path),
+    ).not.toContain('target.md');
+  });
+
+  test('a note with only outbound links is unreferenced but not disconnected', () => {
+    insertNote(db, {
+      path: 'src.md',
+      links: [{ target: 'target', base: 'target', kind: 'wikilink' }],
+    });
+    insertNote(db, { path: 'target.md' });
+    const q = mkQuery();
+    expect(q.orphanNotes().map((n) => n.path)).toEqual([]);
+    expect(q.orphanNotes({ mode: 'unreferenced' }).map((n) => n.path)).toEqual([
+      'src.md',
+    ]);
+  });
+
+  test('a dangling link still counts as an outgoing edge', () => {
+    insertNote(db, {
+      path: 'src.md',
+      links: [{ target: 'ghost', base: 'ghost', kind: 'wikilink' }],
+    });
+    const q = mkQuery();
+    expect(q.orphanNotes().map((n) => n.path)).toEqual([]);
+    expect(q.orphanNotes({ mode: 'unreferenced' }).map((n) => n.path)).toEqual([
+      'src.md',
+    ]);
+  });
+
+  test('an attachment link is not a graph edge in either direction', () => {
+    insertNote(db, {
+      path: 'src.md',
+      links: [{ target: 'diagram.png', base: 'diagram.png', kind: 'embed' }],
+    });
+    expect(
+      mkQuery()
+        .orphanNotes()
+        .map((n) => n.path),
+    ).toEqual(['src.md']);
+  });
+
+  test('an embed of a note is an edge, exactly like a wikilink', () => {
+    insertNote(db, {
+      path: 'src.md',
+      links: [{ target: 'target', base: 'target', kind: 'embed' }],
+    });
+    insertNote(db, { path: 'target.md' });
+    expect(mkQuery().orphanNotes()).toEqual([]);
+  });
+
+  test('a self-link keeps a note out of both modes', () => {
+    insertNote(db, {
+      path: 'self.md',
+      links: [{ target: 'self', base: 'self', kind: 'wikilink' }],
+    });
+    const q = mkQuery();
+    expect(q.orphanNotes()).toEqual([]);
+    expect(q.orphanNotes({ mode: 'unreferenced' })).toEqual([]);
+  });
+
+  test('an inbound link from an out-of-scope source does not count', () => {
+    insertNote(db, {
+      path: 'Private/src.md',
+      links: [{ target: 'Notes/target', base: 'target', kind: 'wikilink' }],
+    });
+    insertNote(db, { path: 'Notes/target.md' });
+    expect(
+      mkQuery({ read: ['Notes/'] })
+        .orphanNotes({ mode: 'unreferenced' })
+        .map((n) => n.path),
+    ).toEqual(['Notes/target.md']);
+  });
+
+  test('a bare wikilink leaves the tie-break loser unreferenced', () => {
+    insertNote(db, { path: 'dup.md' });
+    insertNote(db, { path: 'Deep/dup.md' });
+    insertNote(db, {
+      path: 'src.md',
+      links: [{ target: 'dup', base: 'dup', kind: 'wikilink' }],
+    });
+    // `dup.md` wins the tie-break toward the source's own folder, so only the
+    // loser is left without an inbound edge (as is the linking note itself).
+    expect(
+      mkQuery()
+        .orphanNotes({ mode: 'unreferenced' })
+        .map((n) => n.path)
+        .sort(),
+    ).toEqual(['Deep/dup.md', 'src.md']);
+  });
+
+  test('resolves inbound edges by path key in relative mode', () => {
+    insertNote(db, {
+      path: 'src.md',
+      links: [{ target: 'Notes/Target.md', base: null, kind: 'mdlink' }],
+    });
+    insertNote(db, { path: 'Notes/Target.md', pathKey: 'notes/target.md' });
+    expect(
+      mkQuery({ linkResolution: 'relative' })
+        .orphanNotes({ mode: 'unreferenced' })
+        .map((n) => n.path),
+    ).toEqual(['src.md']);
+  });
+
+  test('applies the same NoteFilter and orderBy as queryNotes', () => {
+    insertNote(db, { path: 'Notes/a.md', tags: ['idea'] });
+    insertNote(db, { path: 'Notes/b.md' });
+    insertNote(db, { path: 'Other/c.md', tags: ['idea'] });
+    const q = mkQuery();
+    expect(
+      q
+        .orphanNotes({ tag: 'idea' })
+        .map((n) => n.path)
+        .sort(),
+    ).toEqual(['Notes/a.md', 'Other/c.md']);
+    expect(
+      q
+        .orphanNotes({ folder: 'Notes' })
+        .map((n) => n.path)
+        .sort(),
+    ).toEqual(['Notes/a.md', 'Notes/b.md']);
+    expect(
+      q
+        .orphanNotes({ orderBy: { field: 'path', dir: 'asc' } })
+        .map((n) => n.path),
+    ).toEqual(['Notes/a.md', 'Notes/b.md', 'Other/c.md']);
+  });
+
+  test('fills pages exactly after the orphan filter', () => {
+    // Orphans and linked notes interleave by path order; a page must carry
+    // `limit` orphans, not `limit` rows thinned down by the filter.
+    for (let i = 0; i < 4; i++) {
+      insertNote(db, { path: `orphan${i}.md` });
+      insertNote(db, {
+        path: `linked${i}.md`,
+        links: [{ target: `hub${i}`, base: `hub${i}`, kind: 'wikilink' }],
+      });
+      insertNote(db, { path: `hub${i}.md` });
+    }
+    const q = mkQuery();
+    const order = { field: 'path', dir: 'asc' } as const;
+    expect(
+      q.orphanNotes({ orderBy: order, limit: 2 }).map((n) => n.path),
+    ).toEqual(['orphan0.md', 'orphan1.md']);
+    expect(
+      q.orphanNotes({ orderBy: order, limit: 2, offset: 2 }).map((n) => n.path),
+    ).toEqual(['orphan2.md', 'orphan3.md']);
+  });
+
+  test('throws VALIDATION_ERROR on an unknown mode', () => {
+    expect(() =>
+      mkQuery().orphanNotes({ mode: 'lonely' as 'disconnected' }),
+    ).toThrow(expect.objectContaining({ code: 'VALIDATION_ERROR' }));
+  });
+});
+
+describe('unlinkedMentions', () => {
+  test('reports a note naming the target in prose, with a snippet', () => {
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, {
+      path: 'journal.md',
+      body: 'we kicked off Alpha today and it went well',
+    });
+    expect(mkQuery().unlinkedMentions('Alpha.md')).toEqual([
+      {
+        path: 'journal.md',
+        title: 'journal',
+        snippet: 'we kicked off <b>Alpha</b> today and it went well',
+      },
+    ]);
+  });
+
+  test('excludes a note that already links, text or not', () => {
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, {
+      path: 'linker.md',
+      body: 'see [[Alpha]] for context',
+      links: [{ target: 'Alpha', base: 'alpha', kind: 'wikilink' }],
+    });
+    expect(mkQuery().unlinkedMentions('Alpha.md')).toEqual([]);
+  });
+
+  test('the linker exclusion is not capped at a page of backlinks', () => {
+    insertNote(db, { path: 'Alpha.md' });
+    for (let i = 0; i < 150; i++) {
+      insertNote(db, {
+        path: `linker${i}.md`,
+        body: 'mentions Alpha and links it',
+        links: [{ target: 'Alpha', base: 'alpha', kind: 'wikilink' }],
+      });
+    }
+    insertNote(db, { path: 'prose.md', body: 'Alpha came up again' });
+    expect(
+      mkQuery()
+        .unlinkedMentions('Alpha.md')
+        .map((h) => h.path),
+    ).toEqual(['prose.md']);
+  });
+
+  test('excludes the note itself', () => {
+    insertNote(db, {
+      path: 'Alpha.md',
+      body: '# Alpha\n\nAlpha is a project.',
+    });
+    expect(mkQuery().unlinkedMentions('Alpha.md')).toEqual([]);
+  });
+
+  test('matches an alias, as a list or a bare scalar, and coerces numbers', () => {
+    insertNote(db, {
+      path: 'Alpha.md',
+      frontmatter: { aliases: ['AI thing', 2024] },
+    });
+    insertNote(db, { path: 'Beta.md', frontmatter: { aliases: 'Bee' } });
+    insertNote(db, { path: 'm1.md', body: 'the AI thing shipped' });
+    insertNote(db, { path: 'm2.md', body: 'back in 2024 we tried' });
+    insertNote(db, { path: 'm3.md', body: 'Bee handled it' });
+    const q = mkQuery();
+    expect(
+      q
+        .unlinkedMentions('Alpha.md')
+        .map((h) => h.path)
+        .sort(),
+    ).toEqual(['m1.md', 'm2.md']);
+    expect(q.unlinkedMentions('Beta.md').map((h) => h.path)).toEqual(['m3.md']);
+  });
+
+  test('matches an explicit frontmatter title but never an H1-derived one', () => {
+    insertNote(db, {
+      path: '2026-07-29.md',
+      title: 'Release Retro',
+      frontmatter: { title: 'Release Retro' },
+    });
+    // title column set, but derived from an H1 — not a name the note answers to
+    insertNote(db, { path: 'misc.md', title: 'Overview' });
+    insertNote(db, { path: 'm1.md', body: 'the Release Retro was useful' });
+    insertNote(db, { path: 'm2.md', body: 'a general Overview of things' });
+    const q = mkQuery();
+    expect(q.unlinkedMentions('2026-07-29.md').map((h) => h.path)).toEqual([
+      'm1.md',
+    ]);
+    expect(q.unlinkedMentions('misc.md')).toEqual([]);
+  });
+
+  test('needs the name contiguous, not its words scattered', () => {
+    insertNote(db, { path: 'Project Alpha.md' });
+    insertNote(db, {
+      path: 'scattered.md',
+      body: 'the project shipped. alpha builds followed.',
+    });
+    insertNote(db, { path: 'contiguous.md', body: 'Project Alpha shipped' });
+    expect(
+      mkQuery()
+        .unlinkedMentions('Project Alpha.md')
+        .map((h) => h.path),
+    ).toEqual(['contiguous.md']);
+  });
+
+  test('verifies fts candidates, so a punctuation name does not match its tokens', () => {
+    insertNote(db, { path: 'C++.md' });
+    insertNote(db, { path: 'letter.md', body: 'option c was chosen' });
+    insertNote(db, { path: 'real.md', body: 'written in C++ back then' });
+    expect(
+      mkQuery()
+        .unlinkedMentions('C++.md')
+        .map((h) => h.path),
+    ).toEqual(['real.md']);
+  });
+
+  test('is case-insensitive and never matches inside a longer word', () => {
+    insertNote(db, { path: 'cat.md' });
+    insertNote(db, { path: 'inside.md', body: 'the catalogue is long' });
+    insertNote(db, { path: 'whole.md', body: 'the CAT sat down' });
+    expect(
+      mkQuery()
+        .unlinkedMentions('cat.md')
+        .map((h) => h.path),
+    ).toEqual(['whole.md']);
+  });
+
+  test('honours the read scope on both ends, and unknown paths', () => {
+    insertNote(db, { path: 'Notes/Alpha.md' });
+    insertNote(db, { path: 'Private/secret.md', body: 'Alpha leaked here' });
+    insertNote(db, { path: 'Notes/ok.md', body: 'Alpha is fine' });
+    const q = mkQuery({ read: ['Notes/'] });
+    expect(q.unlinkedMentions('Notes/Alpha.md').map((h) => h.path)).toEqual([
+      'Notes/ok.md',
+    ]);
+    expect(q.unlinkedMentions('Private/secret.md')).toEqual([]);
+    expect(q.unlinkedMentions('Notes/nope.md')).toEqual([]);
+  });
+
+  test('paginates', () => {
+    insertNote(db, { path: 'Alpha.md' });
+    for (let i = 0; i < 4; i++) {
+      insertNote(db, { path: `m${i}.md`, body: 'Alpha again' });
+    }
+    const q = mkQuery();
+    expect(q.unlinkedMentions('Alpha.md', { limit: 2 })).toHaveLength(2);
+    expect(
+      q.unlinkedMentions('Alpha.md', { limit: 2, offset: 2 }),
+    ).toHaveLength(2);
+    expect(q.unlinkedMentions('Alpha.md', { limit: 2, offset: 4 })).toEqual([]);
+  });
+});
+
+describe('outboundMentions', () => {
+  test('reports another note named in this body', () => {
+    insertNote(db, { path: 'journal.md', body: 'talked about Alpha at lunch' });
+    insertNote(db, { path: 'Alpha.md' });
+    expect(mkQuery().outboundMentions('journal.md')).toEqual([
+      {
+        path: 'Alpha.md',
+        title: 'Alpha',
+        snippet: 'talked about <b>Alpha</b> at lunch',
+      },
+    ]);
+  });
+
+  test('excludes a note this one already links', () => {
+    insertNote(db, {
+      path: 'journal.md',
+      body: 'see [[Alpha]] and also Beta',
+      links: [{ target: 'Alpha', base: 'alpha', kind: 'wikilink' }],
+    });
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, { path: 'Beta.md' });
+    expect(
+      mkQuery()
+        .outboundMentions('journal.md')
+        .map((h) => h.path),
+    ).toEqual(['Beta.md']);
+  });
+
+  test('excludes the note itself', () => {
+    insertNote(db, { path: 'Alpha.md', body: '# Alpha\n\nAlpha again' });
+    expect(mkQuery().outboundMentions('Alpha.md')).toEqual([]);
+  });
+
+  test('needs a word boundary, in Latin and in Cyrillic', () => {
+    insertNote(db, {
+      path: 'src.md',
+      body: 'the catalogue is long. Проект Альфа стартовал.',
+    });
+    insertNote(db, { path: 'cat.md' });
+    insertNote(db, { path: 'Альфа.md' });
+    expect(
+      mkQuery()
+        .outboundMentions('src.md')
+        .map((h) => h.path),
+    ).toEqual(['Альфа.md']);
+  });
+
+  test('survives regex metacharacters in a note name', () => {
+    insertNote(db, {
+      path: 'src.md',
+      body: 'written in C++ during Meeting 1, not Meeting [1]',
+    });
+    insertNote(db, { path: 'C++.md' });
+    insertNote(db, { path: 'Meeting [1].md' });
+    const hits = mkQuery().outboundMentions('src.md');
+    // `C++` matches literally; `Meeting [1]` must not be read as a character
+    // class and match the text "Meeting 1" — it matches its own literal text.
+    expect(hits.map((h) => h.path).sort()).toEqual([
+      'C++.md',
+      'Meeting [1].md',
+    ]);
+    expect(hits.find((h) => h.path === 'Meeting [1].md')?.snippet).toContain(
+      '<b>Meeting [1]</b>',
+    );
+  });
+
+  test('matches another note by alias', () => {
+    insertNote(db, { path: 'src.md', body: 'the AI thing shipped' });
+    insertNote(db, {
+      path: 'Alpha.md',
+      frontmatter: { aliases: ['AI thing'] },
+    });
+    expect(
+      mkQuery()
+        .outboundMentions('src.md')
+        .map((h) => h.path),
+    ).toEqual(['Alpha.md']);
+  });
+
+  test('orders by where the mention falls, not by path', () => {
+    insertNote(db, { path: 'src.md', body: 'Zeta came first, Alpha second' });
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, { path: 'Zeta.md' });
+    expect(
+      mkQuery()
+        .outboundMentions('src.md')
+        .map((h) => h.path),
+    ).toEqual(['Zeta.md', 'Alpha.md']);
+  });
+
+  test('never names a note outside the read scope', () => {
+    insertNote(db, {
+      path: 'Notes/src.md',
+      body: 'about secret and about ok',
+    });
+    insertNote(db, { path: 'Private/secret.md' });
+    insertNote(db, { path: 'Notes/ok.md' });
+    expect(
+      mkQuery({ read: ['Notes/'] })
+        .outboundMentions('Notes/src.md')
+        .map((h) => h.path),
+    ).toEqual(['Notes/ok.md']);
+  });
+
+  test('is [] for a note with no indexed body, and for unknown paths', () => {
+    insertNote(db, { path: 'empty.md' });
+    insertNote(db, { path: 'Alpha.md' });
+    const q = mkQuery();
+    expect(q.outboundMentions('empty.md')).toEqual([]);
+    expect(q.outboundMentions('nope.md')).toEqual([]);
+  });
+
+  test('excludes an already-linked note in relative mode too', () => {
+    insertNote(db, {
+      path: 'src.md',
+      body: 'see [Alpha](Alpha.md) and also Beta',
+      links: [{ target: 'Alpha.md', base: null, kind: 'mdlink' }],
+    });
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, { path: 'Beta.md' });
+    expect(
+      mkQuery({ linkResolution: 'relative' })
+        .outboundMentions('src.md')
+        .map((h) => h.path),
+    ).toEqual(['Beta.md']);
+  });
+
+  test('paginates', () => {
+    insertNote(db, { path: 'src.md', body: 'one two three four' });
+    for (const name of ['one', 'two', 'three', 'four']) {
+      insertNote(db, { path: `${name}.md` });
+    }
+    const q = mkQuery();
+    expect(
+      q.outboundMentions('src.md', { limit: 2 }).map((h) => h.path),
+    ).toEqual(['one.md', 'two.md']);
+    expect(
+      q.outboundMentions('src.md', { limit: 2, offset: 2 }).map((h) => h.path),
+    ).toEqual(['three.md', 'four.md']);
+  });
+});
+
+describe('mentions — documented limits and cross-method agreement', () => {
+  test('a name embedded in unsegmented CJK text is NOT found either way', () => {
+    // Locked, not aspirational: unicode61 makes 我去了东京旅行 one token, and the
+    // word-boundary matcher sees 了 as a letter. Obsidian finds these; we do
+    // not. Changing that means a trigram tokenizer and a schema bump.
+    insertNote(db, { path: '东京.md' });
+    insertNote(db, { path: 'trip.md', body: '我去了东京旅行' });
+    const q = mkQuery();
+    expect(q.unlinkedMentions('东京.md')).toEqual([]);
+    expect(q.outboundMentions('trip.md')).toEqual([]);
+    // …while a delimited occurrence is found, so the limit is the boundary,
+    // not the script.
+    insertNote(db, { path: 'spaced.md', body: '週末は 东京 に行った' });
+    expect(q.unlinkedMentions('东京.md').map((h) => h.path)).toEqual([
+      'spaced.md',
+    ]);
+  });
+
+  test('both methods report the same mention from opposite ends', () => {
+    insertNote(db, { path: 'journal.md', body: 'kicked off Alpha today' });
+    insertNote(db, { path: 'Alpha.md' });
+    const q = mkQuery();
+    const inbound = q.unlinkedMentions('Alpha.md');
+    const outbound = q.outboundMentions('journal.md');
+    expect(inbound.map((h) => h.path)).toEqual(['journal.md']);
+    expect(outbound.map((h) => h.path)).toEqual(['Alpha.md']);
+    // Same body, same matcher, so the excerpt is identical from either side.
+    expect(inbound[0].snippet).toBe(outbound[0].snippet);
+  });
+});
+
+// ── review round 1: verified findings ────────────────────────────────────────
+describe('mentions — read scope is judged on the canonical row, not the caller string', () => {
+  test('a case-variant path cannot reach an out-of-scope note body', () => {
+    // The allowlist matches the caller's spelling case-sensitively, but the row
+    // is fetched by the case-folded path_key — so 'Notes/secret.md' passes the
+    // prefix check and lands on the unreadable 'notes/secret.md'.
+    insertNote(db, {
+      path: 'notes/secret.md',
+      body: 'CONFIDENTIAL merger with pub closes Friday',
+    });
+    insertNote(db, { path: 'Notes/pub.md', body: 'nothing to see' });
+    const q = mkQuery({ read: ['Notes/'] });
+    // The scope filter works for the plain readers…
+    expect(q.queryNotes().map((n) => n.path)).toEqual(['Notes/pub.md']);
+    // …so a snippet quoting that unreadable body must not come back either.
+    expect(q.outboundMentions('Notes/secret.md')).toEqual([]);
+    expect(q.unlinkedMentions('Notes/secret.md')).toEqual([]);
+  });
+});
+
+describe('backlinks — resolution agrees with outboundLinks on casing', () => {
+  test('a bare wikilink is found however the caller spells the path', () => {
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, {
+      path: 'linker.md',
+      body: 'see [[Alpha]] here',
+      links: [{ target: 'Alpha', base: 'alpha', kind: 'wikilink' }],
+    });
+    const q = mkQuery();
+    expect(q.backlinks('Alpha.md')).toEqual([{ from: 'linker.md' }]);
+    expect(q.backlinks('alpha.md')).toEqual([{ from: 'linker.md' }]);
+    // …so the linker is never advertised as an unlinked mention.
+    expect(q.unlinkedMentions('alpha.md')).toEqual([]);
+  });
+
+  test('a relative link whose target differs in case from the path key', () => {
+    insertNote(db, { path: 'Notes/Target.md' });
+    insertNote(db, {
+      path: 'Notes/Src.md',
+      body: 'See [t](Target.md) and Target is important.',
+      links: [{ target: 'Notes/Target.md', base: null, kind: 'mdlink' }],
+    });
+    const q = mkQuery({ linkResolution: 'relative' });
+    expect(q.backlinks('Notes/Target.md')).toEqual([{ from: 'Notes/Src.md' }]);
+    expect(q.unlinkedMentions('Notes/Target.md')).toEqual([]);
+  });
+
+  test('answers an unreadable path with [] whatever the pagination says', () => {
+    insertNote(db, { path: 'Private/target.md' });
+    const q = mkQuery({ read: ['Notes/'] });
+    // outboundLinks has always done this; backlinks must not throw where its
+    // sibling stays quiet, or a two-pane UI breaks on one side only.
+    expect(q.backlinks('Private/target.md', { limit: -1 })).toEqual([]);
+    expect(q.outboundLinks('Private/target.md', { limit: -1 })).toEqual([]);
+  });
+});
+
+describe('mentions — link markup is not prose', () => {
+  test('a name inside a link to a DIFFERENT note is not a mention', () => {
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, { path: 'Alpha Notes.md' });
+    insertNote(db, {
+      path: 'journal.md',
+      body: 'see [[Alpha Notes]] for details',
+      links: [{ target: 'Alpha Notes', base: 'alpha notes', kind: 'wikilink' }],
+    });
+    const q = mkQuery();
+    expect(q.unlinkedMentions('Alpha.md')).toEqual([]);
+    expect(q.outboundMentions('journal.md')).toEqual([]);
+  });
+
+  test('md-link syntax counts as a link even where it is not indexed', () => {
+    // In wikilink mode storedLinksFor discards md-links, so this one is in no
+    // exclusion set — only masking keeps it out of the results.
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, {
+      path: 'journal.md',
+      body: 'see [Alpha](Alpha.md) please',
+    });
+    expect(mkQuery().unlinkedMentions('Alpha.md')).toEqual([]);
+  });
+
+  test('prose around the markup is still matched', () => {
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, {
+      path: 'journal.md',
+      body: 'see [[Other]] and Alpha shipped',
+      links: [{ target: 'Other', base: 'other', kind: 'wikilink' }],
+    });
+    expect(
+      mkQuery()
+        .unlinkedMentions('Alpha.md')
+        .map((h) => h.path),
+    ).toEqual(['journal.md']);
+  });
+});
+
+describe('outboundMentions — earliest mention wins', () => {
+  test('an alias earlier in the body beats the filename later in it', () => {
+    insertNote(db, {
+      path: 'src.md',
+      body: 'The AI thing kicked off, then Beta, and later Alpha shipped',
+    });
+    insertNote(db, {
+      path: 'Alpha.md',
+      frontmatter: { aliases: ['AI thing'] },
+    });
+    insertNote(db, { path: 'Beta.md' });
+    const hits = mkQuery().outboundMentions('src.md');
+    expect(hits.map((h) => h.path)).toEqual(['Alpha.md', 'Beta.md']);
+    expect(hits[0].snippet).toContain('<b>AI thing</b>');
+  });
+});
+
+describe('mentions — names the fts tokenizer cannot index', () => {
+  test('a symbol-only name is still found', () => {
+    insertNote(db, { path: '→.md' });
+    insertNote(db, { path: 'other.md', body: 'the → arrow note explains it' });
+    expect(
+      mkQuery()
+        .unlinkedMentions('→.md')
+        .map((h) => h.path),
+    ).toEqual(['other.md']);
+  });
+});
+
+describe('mentionSnippet — window edges', () => {
+  test('never cuts a surrogate pair in half', () => {
+    const pad = '🎉'.repeat(30);
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, { path: 'j.md', body: `${pad} Alpha ${pad}` });
+    const snippet = mkQuery().unlinkedMentions('Alpha.md')[0].snippet ?? '';
+    expect(snippet.isWellFormed()).toBe(true);
+    expect(snippet).toContain('<b>Alpha</b>');
+  });
+});
+
+describe('orphanNotes — validation before work', () => {
+  test('rejects an unknown orderBy field like queryNotes does', () => {
+    expect(() =>
+      mkQuery().orphanNotes({
+        orderBy: { field: 'bogus' as 'path', dir: 'asc' },
+      }),
+    ).toThrow(expect.objectContaining({ code: 'VALIDATION_ERROR' }));
+  });
+});
+
+describe('backlinks — case-sensitive vault', () => {
+  test('resolves through path keys that keep their case', () => {
+    // The configuration CI runs under, and the one nothing covered: on a
+    // case-sensitive volume path_key preserves case, so a resolver that looks
+    // the target up by key only works if the two agree. Every other test in
+    // this file pins caseSensitive: false, which hid that.
+    insertNote(db, { path: 'Folder/Foo.md', pathKey: 'Folder/Foo.md' });
+    insertNote(db, {
+      path: 'source.md',
+      pathKey: 'source.md',
+      body: 'see [[Folder/Foo]], and Foo came up again',
+      links: [{ target: 'Folder/Foo', base: 'foo', kind: 'wikilink' }],
+    });
+    const q = mkQuery({ caseSensitive: true });
+    expect(q.backlinks('Folder/Foo.md')).toEqual([{ from: 'source.md' }]);
+    // …and a linker is never re-reported as an unlinked mention.
+    expect(q.unlinkedMentions('Folder/Foo.md')).toEqual([]);
+    // A wrong-case path is a different note here, so it resolves to nothing.
+    expect(q.backlinks('folder/foo.md')).toEqual([]);
   });
 });

@@ -17,6 +17,7 @@ import type { TagInfo } from './models/tag-info.ts';
 import type { WhereCondition, WhereValue } from './models/where-map.ts';
 
 const ORDER_FIELDS = new Set<string>(['mtime_ms', 'path', 'title']);
+const ORPHAN_MODES = new Set<string>(['disconnected', 'unreferenced']);
 const WHERE_KEY_RE = /^[A-Za-z0-9_.-]+$/;
 const DEFAULT_LIMIT = 100;
 const HARD_MAX = 1000;
@@ -56,7 +57,11 @@ function validatePagination(
   return { lim: Math.min(lim, HARD_MAX), off };
 }
 
-function sanitizeFts(q: string): string | null {
+// Quotes each whitespace-separated token so caller text cannot reach the fts5
+// query grammar. Whitespace-joined the tokens are separate phrases — an
+// implicit AND that matches words in different sentences; `phrase` joins them
+// with fts5's `+` instead, which demands the tokens be adjacent in that order.
+function sanitizeFts(q: string, phrase = false): string | null {
   const tokens = q
     .trim()
     .split(/\s+/)
@@ -65,7 +70,9 @@ function sanitizeFts(q: string): string | null {
     return null;
   }
 
-  return tokens.map((t) => `"${t.replace(/"/g, '""')}"`).join(' ');
+  return tokens
+    .map((t) => `"${t.replace(/"/g, '""')}"`)
+    .join(phrase ? ' + ' : ' ');
 }
 
 // Escapes LIKE metacharacters (\, %, _) so caller-supplied text matches
@@ -297,6 +304,123 @@ function isAttachmentTarget(target: string): boolean {
   return ATTACHMENT_EXTENSIONS.has(extname(target).slice(1).toLowerCase());
 }
 
+// A mention is a whole word, so `cat` is not a mention inside `catalogue`.
+// `\b` cannot express that: it is defined over ASCII `\w`, so `/\bАльфа\b/`
+// never matches "Проект Альфа" — a whole non-Latin vault would silently report
+// nothing. These lookarounds are Unicode-aware and cost nothing extra.
+const WORD_CHAR = '[\\p{L}\\p{N}_]';
+// Characters of context on each side of a mention, mirroring what fts5's
+// snippet() gives searchText.
+const MENTION_CONTEXT = 40;
+// Whether fts5's unicode61 tokenizer can index a name at all: it keeps letters
+// and digits and drops everything else, so a name made only of symbols is
+// unfindable through MATCH and has to be looked for the slow way.
+const TOKENIZABLE = /[\p{L}\p{N}]/u;
+
+// Wikilinks, embeds and md-links, whole. Blanked before matching: text sitting
+// inside link syntax is already a link, so reporting it as an *unlinked*
+// mention tells the reader to convert markup that is converted. Excluding the
+// note's own link targets is not enough — `[[Alpha Notes]]` contains the name
+// of a DIFFERENT note (`Alpha`), and in wikilink mode md-links are not stored
+// as links at all, so neither one is in any exclusion set.
+const LINK_SPAN = /!?\[\[[^\]]*\]\]|!?\[[^\]]*\]\([^)]*\)/g;
+
+// A one-line excerpt around the match, shaped like fts5's snippet(): the match
+// wrapped in <b>, '…' where the window cuts. Whitespace collapses so one hit
+// cannot drag a paragraph's worth of newlines into a list row.
+function mentionSnippet(body: string, index: number, length: number): string {
+  const from = Math.max(0, index - MENTION_CONTEXT);
+  const to = Math.min(body.length, index + length + MENTION_CONTEXT);
+  const head = body.slice(from, index).replace(/\s+/g, ' ');
+  const tail = body.slice(index + length, to).replace(/\s+/g, ' ');
+  const hit = body.slice(index, index + length);
+
+  // toWellFormed, because the window is measured in UTF-16 code units and
+  // either edge can land inside an emoji: the lone surrogate that leaves is
+  // '�' in a UI and breaks a TextEncoder/Buffer round-trip. It becomes a
+  // replacement character rather than disappearing — visible, which is the
+  // honest rendering of "the excerpt cuts here".
+  return `${from > 0 ? '…' : ''}${head}<b>${hit}</b>${tail}${to < body.length ? '…' : ''}`.toWellFormed();
+}
+
+// Reads one note's body for every name it might contain. Bound to the body
+// because the outbound direction probes a single body with every name in the
+// vault: lowercasing and masking it per term would undo the point of the
+// prefilter.
+//
+// Matching runs against the link-masked text while the snippet is cut from the
+// original — LINK_SPAN blanking is length-preserving, so the indices agree.
+//
+// The prefilter is load-bearing, not tidiness: on a miss the lookbehind regex
+// scans the entire body before conceding, and nearly every term IS a miss —
+// measured 12.5s vs 7.5ms over 30k probes against one 5KB body, on a
+// synchronous call.
+// ponytail: toLowerCase and the regex's Unicode simple case folding disagree on
+// a few exotic pairs (Greek final sigma ς/σ), where the prefilter rejects a
+// match the regex would have taken. Dropping it costs three orders of magnitude.
+function mentionScanner(
+  body: string,
+): (term: string) => { at: number; snippet: string } | null {
+  const prose = body.replace(LINK_SPAN, (span) => ' '.repeat(span.length));
+  const lower = prose.toLowerCase();
+
+  return (term) => {
+    if (!lower.includes(term.toLowerCase())) {
+      return null;
+    }
+    // Escaped, not interpolated raw: a note named `C++` would otherwise throw a
+    // bare SyntaxError out of a method documented to fail with MdVaultError,
+    // and one named `Meeting [1]` would compile into a character class and
+    // quietly match the text "Meeting 1".
+    const match = new RegExp(
+      `(?<!${WORD_CHAR})${RegExp.escape(term)}(?!${WORD_CHAR})`,
+      'iu',
+    ).exec(prose);
+    if (match === null) {
+      return null;
+    }
+
+    return {
+      at: match.index,
+      snippet: mentionSnippet(body, match.index, match[0].length),
+    };
+  };
+}
+
+// Every name a note answers to: its filename, an explicitly authored title, and
+// its aliases — Obsidian matches "name or alias". Deliberately NOT the indexed
+// `title`, which falls back to the first H1: a note headed "# Overview" would
+// turn every occurrence of that word in the vault into a mention of it. List
+// items are coerced the way deriveTags coerces tags, so `aliases: [2024]` is a
+// name rather than a crash.
+function mentionTerms(path: string, frontmatterJson: string): string[] {
+  const fm = JSON.parse(frontmatterJson) as Record<string, unknown>;
+  const raw: unknown[] = [
+    (path.split('/').at(-1) ?? path).replace(/\.md$/i, ''),
+  ];
+  if (typeof fm.title === 'string') {
+    raw.push(fm.title);
+  }
+  raw.push(...(Array.isArray(fm.aliases) ? fm.aliases : [fm.aliases]));
+
+  const seen = new Set<string>();
+  const terms: string[] = [];
+  for (const value of raw) {
+    if (!['string', 'number', 'boolean'].includes(typeof value)) {
+      continue;
+    }
+    const term = String(value).trim();
+    const key = term.toLowerCase();
+    if (term === '' || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    terms.push(term);
+  }
+
+  return terms;
+}
+
 function pathBaseLower(p: string): string {
   return (p.split('/').at(-1) ?? p).replace(/\.md$/i, '').toLowerCase();
 }
@@ -380,15 +504,14 @@ export function createQuery(
     return Map.groupBy(rows, (row) => pathBaseLower(row.path));
   }
 
-  function queryNotes(
-    opts: NoteFilter & {
-      orderBy?: QueryOrder;
-      limit?: number;
-      offset?: number;
-    } = {},
+  // Every readable note matching `opts`, ordered but UNPAGINATED. queryNotes
+  // slices it straight into a page; orphanNotes filters it first — so both fill
+  // pages exactly off one scan, instead of orphanNotes thinning an already
+  // sliced page.
+  function scopedNotes(
+    opts: NoteFilter & { orderBy?: QueryOrder } = {},
   ): NoteHit[] {
-    const { orderBy, limit, offset } = opts;
-    const { lim, off } = validatePagination(limit, offset);
+    const { orderBy } = opts;
     const order: QueryOrder = orderBy ?? { field: 'mtime_ms', dir: 'desc' };
     if (!ORDER_FIELDS.has(order.field)) {
       throw new MdVaultError(
@@ -399,9 +522,9 @@ export function createQuery(
     const dir = order.dir === 'asc' ? 'ASC' : 'DESC';
     const { parts, params } = buildNoteFilters(opts);
     const clause = whereClause(parts);
-    // Fetch all matching rows without LIMIT/OFFSET — scope-filter first, then
-    // slice in JS to get exact page fills. (At personal-vault scale the full
-    // scan is fine; a future optimisation can push read-prefixes into SQL.)
+    // Fetch all matching rows without LIMIT/OFFSET — the caller scope-filters
+    // and slices in JS to get exact page fills. (At personal-vault scale the
+    // full scan is fine; a future optimisation can push read-prefixes into SQL.)
     const sql = `SELECT n.path, n.path_key, n.title, n.frontmatter, n.mtime_ms, n.size FROM notes n ${clause} ORDER BY n.${order.field} ${dir}, n.path ASC`;
     const rows = db
       .query<RawNoteRow, (string | number | boolean | null)[]>(sql)
@@ -421,7 +544,19 @@ export function createQuery(
       });
     }
 
-    return scoped.slice(off, off + lim);
+    return scoped;
+  }
+
+  function queryNotes(
+    opts: NoteFilter & {
+      orderBy?: QueryOrder;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): NoteHit[] {
+    const { lim, off } = validatePagination(opts.limit, opts.offset);
+
+    return scopedNotes(opts).slice(off, off + lim);
   }
 
   function countNotes(opts: NoteFilter = {}): number {
@@ -437,90 +572,60 @@ export function createQuery(
     return rows.filter((row) => inScope(row.path)).length;
   }
 
+  // Every readable note linking to `path`, deduplicated but UNPAGINATED.
+  // backlinks slices it into a page; unlinkedMentions subtracts the whole set,
+  // which must not be capped at some caller's page size — linker #101 is still
+  // a linker, not an unlinked mention.
+  //
+  // Stated as the exact inverse of resolveLinkTarget — a link points here iff
+  // resolving it lands on this note — rather than as a second resolver reading
+  // note_links its own way. The hand-rolled reverse direction disagreed with
+  // outboundLinks twice over: a BARE link compared the tie-break winner (a
+  // canonical `notes.path`) against whatever spelling the caller passed in, so
+  // `backlinks('alpha.md')` found nothing for `Alpha.md`; and a RELATIVE link
+  // compared `note_links.target` (the path as written) against a case-folded
+  // `path_key`, so a mixed-case link matched nothing on a case-insensitive
+  // volume. Both dropped real backlinks, and unlinkedMentions then advertised
+  // those linkers as notes that ought to be linked.
+  // ponytail: this trades an indexed lookup for the same vault-wide scan
+  // danglingLinks does. Per-note callers that feel it want a resolved-edge
+  // table maintained at index time, not a third resolution rule here.
+  function backlinkSources(path: string): string[] {
+    const target = readableNoteByKey(vaultIo.toKey(path));
+    if (target === null) {
+      return [];
+    }
+    const { rows, baseIndex } = linkRows();
+    const seen = new Set<string>();
+    const sources: string[] = [];
+    for (const row of rows) {
+      if (seen.has(row.from_path) || !inScope(row.from_path)) {
+        continue;
+      }
+      if (resolveLinkTarget(row, row.from_path, baseIndex) === target) {
+        seen.add(row.from_path);
+        sources.push(row.from_path);
+      }
+    }
+
+    return sources;
+  }
+
   function backlinks(
     path: string,
     opts: { limit?: number; offset?: number } = {},
   ): Backlink[] {
+    // Scope first, pagination second — outboundLinks answers an unreadable path
+    // with [] whatever the pagination says, and a UI drawing both panes for one
+    // path must not get a throw from this one and an empty list from that one.
     if (!inScope(path)) {
       return [];
     }
     const { lim, off } = validatePagination(opts.limit, opts.offset);
-    const display = vaultIo.toVaultRelative(path);
-    const targetKey = vaultIo.toKey(path);
-    const base = pathBaseLower(display);
-    const sources: string[] = [];
 
-    if (cfg.linkResolution === 'relative') {
-      // JOIN notes tn on the target side so dangling links (target not in index) yield no rows.
-      const rows = db
-        .query<{ from_path: string }, [string]>(
-          `SELECT n.path AS from_path
-           FROM note_links nl
-           JOIN notes n ON n.path_key = nl.src_key
-           JOIN notes tn ON tn.path_key = nl.target
-           WHERE nl.target = ?`,
-        )
-        .all(targetKey);
-      for (const r of rows) {
-        if (inScope(r.from_path)) {
-          sources.push(r.from_path);
-        }
-      }
-    } else {
-      // path-qualified: [[Folder/Foo]] stored as target='Folder/Foo'; resolves to Folder/Foo.md
-      const pqRows = db
-        .query<{ from_path: string; target: string }, []>(
-          `SELECT n.path AS from_path, nl.target
-           FROM note_links nl
-           JOIN notes n ON n.path_key = nl.src_key
-           WHERE nl.target LIKE '%/%'`,
-        )
-        .all();
-      for (const r of pqRows) {
-        if (!inScope(r.from_path)) {
-          continue;
-        }
-        if (vaultIo.toKey(`${r.target}.md`) === targetKey) {
-          sources.push(r.from_path);
-        }
-      }
-
-      // bare: [[Foo]] stored as base='foo'; win tie-break to be a backlink
-      const bareRows = db
-        .query<{ from_path: string }, [string]>(
-          `SELECT n.path AS from_path
-           FROM note_links nl
-           JOIN notes n ON n.path_key = nl.src_key
-           WHERE nl.base = ?`,
-        )
-        .all(base);
-
-      // candidates are the same for every source with this base, but tie-break winner
-      // differs per source folder — compute candidates once, winner per source
-      const candidates = bareCandidates(base);
-
-      for (const r of bareRows) {
-        if (!inScope(r.from_path)) {
-          continue;
-        }
-        const winner = tieBreakWinner(candidates, pathFolder(r.from_path));
-        if (winner === display) {
-          sources.push(r.from_path);
-        }
-      }
-    }
-
-    // deduplicate (a note could link via both path-qualified and bare)
-    const seen = new Set<string>();
-    const deduped: { from: string }[] = [];
-    for (const s of sources) {
-      if (!seen.has(s)) {
-        seen.add(s);
-        deduped.push({ from: s });
-      }
-    }
-
-    return deduped.slice(off, off + lim);
+    return backlinkSources(path)
+      .slice(off, off + lim)
+      .map((from) => ({ from }));
   }
 
   // In-scope note owning `pathKey`, or null when the key indexes nothing (or
@@ -588,10 +693,13 @@ export function createQuery(
       }));
   }
 
-  function danglingLinks(
-    opts: { limit?: number; offset?: number } = {},
-  ): DanglingLink[] {
-    const { lim, off } = validatePagination(opts.limit, opts.offset);
+  // Every stored link joined to the note it came from, plus the base index bare
+  // wikilinks resolve through. Shared by danglingLinks and linkEdges so the two
+  // vault-wide sweeps cannot drift apart on what they read or how they resolve.
+  function linkRows(): {
+    rows: SrcLinkRow[];
+    baseIndex?: Map<string, PathRow[]>;
+  } {
     const rows = db
       .query<SrcLinkRow, []>(
         `SELECT n.path AS from_path, nl.target, nl.base
@@ -604,6 +712,74 @@ export function createQuery(
     // so building it there would be a full scan nobody reads.
     const baseIndex =
       cfg.linkResolution === 'wikilink' ? buildBaseIndex() : undefined;
+
+    return { rows, baseIndex };
+  }
+
+  // The note-graph edges, both directions, in one pass. Only readable notes are
+  // nodes: an out-of-scope source is invisible, and resolveLinkTarget already
+  // refuses an out-of-scope target. A link naming an attachment is no edge at
+  // all (Obsidian hides attachments from the graph), while a link that dangles
+  // still gives its source an outgoing edge (Obsidian draws it as a ghost node)
+  // and gives nothing an inbound one — there is no target to receive it.
+  function linkEdges(): { inbound: Set<string>; outbound: Set<string> } {
+    const { rows, baseIndex } = linkRows();
+    const inbound = new Set<string>();
+    const outbound = new Set<string>();
+    for (const row of rows) {
+      if (!inScope(row.from_path) || isAttachmentTarget(row.target)) {
+        continue;
+      }
+      outbound.add(row.from_path);
+      const target = resolveLinkTarget(row, row.from_path, baseIndex);
+      if (target !== null) {
+        inbound.add(target);
+      }
+    }
+
+    return { inbound, outbound };
+  }
+
+  function orphanNotes(
+    opts: NoteFilter & {
+      mode?: 'disconnected' | 'unreferenced';
+      orderBy?: QueryOrder;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): NoteHit[] {
+    const mode = opts.mode ?? 'disconnected';
+    // Not a silent fallback to the default: a typo'd mode arriving from a query
+    // string would otherwise answer a different question than the caller asked.
+    if (!ORPHAN_MODES.has(mode)) {
+      throw new MdVaultError(
+        'VALIDATION_ERROR',
+        `mode must be one of ${[...ORPHAN_MODES].join(', ')}, got: ${mode}`,
+      );
+    }
+    const { lim, off } = validatePagination(opts.limit, opts.offset);
+    // Notes first: scopedNotes validates `orderBy`, and a typo'd order field
+    // must not cost a full sweep of note_links and notes before it throws —
+    // queryNotes rejects it before doing any work.
+    const notes = scopedNotes(opts);
+    const { inbound, outbound } = linkEdges();
+
+    // Filter before slicing: paginating first would hand back pages thinned by
+    // the orphan test instead of pages of orphans.
+    return notes
+      .filter(
+        (note) =>
+          !inbound.has(note.path) &&
+          (mode === 'unreferenced' || !outbound.has(note.path)),
+      )
+      .slice(off, off + lim);
+  }
+
+  function danglingLinks(
+    opts: { limit?: number; offset?: number } = {},
+  ): DanglingLink[] {
+    const { lim, off } = validatePagination(opts.limit, opts.offset);
+    const { rows, baseIndex } = linkRows();
     // One row per (src, target, kind), so a note carrying both [[ghost]] and
     // ![[ghost]] reports the same breakage twice and burns two slots of the
     // caller's page. backlinks dedupes for the same reason.
@@ -630,15 +806,18 @@ export function createQuery(
 
   // Every in-scope hit for `q`, unpaginated and rank-ordered — searchText slices
   // it into a page, countSearch just takes its length, so a count can never
-  // disagree with the rows it counts. `withSnippet` is off for the count: fts5
+  // disagree with the rows it counts. `snippet` is off for the count: fts5
   // `snippet()` builds a highlighted string per matching row, and a "page 1 of
-  // N" render would pay for one per hit only to discard it.
+  // N" render would pay for one per hit only to discard it. `phrase` demands
+  // adjacent tokens instead of the default implicit AND — mention lookup needs
+  // a contiguous name, not its words scattered across the note.
   function searchScoped(
     q: string,
     opts: NoteFilter = {},
-    withSnippet = true,
+    flags: { snippet?: boolean; phrase?: boolean } = {},
   ): SearchHit[] {
-    const ftsQ = sanitizeFts(q);
+    const withSnippet = flags.snippet ?? true;
+    const ftsQ = sanitizeFts(q, flags.phrase ?? false);
     if (ftsQ === null) {
       return [];
     }
@@ -698,6 +877,191 @@ export function createQuery(
     return scoped;
   }
 
+  // The indexed body of a note. notes_fts is a standalone fts5 table, so it
+  // keeps its own copy of the text and hands it back — the only way to read a
+  // note's text without touching disk, which keeps these methods synchronous.
+  function bodyFor(pathKey: string): string | null {
+    const row = db
+      .query<{ body: string }, [string]>(
+        'SELECT f.body FROM notes_fts f JOIN notes n ON n.id = f.rowid WHERE n.path_key = ?',
+      )
+      .get(pathKey);
+
+    return row?.body ?? null;
+  }
+
+  // The row backing a mention query, or null when the path indexes nothing the
+  // instance may read.
+  //
+  // Scope is judged on the row's own canonical path, never on the spelling the
+  // caller passed: `path_key` is case-folded on a case-insensitive volume, so
+  // `inScope('Notes/secret.md')` can pass the allowlist (a case-sensitive
+  // prefix match) while the key it folds to fetches the unreadable
+  // `notes/secret.md` — and this row's body is what the snippets quote.
+  // readableNoteByKey encodes the same rule for link targets.
+  function mentionSubject(
+    path: string,
+  ): { display: string; pathKey: string; terms: string[] } | null {
+    const pathKey = vaultIo.toKey(path);
+    const row = db
+      .query<{ path: string; frontmatter: string }, [string]>(
+        'SELECT path, frontmatter FROM notes WHERE path_key = ?',
+      )
+      .get(pathKey);
+    if (row === null || !inScope(row.path)) {
+      return null;
+    }
+
+    return {
+      display: row.path,
+      pathKey,
+      terms: mentionTerms(row.path, row.frontmatter),
+    };
+  }
+
+  // Notes worth checking for `term`. fts5 only generates candidates; the JS
+  // scanner decides, because tokenisation is not verbatim matching — a note
+  // named `C++` tokenises to `c`. `phrase` is therefore a narrowing hint and
+  // not the correctness mechanism: it keeps a two-word name from dragging in
+  // every note that merely uses both words, so fewer candidates need their
+  // body read back. Verified by mutation — flipping it off changes no result,
+  // only the work done.
+  //
+  // fts5 does the narrowing — except for a
+  // name it cannot index at all: unicode61 keeps only letters and digits, so a
+  // note filed as `→.md` or `📥.md` (an ordinary Obsidian inbox convention)
+  // tokenises to nothing and MATCH answers no rows, an empty result the caller
+  // cannot tell from "nobody mentions it". Such a name falls back to every
+  // readable note, which is affordable exactly because a name carrying no
+  // letter or digit is rare.
+  function mentionCandidates(term: string): SearchHit[] {
+    if (TOKENIZABLE.test(term)) {
+      return searchScoped(term, {}, { phrase: true, snippet: false });
+    }
+
+    return db
+      .query<{ path: string; title: string }, []>(
+        'SELECT path, title FROM notes',
+      )
+      .all()
+      .filter((row) => inScope(row.path));
+  }
+
+  function unlinkedMentions(
+    path: string,
+    opts: { limit?: number; offset?: number } = {},
+  ): SearchHit[] {
+    const { lim, off } = validatePagination(opts.limit, opts.offset);
+    const subject = mentionSubject(path);
+    if (subject === null) {
+      return [];
+    }
+    // A note that links here made a linked mention; so did this note's own body
+    // when it repeated its title. Neither is an *unlinked* one.
+    const excluded = new Set(backlinkSources(path));
+    excluded.add(subject.display);
+
+    const hits: SearchHit[] = [];
+    const seen = new Set<string>();
+    for (const term of subject.terms) {
+      for (const candidate of mentionCandidates(term)) {
+        if (excluded.has(candidate.path) || seen.has(candidate.path)) {
+          continue;
+        }
+        const body = bodyFor(vaultIo.toKey(candidate.path));
+        const match = body === null ? null : mentionScanner(body)(term);
+        if (match === null) {
+          continue;
+        }
+        seen.add(candidate.path);
+        hits.push({
+          path: candidate.path,
+          title: candidate.title,
+          snippet: match.snippet,
+        });
+      }
+    }
+
+    return hits.slice(off, off + lim);
+  }
+
+  function outboundMentions(
+    path: string,
+    opts: { limit?: number; offset?: number } = {},
+  ): SearchHit[] {
+    const { lim, off } = validatePagination(opts.limit, opts.offset);
+    const subject = mentionSubject(path);
+    if (subject === null) {
+      return [];
+    }
+    const body = bodyFor(subject.pathKey);
+    if (body === null) {
+      return [];
+    }
+    // Notes this one already links are linked mentions; outboundLinks reports
+    // them. Its own name would otherwise match its own H1.
+    // The base index goes in for the same reason danglingLinks builds one: this
+    // resolves ALL of the note's links, and a bare one resolved without it pays
+    // an unindexed double-LIKE scan of `notes` EACH — quadratic on a hub note.
+    const baseIndex =
+      cfg.linkResolution === 'wikilink' ? buildBaseIndex() : undefined;
+    const excluded = new Set<string>([subject.display]);
+    for (const row of db
+      .query<LinkRow, [string]>(
+        'SELECT target, base FROM note_links WHERE src_key = ?',
+      )
+      .all(subject.pathKey)) {
+      const target = resolveLinkTarget(row, subject.display, baseIndex);
+      if (target !== null) {
+        excluded.add(target);
+      }
+    }
+
+    // One scanner over this body, probed with every other note's names — the
+    // reverse of unlinkedMentions, and the reason the prefilter exists: a vault
+    // of names is thousands of probes against one string.
+    // ponytail: a full notes scan per call. If that ever shows up in a profile,
+    // precompute the names into a table at index time; the matching, which is
+    // the expensive half, would not change.
+    const scan = mentionScanner(body);
+    const found: (SearchHit & { at: number })[] = [];
+    for (const row of db
+      .query<{ path: string; title: string; frontmatter: string }, []>(
+        'SELECT path, title, frontmatter FROM notes',
+      )
+      .all()) {
+      if (excluded.has(row.path) || !inScope(row.path)) {
+        continue;
+      }
+      // Every term, not the first that hits: a note is placed by its EARLIEST
+      // mention, and an alias can appear before the filename does. Stopping at
+      // the first match would order by which name we happened to try first and
+      // quote the wrong sentence.
+      let best: { at: number; snippet: string } | null = null;
+      for (const term of mentionTerms(row.path, row.frontmatter)) {
+        const hit = scan(term);
+        if (hit !== null && (best === null || hit.at < best.at)) {
+          best = hit;
+        }
+      }
+      if (best !== null) {
+        found.push({
+          path: row.path,
+          title: row.title,
+          snippet: best.snippet,
+          at: best.at,
+        });
+      }
+    }
+
+    // Reading order: a UI walks the note top to bottom, so that is the order
+    // its mentions should arrive in. Path breaks ties deterministically.
+    return found
+      .sort((a, b) => a.at - b.at || (a.path < b.path ? -1 : 1))
+      .slice(off, off + lim)
+      .map(({ at: _at, ...hit }) => hit);
+  }
+
   function searchText(
     q: string,
     opts: NoteFilter & { limit?: number; offset?: number } = {},
@@ -708,7 +1072,7 @@ export function createQuery(
   }
 
   function countSearch(q: string, opts: NoteFilter = {}): number {
-    return searchScoped(q, opts, false).length;
+    return searchScoped(q, opts, { snippet: false }).length;
   }
 
   function tags(
@@ -788,9 +1152,12 @@ export function createQuery(
   return {
     queryNotes,
     countNotes,
+    orphanNotes,
     backlinks,
     outboundLinks,
     danglingLinks,
+    unlinkedMentions,
+    outboundMentions,
     searchText,
     countSearch,
     tags,

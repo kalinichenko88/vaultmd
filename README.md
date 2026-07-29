@@ -3,7 +3,7 @@
 > A headless markdown-vault data layer for [Bun](https://bun.sh) — CRUD over `.md` notes plus a derived SQLite index for collection queries, backlinks, and full-text search. No Obsidian, no Electron, no plugin.
 
 [![npm](https://img.shields.io/badge/npm-vaultmd-cb3837?logo=npm)](https://www.npmjs.com/package/vaultmd)
-[![runtime: Bun](https://img.shields.io/badge/runtime-Bun%20%E2%89%A5%201.1-f9f1e1?logo=bun)](https://bun.sh)
+[![runtime: Bun](https://img.shields.io/badge/runtime-Bun%20%E2%89%A5%201.3.14-f9f1e1?logo=bun)](https://bun.sh)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![status: published](https://img.shields.io/badge/status-published-brightgreen.svg)](#status)
 [![docs](https://img.shields.io/badge/docs-VaultMD-3451b2.svg)](https://kalinichenko88.github.io/vaultmd/)
@@ -48,7 +48,7 @@ still evolve before `1.0`; see [CHANGELOG.md](./CHANGELOG.md) for what changed.
 
 ## Requirements
 
-- **[Bun](https://bun.sh) ≥ 1.1.0.** VaultMD uses `bun:sqlite`, `Bun.file`, and
+- **[Bun](https://bun.sh) ≥ 1.3.14.** VaultMD uses `bun:sqlite`, `Bun.file`, and
   other Bun built-ins — it does **not** run under Node.
 
 ## Install
@@ -230,6 +230,17 @@ queryNotes(opts?: NoteFilter & {
 // Total matches for the same filters — uncapped, so page counts are exact.
 countNotes(opts?: NoteFilter): number
 
+// Notes with no place in the link graph, filtered/ordered like queryNotes.
+// 'disconnected' (default) = no links either way — Obsidian's graph "Orphans".
+// 'unreferenced' = nothing links TO it, whatever it links out to (wider set).
+// An attachment link is no edge; a dangling link is an outgoing edge only.
+orphanNotes(opts?: NoteFilter & {
+  mode?: 'disconnected' | 'unreferenced';
+  orderBy?: { field: 'mtime_ms' | 'path' | 'title'; dir: 'asc' | 'desc' };
+  limit?: number;
+  offset?: number;
+}): NoteHit[]
+
 // Notes linking TO this path. Returns { from: string }[].
 backlinks(path, opts?: { limit?: number; offset?: number }): Backlink[]
 
@@ -242,6 +253,15 @@ outboundLinks(path, opts?: { limit?: number; offset?: number }): OutboundLink[]
 // report. Returns { from, target }[]. Links naming an attachment file type
 // ([[x.png]], ![[x.pdf]]) are excluded: they can never resolve to a .md note.
 danglingLinks(opts?: { limit?: number; offset?: number }): DanglingLink[]
+
+// The prose counterparts of backlinks / outboundLinks: notes that NAME each
+// other without linking. A note answers to its filename, its explicit
+// frontmatter title, and its aliases. Case-insensitive, word-boundary, so `cat`
+// is never found inside `catalogue` — and a name embedded in unsegmented CJK
+// prose is not found at all. A note that already links is a link, not a
+// mention. Both return SearchHit[] = { path, title, snippet? }[].
+unlinkedMentions(path, opts?: { limit?: number; offset?: number }): SearchHit[]
+outboundMentions(path, opts?: { limit?: number; offset?: number }): SearchHit[]
 
 // Full-text keyword search over bodies. Returns { path, title, snippet? }[].
 searchText(q, opts?: NoteFilter & { limit?: number; offset?: number }): SearchHit[]

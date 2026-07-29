@@ -32,6 +32,29 @@ export type QueryApi = {
    */
   countNotes(opts?: NoteFilter): number;
   /**
+   * Notes with no place in the link graph, narrowed by the same
+   * {@link NoteFilter}, ordering and pagination {@link queryNotes} accepts.
+   *
+   * `mode: 'disconnected'` (the default) returns notes with no links in either
+   * direction — Obsidian's graph "Orphans" filter. `mode: 'unreferenced'`
+   * returns notes nothing links TO, whatever they link out to, so it is the
+   * wider set: every disconnected note is also unreferenced.
+   *
+   * A link naming an attachment (`![[diagram.png]]`) is not a graph edge, so a
+   * note carrying only those is still an orphan. A link that resolves to
+   * nothing still counts as an outgoing edge, so a note carrying only broken
+   * links is `'unreferenced'` but not `'disconnected'`. Links from notes
+   * outside the read scope are invisible and never rescue a note.
+   */
+  orphanNotes(
+    opts?: NoteFilter & {
+      mode?: 'disconnected' | 'unreferenced';
+      orderBy?: QueryOrder;
+      limit?: number;
+      offset?: number;
+    },
+  ): NoteHit[];
+  /**
    * Notes that link to `path` via `[[wikilink]]` or relative-link resolution.
    * Defaults to limit 100; hard cap 1000.
    */
@@ -62,6 +85,45 @@ export type QueryApi = {
    * as `resolved: null`. Defaults to limit 100; hard cap 1000.
    */
   danglingLinks(opts?: { limit?: number; offset?: number }): DanglingLink[];
+  /**
+   * Notes that name this one in prose without linking it — Obsidian's
+   * "Unlinked mentions" in the Backlinks pane, and the prose counterpart of
+   * {@link backlinks}. A hit is a note whose body contains this note's
+   * filename, its explicit frontmatter `title`, or one of its `aliases`, at a
+   * word boundary and case-insensitively, while linking nothing to it. Notes
+   * that already link are reported by {@link backlinks} instead, never here.
+   *
+   * The `snippet` quotes the *mentioning* note (the hit) around the name.
+   *
+   * Matching needs a word boundary, so a name embedded in unsegmented text —
+   * Chinese and Japanese prose, which is written without spaces — is NOT
+   * found; only occurrences delimited by spaces or punctuation are. Defaults
+   * to limit 100; hard cap 1000.
+   */
+  unlinkedMentions(
+    path: string,
+    opts?: { limit?: number; offset?: number },
+  ): SearchHit[];
+  /**
+   * Notes named in THIS note's body without being linked from it — Obsidian's
+   * "Unlinked mentions" in the Outgoing links pane, and the prose counterpart
+   * of {@link outboundLinks}. A hit is another note whose filename, explicit
+   * frontmatter `title` or alias appears in this note's body at a word
+   * boundary and case-insensitively, and which this note does not already
+   * link. Ordered by where the mention falls in the body, so hits arrive in
+   * reading order.
+   *
+   * The `snippet` quotes the *queried* note around the name — the hit is the
+   * note being named, the surrounding text is this one's.
+   *
+   * Carries the same unsegmented-text limitation as {@link unlinkedMentions}:
+   * a name embedded in Chinese or Japanese prose has no word boundary to
+   * match. Defaults to limit 100; hard cap 1000.
+   */
+  outboundMentions(
+    path: string,
+    opts?: { limit?: number; offset?: number },
+  ): SearchHit[];
   /**
    * FTS5 keyword search over note bodies, returning highlighted snippets,
    * narrowed by the same {@link NoteFilter} the note readers take. Defaults to
