@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+Three read-only `QueryApi` methods closing the link-graph gaps (#10), modelled
+on Obsidian so a UI built here behaves the way users already expect. No new
+public type and no schema change — the API freeze stays at 50 names and no
+index rebuild is triggered.
+
+- **`query.orphanNotes()`** — notes with no place in the link graph, taking the
+  same `NoteFilter`, ordering and pagination as `queryNotes`. Defaults to
+  `mode: 'disconnected'`, Obsidian's graph "Orphans" filter (no links in either
+  direction); `mode: 'unreferenced'` is the wider set of notes nothing links
+  *to*, whatever they link out to. A link naming an attachment is not a graph
+  edge, so a note carrying only those is still an orphan; a link that resolves
+  to nothing still counts as an outgoing edge, matching the ghost nodes
+  Obsidian draws. An unknown `mode` throws `VALIDATION_ERROR` rather than
+  quietly answering a different question.
+- **`query.unlinkedMentions(path)`** — notes that name this one in prose
+  without linking it: Obsidian's "Unlinked mentions" in the Backlinks pane, and
+  the prose counterpart of `backlinks()`.
+- **`query.outboundMentions(path)`** — notes named in *this* note's body
+  without being linked from it: the same feature in Obsidian's Outgoing links
+  pane, and the prose counterpart of `outboundLinks()`. Ordered by where each
+  mention falls in the body, so hits arrive in reading order.
+
+Both mention methods match a note's **filename, its explicit frontmatter
+`title`, and its `aliases`** — not the derived title, which falls back to the
+first `#` heading and would turn every note headed "Overview" into a mention of
+that word. Matching is case-insensitive and needs a word boundary, so `cat` is
+never found inside `catalogue`, and it is Unicode-aware, so Cyrillic and other
+non-Latin names match. A note that already links is reported by `backlinks` /
+`outboundLinks`, never as a mention.
+
+**Known limitation:** a name embedded in unsegmented text — Chinese and
+Japanese prose, written without spaces — is not found, because there is no word
+boundary to match; only space- or punctuation-delimited occurrences are.
+Obsidian finds those. Closing the gap needs a different FTS5 tokenizer, which
+is an index-schema change and so its own release.
+
 ## 0.6.0 — 2026-07-29
 
 Five additions closing the gaps the 1.0 surface implied but could not serve.

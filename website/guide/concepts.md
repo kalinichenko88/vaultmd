@@ -25,6 +25,24 @@ for links that resolve to nothing).
 indexed. That is not breakage, so `danglingLinks` filters those out — read
 `resolved: null` as "not a note in this vault", not as "broken".
 
+### The rest of the graph
+
+Three more views cover what links alone cannot say. `orphanNotes` finds notes
+with no place in the graph — by default notes with no links in either
+direction, Obsidian's graph "Orphans" filter, or with `mode: 'unreferenced'`
+the wider set of notes nothing links *to*. `unlinkedMentions` and
+`outboundMentions` are the prose counterparts of `backlinks` and
+`outboundLinks`: notes that name each other without linking. A note answers to
+its filename, an explicitly authored frontmatter `title`, and its `aliases`;
+one that already links is reported as a link, never as a mention.
+
+Mention matching is case-insensitive and needs a word boundary, so `cat` is
+never found inside `catalogue`. That boundary is also the limit: a name
+embedded in **unsegmented text — Chinese and Japanese prose, written without
+spaces — is not found**, only occurrences delimited by spaces or punctuation.
+Obsidian does find those; matching them here needs a different FTS tokenizer,
+which is a change to the index schema rather than to these methods.
+
 ## Scoped access
 
 Each vault instance carries read/write path allowlists (`prefixes.read` /
