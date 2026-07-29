@@ -29,10 +29,19 @@ const overdue = vault.query.queryNotes({
 
 Comparisons run over the indexed frontmatter JSON and follow SQLite's type
 ordering, so compare strings with strings and numbers with numbers — ISO dates
-sort correctly as strings.
+sort correctly as strings. This matters most for `ne`: SQLite holds values of
+differing types to be never equal, so `{ ne: '5' }` against a numeric field
+excludes nothing and quietly returns everything.
 
 `ne` also matches notes that never set the field at all, since "unset" is not
 the value. Require the field alongside it: `{ ne: 'done', exists: true }`.
+
+A malformed filter throws `VALIDATION_ERROR` rather than degrading into a
+wrong-but-plausible result — a non-scalar operand, a non-boolean `exists`, a
+non-array tag list, or an operator object with nothing left to apply (`{}`, or
+`{ lt: cutoff }` where `cutoff` came in `undefined`, which would otherwise drop
+the filter and return the whole vault). To match nothing on purpose, use
+`{ in: [] }`.
 
 ## Match several tags at once
 
@@ -43,6 +52,16 @@ the value. Require the field alongside it: `{ ne: 'done', exists: true }`.
 // tagged #project AND #active, and at least one of #q3 / #q4
 const active = vault.query.queryNotes({
   tags: { all: ['project', 'active'], any: ['q3', 'q4'] },
+});
+```
+
+`tag`, `tags`, `where` and `folder` make up `NoteFilter`, which every note
+reader accepts — so the same filter narrows a keyword search:
+
+```ts
+const hits = vault.query.searchText('deadline', {
+  tags: { all: ['project'] },
+  where: { status: { ne: 'done' } },
 });
 ```
 

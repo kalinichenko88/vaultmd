@@ -567,6 +567,48 @@ describe('queryNotes — rich where operators', () => {
       expect.objectContaining({ code: 'VALIDATION_ERROR' }),
     );
   });
+
+  // An operator object that contributes no predicate would drop the whole
+  // entry and hand back the entire vault — the widening these guards exist to
+  // prevent. `{ in: [] }` is the way to ask for "match nothing".
+  test('a condition contributing no predicate throws instead of matching all', () => {
+    const run = fixture();
+    const cutoff = undefined as string | undefined;
+    expect(() => run({ where: { status: {} } })).toThrow(
+      expect.objectContaining({ code: 'VALIDATION_ERROR' }),
+    );
+    expect(() => run({ where: { due: { lt: cutoff } } })).toThrow(
+      expect.objectContaining({ code: 'VALIDATION_ERROR' }),
+    );
+    // the deliberate "match nothing" spelling still works
+    expect(run({ where: { status: { in: [] } } })).toEqual([]);
+  });
+
+  test('a non-scalar operand throws VALIDATION_ERROR, not a raw SQLite error', () => {
+    const run = fixture();
+    for (const cond of [
+      { gt: [1, 2] },
+      { lt: { a: 1 } },
+      { ne: null },
+      { in: ['ok', { a: 1 }] },
+    ]) {
+      expect(() => run({ where: { priority: cond as never } })).toThrow(
+        expect.objectContaining({ code: 'VALIDATION_ERROR' }),
+      );
+    }
+    // and a bare non-scalar value in the equality form
+    expect(() => run({ where: { status: null as never } })).toThrow(
+      expect.objectContaining({ code: 'VALIDATION_ERROR' }),
+    );
+  });
+
+  test('a non-boolean `exists` throws rather than reading as true', () => {
+    const run = fixture();
+    // 'false' is truthy in JS — coercing it would return the exact inverse
+    expect(() =>
+      run({ where: { status: { exists: 'false' as never } } }),
+    ).toThrow(expect.objectContaining({ code: 'VALIDATION_ERROR' }));
+  });
 });
 
 describe('queryNotes — multi-tag matching', () => {
@@ -624,6 +666,98 @@ describe('queryNotes — multi-tag matching', () => {
       db.query<{ c: number }, []>('SELECT COUNT(*) AS c FROM note_tags').get()
         ?.c,
     ).toBe(5);
+  });
+
+  // A bare string would otherwise iterate/spread character-by-character into
+  // the IN-list and report "no notes have this tag" for a tag that exists.
+  test('a non-array or non-string tag list throws VALIDATION_ERROR', () => {
+    for (const tags of [
+      { all: 'project' },
+      { any: 'project' },
+      { all: ['project', 7] },
+      { any: [null] },
+    ]) {
+      expect(() => run({ tags: tags as never })).toThrow(
+        expect.objectContaining({ code: 'VALIDATION_ERROR' }),
+      );
+    }
+  });
+});
+
+describe('searchText / countSearch — shared note filters', () => {
+  beforeEach(() => {
+    insertNote(db, {
+      path: 'a.md',
+      body: 'hello world',
+      tags: ['project', 'active'],
+      frontmatter: { status: 'open', priority: 1 },
+    });
+    insertNote(db, {
+      path: 'b.md',
+      body: 'hello world',
+      tags: ['project'],
+      frontmatter: { status: 'done', priority: 9 },
+    });
+    insertNote(db, {
+      path: 'c.md',
+      body: 'hello world',
+      tags: ['archive'],
+      frontmatter: {},
+    });
+  });
+
+  test('honours tags.all / tags.any alongside the FTS match', () => {
+    const q = mkQuery();
+    expect(
+      q
+        .searchText('hello', { tags: { all: ['project', 'active'] } })
+        .map((h) => h.path),
+    ).toEqual(['a.md']);
+    expect(
+      q.countSearch('hello', { tags: { any: ['project', 'archive'] } }),
+    ).toBe(3);
+    expect(q.countSearch('hello', { tags: { any: [] } })).toBe(0);
+  });
+
+  test('honours where operators alongside the FTS match', () => {
+    const q = mkQuery();
+    expect(
+      q
+        .searchText('hello', { where: { priority: { lt: 5 } } })
+        .map((h) => h.path),
+    ).toEqual(['a.md']);
+    expect(
+      q
+        .searchText('hello', { where: { status: { exists: false } } })
+        .map((h) => h.path),
+    ).toEqual(['c.md']);
+    expect(q.countSearch('hello', { where: { status: { ne: 'done' } } })).toBe(
+      2,
+    );
+  });
+
+  test('countSearch agrees with searchText on the same filters', () => {
+    const q = mkQuery();
+    const filters = {
+      tag: 'project',
+      where: { status: { in: ['open', 'done'] } },
+    };
+    expect(q.countSearch('hello', filters)).toBe(
+      q.searchText('hello', filters).length,
+    );
+    expect(q.countSearch('hello', filters)).toBe(2);
+  });
+
+  // The bare `catch { return [] }` this path used to carry would have turned a
+  // filter fault into a plausible-looking empty result set.
+  test('a filter fault surfaces as an error, not an empty hit list', () => {
+    const q = mkQuery();
+    expect(() => q.searchText('hello', { where: { 'bad key!': 'x' } })).toThrow(
+      expect.objectContaining({ code: 'VALIDATION_ERROR' }),
+    );
+    expect(() =>
+      q.countSearch('hello', { tags: { any: 'project' as never } }),
+    ).toThrow(expect.objectContaining({ code: 'VALIDATION_ERROR' }));
   });
 });
 

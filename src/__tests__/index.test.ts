@@ -76,7 +76,8 @@ const ALL_EXPORTS = [
   'withFileMove',
   // — 1.0 API completeness (new 1) —
   'DanglingLink',
-  // — richer where filters + multi-tag matching (new 3) —
+  // — richer where filters + multi-tag matching (new 4) —
+  'NoteFilter',
   'TagFilter',
   'WhereCondition',
   'WhereValue',
@@ -100,7 +101,7 @@ function exportedNames(source: string): string[] {
 }
 
 describe('package public API freeze', () => {
-  test('src/index.ts exports exactly the frozen 49 names (Plan 1 + Plan 2 + Plan 3 + 0.2.0 + 0.3.0 + tags + 0.5.0 + 1.0 + rich filters)', () => {
+  test('src/index.ts exports exactly the frozen 50 names (Plan 1 + Plan 2 + Plan 3 + 0.2.0 + 0.3.0 + tags + 0.5.0 + 1.0 + rich filters)', () => {
     const src = readFileSync(new URL('../index.ts', import.meta.url), 'utf8');
     expect(exportedNames(src)).toEqual(ALL_EXPORTS);
   });

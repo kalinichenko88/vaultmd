@@ -1,5 +1,6 @@
 export type { Backlink } from './models/backlink.ts';
 export type { DanglingLink } from './models/dangling-link.ts';
+export type { NoteFilter } from './models/note-filter.ts';
 export type { NoteHit } from './models/note-hit.ts';
 export type { OrderField, QueryOrder } from './models/order.ts';
 export type { OutboundLink } from './models/outbound-link.ts';

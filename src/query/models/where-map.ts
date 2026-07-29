@@ -20,6 +20,11 @@ export type WhereCondition = {
   /**
    * Not equal. A note *missing* the field matches, since "unset" is not the
    * value — pair with `exists: true` to require the field as well.
+   *
+   * Match the operand's type to the stored one. SQLite holds values of
+   * different types to be never equal, so `{ ne: '5' }` against a numeric
+   * field excludes nothing and quietly returns every note — where the same
+   * mismatch on equality or a range would return an obvious empty result.
    */
   ne?: WhereValue;
   /** Less than. */

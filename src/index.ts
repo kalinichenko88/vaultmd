@@ -40,6 +40,7 @@ export type {
 export type {
   Backlink,
   DanglingLink,
+  NoteFilter,
   NoteHit,
   OrderField,
   OutboundLink,
