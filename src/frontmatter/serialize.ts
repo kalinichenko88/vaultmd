@@ -6,9 +6,7 @@ import { assertFlatFrontmatter } from './validate.ts';
  * Fence one YAML document into a frontmatter block — the single emitter both
  * producers go through, so `serializeFrontmatter` (a fresh map) and
  * `editFrontmatter` (an existing block re-emitted) cannot drift on options or
- * on how the `---` fences are assembled. They did drift once: this file passed
- * explicit options while `editFrontmatter` used a bare `String(doc)`, and only
- * this side got the no-folding fix.
+ * on how the `---` fences are assembled.
  *
  * `blockQuote: false` keeps multi-line values in double-quoted flow scalars
  * rather than `|`/`|+` block scalars — a block scalar whose value ends in a

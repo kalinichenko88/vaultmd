@@ -844,8 +844,7 @@ export function createQuery(
     // and MOST negative for the best match — hence the ascending ORDER BY. Sent
     // out raw it would be an API where -8.4 beats -2.1, and callers get that
     // comparison backwards; negated, `score` reads the way a relevance number
-    // is expected to. Unaffected by `snippet: false`, so countSearch keeps
-    // paying for neither the snippet nor a second statement.
+    // is expected to.
     const sql = `
       SELECT n.path, n.title, ${snippetCol} AS snippet, -notes_fts.rank AS score
       FROM notes_fts
@@ -987,13 +986,8 @@ export function createQuery(
           continue;
         }
         seen.add(candidate.path);
-        // No `score`. The candidate's fts5 rank scores ONE of the subject's
-        // names as a phrase query, so hits found through a filename and through
-        // an alias came from different queries and cannot be compared; the
-        // non-tokenizable fallback has no rank at all; and these hits arrive in
-        // term-iteration order, not score order, so there is not even a top hit
-        // to compare against. A number with none of the properties
-        // SearchHit.score promises is a trap, not a feature.
+        // No `score` — see SearchHit.score: a rank here would have none of the
+        // properties that field promises.
         hits.push({
           path: candidate.path,
           title: candidate.title,

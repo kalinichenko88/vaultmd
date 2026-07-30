@@ -24,12 +24,9 @@ export type SearchHit = {
    * Unbounded above, and comparable only **within one query's results**. BM25
    * weighs a term by how rare it is across the vault and how short the matching
    * note is, so the same number means different things for different query
-   * strings — a threshold tuned on one query does not transfer to another.
-   * Compare hits against each other, or against the top hit, not against a
-   * constant carried between searches. For the same reason a fixed cutoff
-   * drifts as the vault grows: adding notes changes how rare a term is, and a
-   * read-scoped instance is ranked against the whole index rather than the
-   * subset it can read, so notes it cannot see still move its numbers.
+   * strings, and drifts as the vault grows — a read-scoped instance is even
+   * ranked against the whole index, not the subset it can read. Compare hits
+   * against each other, or against the top hit, never against a constant.
    *
    * Present on every {@link QueryApi.searchText} hit, and **only** there.
    * {@link QueryApi.unlinkedMentions} and {@link QueryApi.outboundMentions}

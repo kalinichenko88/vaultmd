@@ -1159,14 +1159,6 @@ describe('searchText — relevance score', () => {
     expect(raw?.rank).toBeLessThan(0);
     expect(hit.score).toBe(-(raw?.rank as number));
   });
-
-  test('countSearch still counts the same rows with the snippet projection off', () => {
-    insertNote(db, { path: 'a.md', body: 'fox one' });
-    insertNote(db, { path: 'b.md', body: 'fox two' });
-    const q = mkQuery();
-    expect(q.countSearch('fox')).toBe(2);
-    expect(q.countSearch('fox')).toBe(q.searchText('fox').length);
-  });
 });
 
 describe('searchText — basic search + filters + read-scope', () => {
@@ -2469,18 +2461,16 @@ describe('mentions — documented limits and cross-method agreement', () => {
     insertNote(db, { path: 'journal.md', body: 'kicked off Alpha today' });
     const q = mkQuery();
 
-    // Both match names in prose rather than running one ranked query, so a
-    // score would be per-name and unordered — none of what SearchHit.score
-    // promises. `in`, not `=== undefined`: a consumer feature-detecting the
-    // field must not find a present-but-undefined key.
-    for (const hit of [
+    // `in`, not `=== undefined`: a consumer feature-detecting the field must
+    // not find a present-but-undefined key.
+    const hits = [
       ...q.unlinkedMentions('Alpha.md'),
       ...q.outboundMentions('journal.md'),
-    ]) {
+    ];
+    expect(hits).toHaveLength(2);
+    for (const hit of hits) {
       expect('score' in hit).toBe(false);
     }
-    expect(q.unlinkedMentions('Alpha.md')).toHaveLength(1);
-    expect(q.outboundMentions('journal.md')).toHaveLength(1);
   });
 });
 

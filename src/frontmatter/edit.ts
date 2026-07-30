@@ -83,43 +83,23 @@ export function editFrontmatter(
   if (!changed) {
     return { content, outcome: 'unchanged' };
   }
-  // The same emitter buildFrontmatterBlock uses, so both frontmatter producers
-  // agree byte-for-byte on options and fences. Editing an existing note is the
-  // commoner write by far, so it is the path that most needs the no-folding and
-  // no-block-scalar guarantees — hand-rolling them here is how the two drifted
-  // in the first place.
   return {
     content: `${emitFrontmatterBlock(doc)}${ext.body}`,
     outcome: 'edited',
   };
 }
 
-// yaml is parsed with `uniqueKeys: false`, so a note may legally repeat a key,
-// and every READER of one is last-wins — `doc.toJS()` here, `parseFrontmatter`
-// for the caller. `doc.set`/`doc.delete` address the FIRST pair, though, so an
-// edit would write into a shadowed copy nothing reads: the mutation vanishes on
-// the next parse while the outcome still says 'edited', and a deleted key comes
-// back. Dropping the shadowed pairs up front only makes the file say what its
-// readers already believe it says, and it happens on the edited path alone — an
-// unchanged note is returned byte-for-byte as it came in.
+// A note may legally repeat a key (`uniqueKeys: false`), and every reader of one
+// is last-wins. `doc.set`/`doc.delete` address the FIRST pair, so without this
+// an edit lands where nothing reads it and vanishes on the next parse.
 function dropShadowedKeys(doc: Document): void {
   if (!isMap(doc.contents)) {
     return;
   }
-  const seen = new Set<unknown>();
-  // Reversed, because the pair that survives is the LAST one — the one the
-  // readers resolve to.
-  doc.contents.items = doc.contents.items
-    .slice()
-    .reverse()
-    .filter((pair) => {
-      const key = isScalar(pair.key) ? pair.key.value : pair.key;
-      if (seen.has(key)) {
-        return false;
-      }
-      seen.add(key);
-
-      return true;
-    })
-    .reverse();
+  const keys = doc.contents.items.map((p) =>
+    isScalar(p.key) ? p.key.value : p.key,
+  );
+  doc.contents.items = doc.contents.items.filter(
+    (_, i) => keys.lastIndexOf(keys[i]) === i,
+  );
 }
