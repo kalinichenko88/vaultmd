@@ -2155,7 +2155,6 @@ describe('unlinkedMentions', () => {
         path: 'journal.md',
         title: 'journal',
         snippet: 'we kicked off <b>Alpha</b> today and it went well',
-        score: expect.any(Number),
       },
     ]);
   });
@@ -2465,29 +2464,23 @@ describe('mentions — documented limits and cross-method agreement', () => {
     expect(inbound[0].snippet).toBe(outbound[0].snippet);
   });
 
-  test('score: present on an fts5-backed unlinked mention, absent where no fts5 query ran', () => {
+  test('neither mention method carries a score — the key is absent, not undefined', () => {
     insertNote(db, { path: 'Alpha.md' });
     insertNote(db, { path: 'journal.md', body: 'kicked off Alpha today' });
-    // A name unicode61 tokenises to nothing skips MATCH entirely and scans
-    // every readable note instead, so there is no rank to report.
-    insertNote(db, { path: '📥.md' });
-    insertNote(db, {
-      path: 'triage.md',
-      body: 'dropped it in 📥 this morning',
-    });
     const q = mkQuery();
 
-    const [alpha] = q.unlinkedMentions('Alpha.md');
-    expect(alpha.path).toBe('journal.md');
-    expect(alpha.score).toBeGreaterThan(0);
-
-    const [inbox] = q.unlinkedMentions('📥.md');
-    expect(inbox.path).toBe('triage.md');
-    expect(inbox.score).toBeUndefined();
-
-    // outboundMentions never runs an fts5 query — it scans the queried note's
-    // own body — so it has nothing to score with, in either direction.
-    expect(q.outboundMentions('journal.md')[0].score).toBeUndefined();
+    // Both match names in prose rather than running one ranked query, so a
+    // score would be per-name and unordered — none of what SearchHit.score
+    // promises. `in`, not `=== undefined`: a consumer feature-detecting the
+    // field must not find a present-but-undefined key.
+    for (const hit of [
+      ...q.unlinkedMentions('Alpha.md'),
+      ...q.outboundMentions('journal.md'),
+    ]) {
+      expect('score' in hit).toBe(false);
+    }
+    expect(q.unlinkedMentions('Alpha.md')).toHaveLength(1);
+    expect(q.outboundMentions('journal.md')).toHaveLength(1);
   });
 });
 

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { editFrontmatter } from '../edit.ts';
+import { parseFrontmatter } from '../parse.ts';
 
 describe('editFrontmatter', () => {
   test('multi-field mutate preserves comments, order, 1.0, empty aliases', () => {
@@ -63,6 +64,48 @@ body text
     // already has frontmatter is the commoner write, and folding there would
     // break the caller's flat-value guarantee just as thoroughly.
     expect(r.content).toContain(`source: ${source}\n`);
+  });
+
+  test('a value ending in a newline round-trips (no |+ block scalar)', () => {
+    // A `|+` block scalar as the last key is ambiguous against the closing
+    // `---` fence: yaml emits it, the parser gives the newline back to the
+    // fence, and the value silently loses it on every read.
+    for (const note of ['a\n', 'a\n\n', 'a\nb\n\n\n']) {
+      const r = editFrontmatter('---\ntitle: x\n---\nbody', (fm) => {
+        fm.note = note;
+      });
+      expect(r.content).not.toContain('|+');
+      expect(parseFrontmatter(r.content).frontmatter).toEqual({
+        title: 'x',
+        note,
+      });
+    }
+  });
+
+  test('editing a duplicated key writes the pair readers actually resolve to', () => {
+    // yaml parses with uniqueKeys: false and every reader is last-wins, but
+    // doc.set/doc.delete hit the FIRST pair — so without the shadow drop the
+    // write lands where nothing reads it and vanishes on the next parse.
+    const dup = '---\ntags: a\ntags: b\ntitle: x\n---\nbody';
+
+    const set = editFrontmatter(dup, (fm) => {
+      fm.tags = 'z';
+    });
+    expect(set.outcome).toBe('edited');
+    expect(parseFrontmatter(set.content).frontmatter).toEqual({
+      tags: 'z',
+      title: 'x',
+    });
+
+    const del = editFrontmatter(dup, (fm) => {
+      delete fm.tags;
+    });
+    expect(del.outcome).toBe('edited');
+    expect(parseFrontmatter(del.content).frontmatter).toEqual({ title: 'x' });
+
+    // An unchanged note is still returned byte-for-byte: the shadow drop is not
+    // a licence to rewrite a file nobody asked to edit.
+    expect(editFrontmatter(dup, () => {}).content).toBe(dup);
   });
 
   test('no-op mutate -> unchanged, content untouched', () => {

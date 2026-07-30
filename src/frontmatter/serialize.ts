@@ -3,20 +3,42 @@ import { Document } from 'yaml';
 import { assertFlatFrontmatter } from './validate.ts';
 
 /**
- * Build the fenced YAML block for an already-validated flat frontmatter map.
- * The single source of truth for fresh-block emission, shared with
- * `editFrontmatter`'s no-frontmatter path so the two stay byte-identical.
+ * Fence one YAML document into a frontmatter block — the single emitter both
+ * producers go through, so `serializeFrontmatter` (a fresh map) and
+ * `editFrontmatter` (an existing block re-emitted) cannot drift on options or
+ * on how the `---` fences are assembled. They did drift once: this file passed
+ * explicit options while `editFrontmatter` used a bare `String(doc)`, and only
+ * this side got the no-folding fix.
  *
- * Returns the empty string for an empty map (no block to emit). Strings are
- * emitted with `blockQuote: false`, so multi-line values use double-quoted flow
- * scalars rather than `|`/`|+` block scalars — block scalars whose value ends in
- * a newline are ambiguous against the closing `---` fence and lose data on
- * re-parse.
+ * `blockQuote: false` keeps multi-line values in double-quoted flow scalars
+ * rather than `|`/`|+` block scalars — a block scalar whose value ends in a
+ * newline is ambiguous against the closing `---` fence and loses that newline
+ * on re-parse. It costs an author-written `|` block its styling the first time
+ * the note is edited, which is the price of the value surviving the round-trip.
  *
  * `lineWidth: 0` disables folding: yaml's default wraps any scalar past 80
  * columns onto continuation lines, which still round-trips but leaves a long
  * `source:` string or URL spread over several lines, unreadable to anything
  * reading the file as line-oriented text.
+ *
+ * @param doc The YAML document to emit.
+ * @returns The block as `---\n<yaml>\n---\n`.
+ */
+export function emitFrontmatterBlock(doc: Document): string {
+  const block = doc
+    .toString({ blockQuote: false, lineWidth: 0 })
+    .replace(/\n$/, '');
+
+  return `---\n${block}\n---\n`;
+}
+
+/**
+ * Build the fenced YAML block for an already-validated flat frontmatter map.
+ * The single source of truth for fresh-block emission, shared with
+ * `editFrontmatter`'s no-frontmatter path so the two stay byte-identical.
+ *
+ * Returns the empty string for an empty map (no block to emit); everything else
+ * is {@link emitFrontmatterBlock}'s contract.
  *
  * @param frontmatter Flat key-value map; the caller must validate flatness.
  * @returns `''` for an empty map, otherwise `---\n<yaml>\n---\n`.
@@ -27,11 +49,8 @@ export function buildFrontmatterBlock(
   if (Object.keys(frontmatter).length === 0) {
     return '';
   }
-  const block = new Document(frontmatter)
-    .toString({ blockQuote: false, lineWidth: 0 })
-    .replace(/\n$/, '');
 
-  return `---\n${block}\n---\n`;
+  return emitFrontmatterBlock(new Document(frontmatter));
 }
 
 /**
@@ -43,8 +62,12 @@ export function buildFrontmatterBlock(
  *
  * An empty map yields the empty string (no block), matching what `createNote` /
  * {@link editFrontmatter} write for empty frontmatter. Non-empty arrays
- * serialize as block sequences; an empty array serializes as flow `[]`. Every
- * scalar stays on one line however long it is — no folding.
+ * serialize as block sequences; an empty array serializes as flow `[]`.
+ *
+ * Folding is off, so a value stays on its key's line however long it is. A
+ * value that *contains* a newline is the exception — it has to span lines to
+ * carry them — and is emitted as a double-quoted scalar broken at its own line
+ * breaks, not at a column limit.
  *
  * @param frontmatter Flat key-value map (scalars and arrays of scalars only).
  * @returns A string of the form `---\n<yaml>\n---\n`, or `''` for an empty map.

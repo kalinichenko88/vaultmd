@@ -259,11 +259,17 @@ danglingLinks(opts?: { limit?: number; offset?: number }): DanglingLink[]
 // frontmatter title, and its aliases. Case-insensitive, word-boundary, so `cat`
 // is never found inside `catalogue` — and a name embedded in unsegmented CJK
 // prose is not found at all. A note that already links is a link, not a
-// mention. Both return SearchHit[] = { path, title, snippet? }[].
+// mention. Both return SearchHit[] = { path, title, snippet? }[] — no `score`:
+// they match names in prose, not one ranked query.
 unlinkedMentions(path, opts?: { limit?: number; offset?: number }): SearchHit[]
 outboundMentions(path, opts?: { limit?: number; offset?: number }): SearchHit[]
 
-// Full-text keyword search over bodies. Returns { path, title, snippet? }[].
+// Full-text keyword search over bodies, best match first. Returns
+// { path, title, snippet?, score }[], where `score` is fts5's BM25 relevance
+// negated so HIGHER IS BETTER. It is comparable only within one query's
+// results — BM25 weighs term rarity and note length, so a cutoff tuned on one
+// query does not transfer to another, and it drifts as the vault grows.
+// Compare hits against each other or against the top hit, not a constant.
 searchText(q, opts?: NoteFilter & { limit?: number; offset?: number }): SearchHit[]
 
 // Total hits for the same query — the page-count companion to searchText.

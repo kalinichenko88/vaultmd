@@ -1,8 +1,8 @@
-import { parseDocument } from 'yaml';
+import { type Document, isMap, isScalar, parseDocument } from 'yaml';
 
 import type { EditOutcome } from './models/edit-outcome.ts';
 import { extractBlock, parseFrontmatter } from './parse.ts';
-import { buildFrontmatterBlock } from './serialize.ts';
+import { buildFrontmatterBlock, emitFrontmatterBlock } from './serialize.ts';
 import { isFlatFrontmatter } from './validate.ts';
 
 /**
@@ -57,6 +57,7 @@ export function editFrontmatter(
     return { content, outcome: 'unverifiable' };
   }
   const doc = parseDocument(ext.yaml, { uniqueKeys: false });
+  dropShadowedKeys(doc);
   const before = (doc.toJS() ?? {}) as Record<string, unknown>;
   const view = structuredClone(before);
   mutate(view);
@@ -82,17 +83,43 @@ export function editFrontmatter(
   if (!changed) {
     return { content, outcome: 'unchanged' };
   }
-  // lineWidth: 0 for the same reason buildFrontmatterBlock passes it — an
-  // 80-column fold spreads a long `source:` or URL over continuation lines.
-  // Fixing only the fresh-block path would leave every EDIT of a note that
-  // already has frontmatter folding, which is the commoner write by far.
-  // blockQuote is left at its default here on purpose: this path re-emits the
-  // whole existing document, and forcing flow scalars would rewrite `|` blocks
-  // the author wrote, which is the styling this path exists to preserve.
-  const serialized = doc.toString({ lineWidth: 0 });
-  const block = serialized.endsWith('\n')
-    ? serialized.slice(0, -1)
-    : serialized;
+  // The same emitter buildFrontmatterBlock uses, so both frontmatter producers
+  // agree byte-for-byte on options and fences. Editing an existing note is the
+  // commoner write by far, so it is the path that most needs the no-folding and
+  // no-block-scalar guarantees — hand-rolling them here is how the two drifted
+  // in the first place.
+  return {
+    content: `${emitFrontmatterBlock(doc)}${ext.body}`,
+    outcome: 'edited',
+  };
+}
 
-  return { content: `---\n${block}\n---\n${ext.body}`, outcome: 'edited' };
+// yaml is parsed with `uniqueKeys: false`, so a note may legally repeat a key,
+// and every READER of one is last-wins — `doc.toJS()` here, `parseFrontmatter`
+// for the caller. `doc.set`/`doc.delete` address the FIRST pair, though, so an
+// edit would write into a shadowed copy nothing reads: the mutation vanishes on
+// the next parse while the outcome still says 'edited', and a deleted key comes
+// back. Dropping the shadowed pairs up front only makes the file say what its
+// readers already believe it says, and it happens on the edited path alone — an
+// unchanged note is returned byte-for-byte as it came in.
+function dropShadowedKeys(doc: Document): void {
+  if (!isMap(doc.contents)) {
+    return;
+  }
+  const seen = new Set<unknown>();
+  // Reversed, because the pair that survives is the LAST one — the one the
+  // readers resolve to.
+  doc.contents.items = doc.contents.items
+    .slice()
+    .reverse()
+    .filter((pair) => {
+      const key = isScalar(pair.key) ? pair.key.value : pair.key;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+
+      return true;
+    })
+    .reverse();
 }

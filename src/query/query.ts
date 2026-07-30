@@ -946,8 +946,7 @@ export function createQuery(
   // tokenises to nothing and MATCH answers no rows, an empty result the caller
   // cannot tell from "nobody mentions it". Such a name falls back to every
   // readable note, which is affordable exactly because a name carrying no
-  // letter or digit is rare. That fallback ran no fts5 query, so its rows carry
-  // no `score` — the honest answer, and what SearchHit.score documents.
+  // letter or digit is rare.
   function mentionCandidates(term: string): SearchHit[] {
     if (TOKENIZABLE.test(term)) {
       return searchScoped(term, {}, { phrase: true, snippet: false });
@@ -988,14 +987,17 @@ export function createQuery(
           continue;
         }
         seen.add(candidate.path);
+        // No `score`. The candidate's fts5 rank scores ONE of the subject's
+        // names as a phrase query, so hits found through a filename and through
+        // an alias came from different queries and cannot be compared; the
+        // non-tokenizable fallback has no rank at all; and these hits arrive in
+        // term-iteration order, not score order, so there is not even a top hit
+        // to compare against. A number with none of the properties
+        // SearchHit.score promises is a trap, not a feature.
         hits.push({
           path: candidate.path,
           title: candidate.title,
           snippet: match.snippet,
-          // The candidate's own fts5 score for THIS term. Terms are separate
-          // queries, so two hits found through different names of the subject
-          // are not comparable — SearchHit.score says so.
-          score: candidate.score,
         });
       }
     }
