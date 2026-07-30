@@ -1129,6 +1129,46 @@ describe('searchText — sanitization: adversarial FTS5 input never throws', () 
   });
 });
 
+describe('searchText — relevance score', () => {
+  test('every hit carries a positive score, best match highest, matching rank order', () => {
+    insertNote(db, { path: 'strong.md', body: 'fox fox fox fox' });
+    insertNote(db, {
+      path: 'weak.md',
+      body: `fox ${'unrelated padding words '.repeat(20)}`,
+    });
+    const hits = mkQuery().searchText('fox');
+    expect(hits.map((h) => h.path)).toEqual(['strong.md', 'weak.md']);
+    for (const hit of hits) {
+      expect(hit.score).toBeGreaterThan(0);
+    }
+    // The contract callers thread on: score DESC is the order rows arrive in,
+    // so `hits[0]` is also `max(score)` and a threshold reads the same way the
+    // list does.
+    expect(hits[0].score).toBeGreaterThan(hits[1].score as number);
+  });
+
+  test('score is the negation of fts5 bm25 rank, not the raw value', () => {
+    insertNote(db, { path: 'a.md', body: 'the quick brown fox' });
+    const [hit] = mkQuery().searchText('fox');
+    const raw = db
+      .query<{ rank: number }, [string]>(
+        'SELECT rank FROM notes_fts WHERE notes_fts MATCH ?',
+      )
+      .get('"fox"');
+    // fts5 ranks negative-is-better; the exported score is the mirror of it.
+    expect(raw?.rank).toBeLessThan(0);
+    expect(hit.score).toBe(-(raw?.rank as number));
+  });
+
+  test('countSearch still counts the same rows with the snippet projection off', () => {
+    insertNote(db, { path: 'a.md', body: 'fox one' });
+    insertNote(db, { path: 'b.md', body: 'fox two' });
+    const q = mkQuery();
+    expect(q.countSearch('fox')).toBe(2);
+    expect(q.countSearch('fox')).toBe(q.searchText('fox').length);
+  });
+});
+
 describe('searchText — basic search + filters + read-scope', () => {
   test('finds a note by body keyword', () => {
     const io = createVaultIo({
@@ -2115,6 +2155,7 @@ describe('unlinkedMentions', () => {
         path: 'journal.md',
         title: 'journal',
         snippet: 'we kicked off <b>Alpha</b> today and it went well',
+        score: expect.any(Number),
       },
     ]);
   });
@@ -2422,6 +2463,31 @@ describe('mentions — documented limits and cross-method agreement', () => {
     expect(outbound.map((h) => h.path)).toEqual(['Alpha.md']);
     // Same body, same matcher, so the excerpt is identical from either side.
     expect(inbound[0].snippet).toBe(outbound[0].snippet);
+  });
+
+  test('score: present on an fts5-backed unlinked mention, absent where no fts5 query ran', () => {
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, { path: 'journal.md', body: 'kicked off Alpha today' });
+    // A name unicode61 tokenises to nothing skips MATCH entirely and scans
+    // every readable note instead, so there is no rank to report.
+    insertNote(db, { path: '📥.md' });
+    insertNote(db, {
+      path: 'triage.md',
+      body: 'dropped it in 📥 this morning',
+    });
+    const q = mkQuery();
+
+    const [alpha] = q.unlinkedMentions('Alpha.md');
+    expect(alpha.path).toBe('journal.md');
+    expect(alpha.score).toBeGreaterThan(0);
+
+    const [inbox] = q.unlinkedMentions('📥.md');
+    expect(inbox.path).toBe('triage.md');
+    expect(inbox.score).toBeUndefined();
+
+    // outboundMentions never runs an fts5 query — it scans the queried note's
+    // own body — so it has nothing to score with, in either direction.
+    expect(q.outboundMentions('journal.md')[0].score).toBeUndefined();
   });
 });
 

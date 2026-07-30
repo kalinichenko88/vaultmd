@@ -33,7 +33,12 @@ type RawNoteRow = {
 type TagRow = { tag: string };
 type LinkRow = { target: string; base: string | null };
 type SrcLinkRow = LinkRow & { from_path: string };
-type SearchRow = { path: string; title: string; snippet: string };
+type SearchRow = {
+  path: string;
+  title: string;
+  snippet: string;
+  score: number;
+};
 type PathRow = { path: string };
 
 function assertNonNegativeInt(value: number, label: string): void {
@@ -834,8 +839,15 @@ export function createQuery(
     // Fetch all matching rows without LIMIT/OFFSET — scope-filter first, then
     // slice in JS to get exact page fills. (At personal-vault scale the full
     // scan is fine; a future optimisation can push read-prefixes into SQL.)
+    //
+    // `-notes_fts.rank`, not `rank`: fts5 ranks with bm25(), which is negative
+    // and MOST negative for the best match — hence the ascending ORDER BY. Sent
+    // out raw it would be an API where -8.4 beats -2.1, and callers get that
+    // comparison backwards; negated, `score` reads the way a relevance number
+    // is expected to. Unaffected by `snippet: false`, so countSearch keeps
+    // paying for neither the snippet nor a second statement.
     const sql = `
-      SELECT n.path, n.title, ${snippetCol} AS snippet
+      SELECT n.path, n.title, ${snippetCol} AS snippet, -notes_fts.rank AS score
       FROM notes_fts
       JOIN notes n ON notes_fts.rowid = n.id
       WHERE notes_fts MATCH ? ${extra}
@@ -871,6 +883,7 @@ export function createQuery(
         path: row.path,
         title: row.title,
         snippet: row.snippet || undefined,
+        score: row.score,
       });
     }
 
@@ -933,7 +946,8 @@ export function createQuery(
   // tokenises to nothing and MATCH answers no rows, an empty result the caller
   // cannot tell from "nobody mentions it". Such a name falls back to every
   // readable note, which is affordable exactly because a name carrying no
-  // letter or digit is rare.
+  // letter or digit is rare. That fallback ran no fts5 query, so its rows carry
+  // no `score` — the honest answer, and what SearchHit.score documents.
   function mentionCandidates(term: string): SearchHit[] {
     if (TOKENIZABLE.test(term)) {
       return searchScoped(term, {}, { phrase: true, snippet: false });
@@ -978,6 +992,10 @@ export function createQuery(
           path: candidate.path,
           title: candidate.title,
           snippet: match.snippet,
+          // The candidate's own fts5 score for THIS term. Terms are separate
+          // queries, so two hits found through different names of the subject
+          // are not comparable — SearchHit.score says so.
+          score: candidate.score,
         });
       }
     }

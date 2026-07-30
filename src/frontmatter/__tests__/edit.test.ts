@@ -52,6 +52,19 @@ body text
     expect(r.content.endsWith(content)).toBe(true);
   });
 
+  test('a long scalar written into an EXISTING block stays on one line', () => {
+    const source =
+      'Imported from the Q2 architecture review deck, slide 14, transcribed by the ingestion agent and reconciled against the meeting minutes.';
+    const r = editFrontmatter('---\ntitle: x\n---\nbody', (fm) => {
+      fm.source = source;
+    });
+    expect(r.outcome).toBe('edited');
+    // Same no-folding contract as the fresh-block path: an edit to a note that
+    // already has frontmatter is the commoner write, and folding there would
+    // break the caller's flat-value guarantee just as thoroughly.
+    expect(r.content).toContain(`source: ${source}\n`);
+  });
+
   test('no-op mutate -> unchanged, content untouched', () => {
     const content = '---\ntitle: x\n---\nbody';
     const r = editFrontmatter(content, () => {});

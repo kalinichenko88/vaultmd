@@ -82,7 +82,14 @@ export function editFrontmatter(
   if (!changed) {
     return { content, outcome: 'unchanged' };
   }
-  const serialized = String(doc);
+  // lineWidth: 0 for the same reason buildFrontmatterBlock passes it — an
+  // 80-column fold spreads a long `source:` or URL over continuation lines.
+  // Fixing only the fresh-block path would leave every EDIT of a note that
+  // already has frontmatter folding, which is the commoner write by far.
+  // blockQuote is left at its default here on purpose: this path re-emits the
+  // whole existing document, and forcing flow scalars would rewrite `|` blocks
+  // the author wrote, which is the styling this path exists to preserve.
+  const serialized = doc.toString({ lineWidth: 0 });
   const block = serialized.endsWith('\n')
     ? serialized.slice(0, -1)
     : serialized;

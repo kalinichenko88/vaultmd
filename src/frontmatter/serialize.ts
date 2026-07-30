@@ -13,6 +13,11 @@ import { assertFlatFrontmatter } from './validate.ts';
  * a newline are ambiguous against the closing `---` fence and lose data on
  * re-parse.
  *
+ * `lineWidth: 0` disables folding: yaml's default wraps any scalar past 80
+ * columns onto continuation lines, which still round-trips but leaves a long
+ * `source:` string or URL spread over several lines, unreadable to anything
+ * reading the file as line-oriented text.
+ *
  * @param frontmatter Flat key-value map; the caller must validate flatness.
  * @returns `''` for an empty map, otherwise `---\n<yaml>\n---\n`.
  */
@@ -23,7 +28,7 @@ export function buildFrontmatterBlock(
     return '';
   }
   const block = new Document(frontmatter)
-    .toString({ blockQuote: false })
+    .toString({ blockQuote: false, lineWidth: 0 })
     .replace(/\n$/, '');
 
   return `---\n${block}\n---\n`;
@@ -38,7 +43,8 @@ export function buildFrontmatterBlock(
  *
  * An empty map yields the empty string (no block), matching what `createNote` /
  * {@link editFrontmatter} write for empty frontmatter. Non-empty arrays
- * serialize as block sequences; an empty array serializes as flow `[]`.
+ * serialize as block sequences; an empty array serializes as flow `[]`. Every
+ * scalar stays on one line however long it is — no folding.
  *
  * @param frontmatter Flat key-value map (scalars and arrays of scalars only).
  * @returns A string of the form `---\n<yaml>\n---\n`, or `''` for an empty map.

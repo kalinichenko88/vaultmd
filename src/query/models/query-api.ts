@@ -126,8 +126,10 @@ export type QueryApi = {
   ): SearchHit[];
   /**
    * FTS5 keyword search over note bodies, returning highlighted snippets,
-   * narrowed by the same {@link NoteFilter} the note readers take. Defaults to
-   * limit 100; hard cap 1000.
+   * narrowed by the same {@link NoteFilter} the note readers take. Best match
+   * first, each hit carrying a higher-is-better `score` — read
+   * {@link SearchHit.score} before thresholding on it. Defaults to limit 100;
+   * hard cap 1000.
    */
   searchText(
     q: string,

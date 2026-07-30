@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.8.0 — 2026-07-30
+
+Two independent unblocks for consumers writing a vault programmatically: a
+relevance number on every search hit, and frontmatter that stops folding long
+values across lines. No schema change, so no index rebuild is triggered, and the
+public API freeze stays at 50 names — `SearchHit` gains a *member*, not the
+surface a name. Bun floor unchanged at ≥ 1.3.14.
+
+### Search relevance
+
+- **`query.searchText()` hits now carry `score`** — the relevance fts5 was
+  already computing to order them by, and the query then threw away. Rank
+  *order* alone cannot separate a strong match from the least-bad match in a
+  vault where nothing really matches, which is exactly what a caller asking "is
+  this the note I am about to write?" needs a number for.
+- **Higher is better.** fts5 ranks with `bm25()`, which returns a *negative*
+  number where more negative is the better match (hence its ascending rank
+  order). The exported `score` is that value negated, so a threshold reads
+  `score > x` instead of the `score < -x` every caller gets backwards at least
+  once. Result order is unchanged — hits still arrive best first, and `hits[0]`
+  is now also `max(score)`.
+- **Comparable only within one query's results.** BM25 weighs a term by how rare
+  it is across the vault and how short the matching note is, so the same number
+  means different things for different query strings, and a threshold tuned on
+  one query does not transfer to another. Compare hits against each other, or
+  against the top hit — not against a constant carried between searches. The
+  TSDoc says so at the field, where a consumer picking a cutoff will read it.
+- The field is **optional**, because two producers genuinely have no rank to
+  report. `unlinkedMentions()` carries the score of the name-phrase query that
+  surfaced the candidate, but it runs one query *per name* of the subject note
+  (filename, frontmatter `title`, each alias), so hits found through different
+  names are not mutually comparable — and a name fts5 cannot tokenize (`📥.md`)
+  skips `MATCH` altogether and yields none. `outboundMentions()` runs no fts5
+  query at all, scanning the queried note's own body instead, so its hits never
+  carry one.
+- `countSearch()` is unaffected: it shares the same statement with the snippet
+  projection off, and still counts precisely the rows `searchText` returns.
+
+### Fixed
+
+- **`serializeFrontmatter()` folded any scalar past 80 characters** onto
+  indented continuation lines — yaml's default `lineWidth`. The value still
+  survived a parse round-trip, but a long `source:` provenance string or URL
+  landed on disk unreadable to anything treating the file as line-oriented text,
+  breaking the flat single-line frontmatter an agent writing notes continuously
+  depends on. Folding is now off (`lineWidth: 0`) and every scalar stays on its
+  key's line, however long. The existing `blockQuote: false` and its reasoning
+  are untouched.
+- **The same fold hit `editFrontmatter()`'s existing-block path** — the commoner
+  write by far, since it covers every update to a note that already has
+  frontmatter. Fixed alongside, so both frontmatter producers agree; fixing only
+  the fresh-block path would have left the guarantee broken where it is used
+  most. `blockQuote` is deliberately left at its default there: that path
+  re-emits the whole document, and forcing flow scalars would rewrite `|` blocks
+  the author wrote, which is the styling it exists to preserve.
+
 ## 0.7.0 — 2026-07-29
 
 Two bodies of query work: richer filtering on every read (#8), and three

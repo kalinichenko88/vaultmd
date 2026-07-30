@@ -28,6 +28,22 @@ describe('serializeFrontmatter', () => {
     }
   });
 
+  test('long scalars stay on one line and round-trip (no 80-column folding)', () => {
+    const url = `https://example.com/wiki/Long_Article_Title?section=${'a'.repeat(90)}&ref=vault`;
+    const source =
+      'Imported from the Q2 architecture review deck, slide 14, transcribed by the ingestion agent and reconciled against the meeting minutes.';
+    const fm: Record<string, unknown> = { source, url, tags: ['ingested'] };
+    const serialized = serializeFrontmatter(fm);
+
+    expect(source.length).toBeGreaterThan(80);
+    // The value sits on the same line as its key — the property the consumer
+    // reads the file for. yaml's default lineWidth: 80 would wrap it onto
+    // indented continuation lines instead.
+    expect(serialized).toContain(`source: ${source}\n`);
+    expect(serialized).toContain(`url: ${url}\n`);
+    expect(parseFrontmatter(serialized).frontmatter).toEqual(fm);
+  });
+
   test('round-trip preserves an empty array value', () => {
     const fm: Record<string, unknown> = { tags: [] };
     const parsed = parseFrontmatter(serializeFrontmatter(fm));
