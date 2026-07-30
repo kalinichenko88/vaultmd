@@ -1,8 +1,8 @@
-import { parseDocument } from 'yaml';
+import { type Document, isMap, isScalar, parseDocument } from 'yaml';
 
 import type { EditOutcome } from './models/edit-outcome.ts';
 import { extractBlock, parseFrontmatter } from './parse.ts';
-import { buildFrontmatterBlock } from './serialize.ts';
+import { buildFrontmatterBlock, emitFrontmatterBlock } from './serialize.ts';
 import { isFlatFrontmatter } from './validate.ts';
 
 /**
@@ -57,6 +57,7 @@ export function editFrontmatter(
     return { content, outcome: 'unverifiable' };
   }
   const doc = parseDocument(ext.yaml, { uniqueKeys: false });
+  dropShadowedKeys(doc);
   const before = (doc.toJS() ?? {}) as Record<string, unknown>;
   const view = structuredClone(before);
   mutate(view);
@@ -82,10 +83,23 @@ export function editFrontmatter(
   if (!changed) {
     return { content, outcome: 'unchanged' };
   }
-  const serialized = String(doc);
-  const block = serialized.endsWith('\n')
-    ? serialized.slice(0, -1)
-    : serialized;
+  return {
+    content: `${emitFrontmatterBlock(doc)}${ext.body}`,
+    outcome: 'edited',
+  };
+}
 
-  return { content: `---\n${block}\n---\n${ext.body}`, outcome: 'edited' };
+// A note may legally repeat a key (`uniqueKeys: false`), and every reader of one
+// is last-wins. `doc.set`/`doc.delete` address the FIRST pair, so without this
+// an edit lands where nothing reads it and vanishes on the next parse.
+function dropShadowedKeys(doc: Document): void {
+  if (!isMap(doc.contents)) {
+    return;
+  }
+  const keys = doc.contents.items.map((p) =>
+    isScalar(p.key) ? p.key.value : p.key,
+  );
+  doc.contents.items = doc.contents.items.filter(
+    (_, i) => keys.lastIndexOf(keys[i]) === i,
+  );
 }

@@ -1,5 +1,79 @@
 # Changelog
 
+## 0.8.0 — 2026-07-30
+
+Two independent unblocks for consumers writing a vault programmatically: a
+relevance number on every search hit, and frontmatter that stops folding long
+values across lines. No schema change, so no index rebuild is triggered, and the
+public API freeze stays at 50 names — `SearchHit` gains a *member*, not the
+surface a name. Bun floor unchanged at ≥ 1.3.14.
+
+### Search relevance
+
+- **`query.searchText()` hits now carry `score`** — the relevance fts5 was
+  already computing to order them by, and the query then threw away. Rank
+  *order* alone cannot separate a strong match from the least-bad match in a
+  vault where nothing really matches, which is exactly what a caller asking "is
+  this the note I am about to write?" needs a number for.
+- **Higher is better.** fts5 ranks with `bm25()`, which returns a *negative*
+  number where more negative is the better match (hence its ascending rank
+  order). The exported `score` is that value negated, so a threshold reads
+  `score > x` instead of the `score < -x` every caller gets backwards at least
+  once. Result order is unchanged — hits still arrive best first, and `hits[0]`
+  is now also `max(score)`.
+- **Comparable only within one query's results.** BM25 weighs a term by how rare
+  it is across the vault and how short the matching note is, so the same number
+  means different things for different query strings, and a threshold tuned on
+  one query does not transfer to another. For the same reason a fixed cutoff
+  drifts as the vault grows, and a read-scoped instance is ranked against the
+  whole index rather than the subset it can read. Compare hits against each
+  other, or against the top hit — not against a constant carried between
+  searches. The TSDoc says all of this at the field, where a consumer picking a
+  cutoff will read it.
+- The field carries **only on `searchText()`**. The mention methods match a
+  note's *names* in prose rather than running one ranked query, so any number
+  attached to them would be per-name (a hit found via an alias not comparable
+  with one found via the filename), unordered, and simply missing for a name
+  fts5 cannot tokenize (`📥.md`) — none of the properties above. They return
+  hits with no `score` key at all rather than a number that fails every
+  guarantee the field makes.
+- `countSearch()` is unaffected: it shares the same statement with the snippet
+  projection off, and still counts precisely the rows `searchText` returns.
+
+### Fixed
+
+- **Frontmatter folded any scalar past 80 characters** onto indented
+  continuation lines — yaml's default `lineWidth`. The value still survived a
+  parse round-trip, but a long `source:` provenance string or URL landed on disk
+  unreadable to anything treating the file as line-oriented text, breaking the
+  flat single-line frontmatter an agent writing notes continuously depends on.
+  Folding is now off (`lineWidth: 0`) on **both** producers — `createNote` /
+  `serializeFrontmatter`'s fresh block *and* `editFrontmatter`'s existing-block
+  path, which is the commoner write by far since it covers every update to a
+  note that already has frontmatter. A value that *contains* a newline still
+  spans lines, since it has to carry them; the guarantee is about a column
+  limit, not about newlines in the data.
+- **`editFrontmatter()` silently lost a trailing newline.** Its existing-block
+  path emitted yaml's default `|`/`|+` block scalars, and a `|+` scalar as the
+  last key is ambiguous against the closing `---` fence: `note: 'a\n\n'` was
+  written, then read back as `'a\n'`, on every round-trip. It now shares
+  `serializeFrontmatter`'s `blockQuote: false`, which is exactly what that
+  option has always been there to prevent. Cost: an author-written `|` block is
+  re-emitted as a double-quoted scalar the first time the note is edited —
+  styling traded for the value surviving.
+- **`editFrontmatter()` silently dropped an edit to a duplicated key.** YAML
+  here is parsed with `uniqueKeys: false` and every reader is last-wins, but
+  `doc.set`/`doc.delete` address the *first* pair — so on a note carrying
+  `tags:` twice, setting `tags` wrote into a shadowed copy nothing reads (the
+  value vanished on the next parse while the outcome still said `'edited'`), and
+  deleting `tags` left it in the file. Shadowed pairs are now dropped before the
+  mutation, on the edited path only — an unchanged note is still returned
+  byte-for-byte.
+- Both frontmatter producers now emit through **one shared function**. The fold
+  bug existed because they had drifted — one passed explicit options, the other
+  used a bare `String(doc)` — and two hand-written `---` fence assemblies plus
+  two different trailing-newline strips were the rest of that divergence.
+
 ## 0.7.0 — 2026-07-29
 
 Two bodies of query work: richer filtering on every read (#8), and three

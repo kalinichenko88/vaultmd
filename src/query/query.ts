@@ -33,7 +33,12 @@ type RawNoteRow = {
 type TagRow = { tag: string };
 type LinkRow = { target: string; base: string | null };
 type SrcLinkRow = LinkRow & { from_path: string };
-type SearchRow = { path: string; title: string; snippet: string };
+type SearchRow = {
+  path: string;
+  title: string;
+  snippet: string;
+  score: number;
+};
 type PathRow = { path: string };
 
 function assertNonNegativeInt(value: number, label: string): void {
@@ -834,8 +839,14 @@ export function createQuery(
     // Fetch all matching rows without LIMIT/OFFSET — scope-filter first, then
     // slice in JS to get exact page fills. (At personal-vault scale the full
     // scan is fine; a future optimisation can push read-prefixes into SQL.)
+    //
+    // `-notes_fts.rank`, not `rank`: fts5 ranks with bm25(), which is negative
+    // and MOST negative for the best match — hence the ascending ORDER BY. Sent
+    // out raw it would be an API where -8.4 beats -2.1, and callers get that
+    // comparison backwards; negated, `score` reads the way a relevance number
+    // is expected to.
     const sql = `
-      SELECT n.path, n.title, ${snippetCol} AS snippet
+      SELECT n.path, n.title, ${snippetCol} AS snippet, -notes_fts.rank AS score
       FROM notes_fts
       JOIN notes n ON notes_fts.rowid = n.id
       WHERE notes_fts MATCH ? ${extra}
@@ -871,6 +882,7 @@ export function createQuery(
         path: row.path,
         title: row.title,
         snippet: row.snippet || undefined,
+        score: row.score,
       });
     }
 
@@ -974,6 +986,8 @@ export function createQuery(
           continue;
         }
         seen.add(candidate.path);
+        // No `score` — see SearchHit.score: a rank here would have none of the
+        // properties that field promises.
         hits.push({
           path: candidate.path,
           title: candidate.title,

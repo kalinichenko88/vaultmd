@@ -1129,6 +1129,38 @@ describe('searchText — sanitization: adversarial FTS5 input never throws', () 
   });
 });
 
+describe('searchText — relevance score', () => {
+  test('every hit carries a positive score, best match highest, matching rank order', () => {
+    insertNote(db, { path: 'strong.md', body: 'fox fox fox fox' });
+    insertNote(db, {
+      path: 'weak.md',
+      body: `fox ${'unrelated padding words '.repeat(20)}`,
+    });
+    const hits = mkQuery().searchText('fox');
+    expect(hits.map((h) => h.path)).toEqual(['strong.md', 'weak.md']);
+    for (const hit of hits) {
+      expect(hit.score).toBeGreaterThan(0);
+    }
+    // The contract callers thread on: score DESC is the order rows arrive in,
+    // so `hits[0]` is also `max(score)` and a threshold reads the same way the
+    // list does.
+    expect(hits[0].score).toBeGreaterThan(hits[1].score as number);
+  });
+
+  test('score is the negation of fts5 bm25 rank, not the raw value', () => {
+    insertNote(db, { path: 'a.md', body: 'the quick brown fox' });
+    const [hit] = mkQuery().searchText('fox');
+    const raw = db
+      .query<{ rank: number }, [string]>(
+        'SELECT rank FROM notes_fts WHERE notes_fts MATCH ?',
+      )
+      .get('"fox"');
+    // fts5 ranks negative-is-better; the exported score is the mirror of it.
+    expect(raw?.rank).toBeLessThan(0);
+    expect(hit.score).toBe(-(raw?.rank as number));
+  });
+});
+
 describe('searchText — basic search + filters + read-scope', () => {
   test('finds a note by body keyword', () => {
     const io = createVaultIo({
@@ -2422,6 +2454,23 @@ describe('mentions — documented limits and cross-method agreement', () => {
     expect(outbound.map((h) => h.path)).toEqual(['Alpha.md']);
     // Same body, same matcher, so the excerpt is identical from either side.
     expect(inbound[0].snippet).toBe(outbound[0].snippet);
+  });
+
+  test('neither mention method carries a score — the key is absent, not undefined', () => {
+    insertNote(db, { path: 'Alpha.md' });
+    insertNote(db, { path: 'journal.md', body: 'kicked off Alpha today' });
+    const q = mkQuery();
+
+    // `in`, not `=== undefined`: a consumer feature-detecting the field must
+    // not find a present-but-undefined key.
+    const hits = [
+      ...q.unlinkedMentions('Alpha.md'),
+      ...q.outboundMentions('journal.md'),
+    ];
+    expect(hits).toHaveLength(2);
+    for (const hit of hits) {
+      expect('score' in hit).toBe(false);
+    }
   });
 });
 

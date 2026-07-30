@@ -15,4 +15,25 @@ export type SearchHit = {
    * matched. Absent when the caller asked for no snippet.
    */
   snippet?: string;
+  /**
+   * Relevance of this hit, **higher is better**. It is SQLite fts5's BM25 rank
+   * negated: fts5 itself scores with *negative* numbers where more negative is
+   * the better match (which is why its rank order is ascending), and handing
+   * that sign to callers makes every threshold read backwards.
+   *
+   * Unbounded above, and comparable only **within one query's results**. BM25
+   * weighs a term by how rare it is across the vault and how short the matching
+   * note is, so the same number means different things for different query
+   * strings, and drifts as the vault grows — a read-scoped instance is even
+   * ranked against the whole index, not the subset it can read. Compare hits
+   * against each other, or against the top hit, never against a constant.
+   *
+   * Present on every {@link QueryApi.searchText} hit, and **only** there.
+   * {@link QueryApi.unlinkedMentions} and {@link QueryApi.outboundMentions}
+   * return hits without it: they match a note's *names* in prose rather than
+   * running one ranked query, so any number attached to them would be
+   * per-name, unordered, and missing for a name fts5 cannot tokenize — none of
+   * the properties documented above.
+   */
+  score?: number;
 };
