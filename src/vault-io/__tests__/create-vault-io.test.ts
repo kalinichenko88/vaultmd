@@ -450,14 +450,14 @@ describe('listFolders', () => {
 });
 
 describe('enumeration cycle guard', () => {
-  test('a dir symlink pointing back inside the vault is followed at most once', async () => {
+  test('a dir symlink onto the directory holding it is not descended into', async () => {
     const io = createVaultIo({
       root: vault,
       prefixes: { read: [''], write: [''] },
     });
     await mkdir(join(vault, 'notes'));
     await writeFile(join(vault, 'notes', 'a.md'), '# a');
-    await symlink('..', join(vault, 'notes', 'loop')); // -> vault root
+    await symlink('.', join(vault, 'notes', 'self')); // -> notes, its own parent
     expect(await io.listFolders()).toEqual(['notes']);
     expect(await io.listMarkdown()).toEqual(['notes/a.md']);
   });

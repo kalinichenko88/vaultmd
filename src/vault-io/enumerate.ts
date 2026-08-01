@@ -2,8 +2,6 @@ import { type Dirent, realpathSync } from 'node:fs';
 import { readdir, stat as statEntry } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 
-import { realTargetWithinRoot } from './realpath-guard.ts';
-
 type EnumerateDeps = {
   can(rel: string, access: 'read' | 'write'): boolean;
   isIgnored(rel: string): boolean;
@@ -14,11 +12,9 @@ type EnumerateDeps = {
 type Walked = { files: string[]; folders: string[] };
 
 async function walk(
-  root: string,
+  realRoot: string,
   absDir: string,
-  // Fully-resolved location of absDir. Tracked so a symlink that jumps back
-  // onto our own ancestry is recognised as the cycle it is; see enterable().
-  realDir: string,
+  realDir: string, // fully-resolved location of absDir
   relDir: string,
   out: Walked,
   deps: EnumerateDeps,
@@ -51,19 +47,25 @@ async function walk(
       if (deps.isIgnored(childRel)) {
         continue;
       }
-      if (!realTargetWithinRoot(childAbs, root)) {
-        continue;
-      }
+      // A real subdirectory of an in-root directory is trivially in-root, so
+      // only a symlink can leave the vault — or aim back at ground we are
+      // standing on and loop: `ln -s .. vault/notes/loop` otherwise
+      // re-enumerates the whole vault at every level. Two *sibling* links to
+      // one target are not a cycle, so the result never depends on readdir order.
       const childReal = ent.isSymbolicLink()
         ? realTarget(childAbs)
         : join(realDir, name);
-      if (childReal === null || !enterable(childReal, realDir)) {
+      if (
+        childReal === null ||
+        !isUnder(childReal, realRoot) ||
+        isUnder(realDir, childReal)
+      ) {
         continue;
       }
       if (deps.can(childRel, 'read')) {
         out.folders.push(deps.toVaultRelative(childRel));
       }
-      await walk(root, childAbs, childReal, childRel, out, deps);
+      await walk(realRoot, childAbs, childReal, childRel, out, deps);
       continue;
     }
     if (isFile && name.endsWith('.md')) {
@@ -104,24 +106,24 @@ async function enumerate(
   const out: Walked = { files: [], folders: [] };
   const startRel = dir === undefined ? '' : deps.toVaultRelative(dir);
   const startAbs = startRel === '' ? root : join(root, startRel);
+  const realRoot = realTarget(root);
   const startReal = realTarget(startAbs);
-  if (startReal === null || !realTargetWithinRoot(startAbs, root)) {
+  if (
+    realRoot === null ||
+    startReal === null ||
+    !isUnder(startReal, realRoot)
+  ) {
     return out;
   }
-  await walk(root, startAbs, startReal, startRel, out, deps);
+  await walk(realRoot, startAbs, startReal, startRel, out, deps);
 
   return out;
 }
 
-// Whether descending into a directory whose real location is `childReal`
-// advances the walk rather than re-entering ground we are standing on. A dir
-// symlink aimed at its own ancestor (`ln -s .. vault/notes/loop`) otherwise
-// re-enumerates the whole vault under an aliased path at every level until the
-// kernel's symlink limit stops it, indexing each note dozens of times over.
-// Two *sibling* links to one target are not a cycle and are both walked, so the
-// result never depends on readdir order.
-function enterable(childReal: string, realDir: string): boolean {
-  return childReal !== realDir && !realDir.startsWith(childReal + sep);
+// `p` is `ancestor` itself or something beneath it. The trailing separators
+// keep `/vault/notes` from reading as a child of `/vault/note`.
+function isUnder(p: string, ancestor: string): boolean {
+  return (p + sep).startsWith(ancestor + sep);
 }
 
 function realTarget(abs: string): string | null {
