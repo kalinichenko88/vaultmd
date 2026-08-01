@@ -538,13 +538,14 @@ export function createQuery(
     return Map.groupBy(rows, (row) => pathBaseLower(row.path));
   }
 
-  // Every readable note matching `opts`, ordered but UNPAGINATED. queryNotes
-  // slices it straight into a page; orphanNotes filters it first — so both fill
-  // pages exactly off one scan, instead of orphanNotes thinning an already
-  // sliced page.
-  function scopedNotes(
+  // Every readable note matching `opts`, ordered but UNPAGINATED, as raw index
+  // rows. queryNotes slices it straight into a page; orphanNotes filters it
+  // first — so both fill pages exactly off one scan, instead of orphanNotes
+  // thinning an already sliced page. Rows rather than hits so the per-note cost
+  // of building a NoteHit lands after the slice; see toHit.
+  function scopedRows(
     opts: NoteFilter & { orderBy?: QueryOrder } = {},
-  ): NoteHit[] {
+  ): RawNoteRow[] {
     const { orderBy } = opts;
     const order: QueryOrder = orderBy ?? { field: 'mtime_ms', dir: 'desc' };
     if (!ORDER_FIELDS.has(order.field)) {
@@ -560,25 +561,27 @@ export function createQuery(
     // and slices in JS to get exact page fills. (At personal-vault scale the
     // full scan is fine; a future optimisation can push read-prefixes into SQL.)
     const sql = `SELECT n.path, n.path_key, n.title, n.frontmatter, n.mtime_ms, n.size FROM notes n ${clause} ORDER BY n.${order.field} ${dir}, n.path ASC`;
-    const rows = db
+    return db
       .query<RawNoteRow, (string | number | boolean | null)[]>(sql)
-      .all(...params);
-    const scoped: NoteHit[] = [];
-    for (const row of rows) {
-      if (!inScope(row.path)) {
-        continue;
-      }
-      scoped.push({
-        path: row.path,
-        title: row.title,
-        frontmatter: JSON.parse(row.frontmatter) as Record<string, unknown>,
-        tags: tagsFor(row.path_key),
-        mtime_ms: row.mtime_ms,
-        size: row.size,
-      });
-    }
+      .all(...params)
+      .filter((row) => inScope(row.path));
+  }
 
-    return scoped;
+  // One index row as a NoteHit. Deliberately NOT folded into scopedRows: it
+  // parses the frontmatter JSON and runs a tag lookup per note, and callers
+  // slice to a page first, so a `limit: 20` over a 5,000-note vault pays this
+  // twenty times rather than five thousand. The blob it parses is an
+  // arbitrarily deep tree now, so the cost per discarded row is no longer
+  // bounded by anything.
+  function toHit(row: RawNoteRow): NoteHit {
+    return {
+      path: row.path,
+      title: row.title,
+      frontmatter: JSON.parse(row.frontmatter) as Record<string, unknown>,
+      tags: tagsFor(row.path_key),
+      mtime_ms: row.mtime_ms,
+      size: row.size,
+    };
   }
 
   function queryNotes(
@@ -590,7 +593,9 @@ export function createQuery(
   ): NoteHit[] {
     const { lim, off } = validatePagination(opts.limit, opts.offset);
 
-    return scopedNotes(opts).slice(off, off + lim);
+    return scopedRows(opts)
+      .slice(off, off + lim)
+      .map(toHit);
   }
 
   function countNotes(opts: NoteFilter = {}): number {
@@ -792,21 +797,23 @@ export function createQuery(
       );
     }
     const { lim, off } = validatePagination(opts.limit, opts.offset);
-    // Notes first: scopedNotes validates `orderBy`, and a typo'd order field
+    // Notes first: scopedRows validates `orderBy`, and a typo'd order field
     // must not cost a full sweep of note_links and notes before it throws —
     // queryNotes rejects it before doing any work.
-    const notes = scopedNotes(opts);
+    const rows = scopedRows(opts);
     const { inbound, outbound } = linkEdges();
 
     // Filter before slicing: paginating first would hand back pages thinned by
-    // the orphan test instead of pages of orphans.
-    return notes
+    // the orphan test instead of pages of orphans. toHit after both, so only
+    // the page that is returned pays for its frontmatter parse and tag lookup.
+    return rows
       .filter(
-        (note) =>
-          !inbound.has(note.path) &&
-          (mode === 'unreferenced' || !outbound.has(note.path)),
+        (row) =>
+          !inbound.has(row.path) &&
+          (mode === 'unreferenced' || !outbound.has(row.path)),
       )
-      .slice(off, off + lim);
+      .slice(off, off + lim)
+      .map(toHit);
   }
 
   function danglingLinks(

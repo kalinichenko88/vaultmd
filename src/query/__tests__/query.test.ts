@@ -1971,6 +1971,23 @@ describe('orphanNotes', () => {
     ]);
   });
 
+  // A full NoteHit, not a bare row. The frontmatter parse and tag lookup now
+  // run after the orphan filter and the slice, so this pins that they still
+  // run at all for the page that is returned.
+  test('returns fully built hits, not raw index rows', () => {
+    insertNote(db, {
+      path: 'lonely.md',
+      frontmatter: { meta: { status: 'open' } },
+      tags: ['x'],
+    });
+
+    expect(mkQuery().orphanNotes()[0]).toMatchObject({
+      path: 'lonely.md',
+      frontmatter: { meta: { status: 'open' } },
+      tags: ['x'],
+    });
+  });
+
   test('reports a note with an inbound link in neither mode', () => {
     insertNote(db, {
       path: 'src.md',
