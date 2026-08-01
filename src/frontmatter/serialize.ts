@@ -1,18 +1,41 @@
-import { Document } from 'yaml';
+import { Document, isScalar, type Node, Scalar, visit } from 'yaml';
 
 import { assertValidFrontmatter } from './validate.ts';
 
 /**
+ * Force every multi-line string inside `node` to a double-quoted flow scalar.
+ *
+ * A block scalar (`|`) cannot express a value ending in more than one newline —
+ * the chomping indicator swallows the rest — so `'a\n\n'` comes back as
+ * `'a\n'`. Applied to the nodes a caller's value produces, and only to those:
+ * the emitter is left at its default so a block scalar an author wrote by hand,
+ * in a part of the note nothing touched, keeps the shape they gave it.
+ *
+ * @param node Node or document to restyle in place.
+ */
+export function quoteMultilineStrings(node: Node | Document): void {
+  visit(node, {
+    Scalar(_key, scalar) {
+      if (
+        isScalar(scalar) &&
+        typeof scalar.value === 'string' &&
+        scalar.value.includes('\n')
+      ) {
+        scalar.type = Scalar.QUOTE_DOUBLE;
+      }
+    },
+  });
+}
+
+/**
  * Fence one YAML document into a frontmatter block — the single emitter both
  * producers go through, so `serializeFrontmatter` (a fresh map) and
- * `editFrontmatter` (an existing block re-emitted) cannot drift on options or
- * on how the `---` fences are assembled.
+ * `editFrontmatter` (an existing block re-emitted) cannot drift on how the
+ * `---` fences are assembled.
  *
- * `blockQuote: false` keeps multi-line values in double-quoted flow scalars
- * rather than `|`/`|+` block scalars — a block scalar whose value ends in a
- * newline is ambiguous against the closing `---` fence and loses that newline
- * on re-parse. It costs an author-written `|` block its styling the first time
- * the note is edited, which is the price of the value surviving the round-trip.
+ * Scalar style is NOT forced here. Doing it at the emitter would restyle the
+ * whole document, rewriting block scalars in parts of a note the edit never
+ * touched; {@link quoteMultilineStrings} does it per written node instead.
  *
  * `lineWidth: 0` disables folding: yaml's default wraps any scalar past 80
  * columns onto continuation lines, which still round-trips but leaves a long
@@ -23,9 +46,7 @@ import { assertValidFrontmatter } from './validate.ts';
  * @returns The block as `---\n<yaml>\n---\n`.
  */
 export function emitFrontmatterBlock(doc: Document): string {
-  const block = doc
-    .toString({ blockQuote: false, lineWidth: 0 })
-    .replace(/\n$/, '');
+  const block = doc.toString({ lineWidth: 0 }).replace(/\n$/, '');
 
   return `---\n${block}\n---\n`;
 }
@@ -53,9 +74,11 @@ export function buildFrontmatterBlock(
   // an anchored container cannot be edited in place afterwards. Writing the
   // value twice costs a few bytes and keeps every note editable. (doc.set on an
   // existing document already duplicates, so only fresh blocks need this.)
-  return emitFrontmatterBlock(
-    new Document(frontmatter, { aliasDuplicateObjects: false }),
-  );
+  const doc = new Document(frontmatter, { aliasDuplicateObjects: false });
+  // Every node here is ours, so the whole document is fair game to restyle.
+  quoteMultilineStrings(doc);
+
+  return emitFrontmatterBlock(doc);
 }
 
 /**

@@ -9,7 +9,11 @@ import {
 
 import type { EditOutcome } from './models/edit-outcome.ts';
 import { extractBlock, parseFrontmatter } from './parse.ts';
-import { buildFrontmatterBlock, emitFrontmatterBlock } from './serialize.ts';
+import {
+  buildFrontmatterBlock,
+  emitFrontmatterBlock,
+  quoteMultilineStrings,
+} from './serialize.ts';
 import { isValidFrontmatter } from './validate.ts';
 
 /**
@@ -75,23 +79,7 @@ export function editFrontmatter(
   if (!isValidFrontmatter(view)) {
     return { content, outcome: 'unverifiable' };
   }
-  let changed = false;
-  for (const key of Object.keys(before)) {
-    if (!(key in view)) {
-      doc.delete(key);
-      changed = true;
-    }
-  }
-  for (const key of Object.keys(view)) {
-    if (
-      !(key in before) ||
-      JSON.stringify(before[key]) !== JSON.stringify(view[key])
-    ) {
-      doc.set(key, view[key]);
-      changed = true;
-    }
-  }
-  if (!changed) {
+  if (!applyDiff(doc, [], before, view)) {
     return { content, outcome: 'unchanged' };
   }
 
@@ -99,6 +87,107 @@ export function editFrontmatter(
     content: `${emitFrontmatterBlock(doc)}${ext.body}`,
     outcome: 'edited',
   };
+}
+
+// Is `a` the same value as `b`, structurally? Map key ORDER is not part of the
+// answer: a mutator that rebuilds a map from its own fields — the shape the
+// recipes guide suggests — reorders keys without changing anything, and
+// treating that as an edit would rewrite every note in the vault on every run.
+// Arrays stay order-sensitive, where order is meaning.
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (
+    typeof a !== 'object' ||
+    typeof b !== 'object' ||
+    a === null ||
+    b === null
+  ) {
+    return false;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item, i) => deepEqual(item, b[i]))
+    );
+  }
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+
+  return (
+    aKeys.length === bKeys.length &&
+    aKeys.every(
+      (key) =>
+        key in b &&
+        deepEqual(
+          (a as Record<string, unknown>)[key],
+          (b as Record<string, unknown>)[key],
+        ),
+    )
+  );
+}
+
+// Writes the difference between `before` and `after` into `doc` at `path`,
+// descending into maps so only the leaves that actually changed are touched.
+// Setting a whole node instead would re-emit its entire subtree from the plain
+// JS clone, discarding every comment, anchor and scalar style underneath it —
+// an author's `# why this value` and their `|` blocks would vanish from a note
+// whose only edit was one sibling key.
+//
+// Arrays are set whole: yaml has no stable identity for a moved element, so a
+// per-index diff would mangle an insertion rather than preserve anything.
+//
+// @returns whether anything was written.
+function applyDiff(
+  doc: Document,
+  path: string[],
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): boolean {
+  let changed = false;
+  for (const key of Object.keys(before)) {
+    if (!(key in after)) {
+      doc.deleteIn([...path, key]);
+      changed = true;
+    }
+  }
+  for (const key of Object.keys(after)) {
+    const next = [...path, key];
+    const prev = before[key];
+    const value = after[key];
+    if (!(key in before)) {
+      setStyled(doc, next, value);
+      changed = true;
+      continue;
+    }
+    if (deepEqual(prev, value)) {
+      continue;
+    }
+    if (isPlainMap(prev) && isPlainMap(value)) {
+      changed = applyDiff(doc, next, prev, value) || changed;
+      continue;
+    }
+    setStyled(doc, next, value);
+    changed = true;
+  }
+
+  return changed;
+}
+
+// doc.setIn with the raw value, but with the node built first so its scalar
+// style can be pinned before it lands. Only what this write creates is
+// restyled — nodes elsewhere in the note keep the shape their author gave them.
+function setStyled(doc: Document, path: string[], value: unknown): void {
+  const node = doc.createNode(value);
+  quoteMultilineStrings(node);
+  doc.setIn(path, node);
+}
+
+function isPlainMap(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 // Whether the block anchors a map or a sequence and refers to it by alias.
