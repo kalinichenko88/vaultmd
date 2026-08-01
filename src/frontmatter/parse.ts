@@ -1,6 +1,5 @@
 import { parse } from 'yaml';
 
-import type { FrontmatterValidity } from './models/frontmatter-validity.ts';
 import type { ParsedFrontmatter } from './models/parsed-frontmatter.ts';
 import { deriveTags } from './tags.ts';
 import { isValidFrontmatter } from './validate.ts';
@@ -62,9 +61,19 @@ export function parseFrontmatter(content: string): ParsedFrontmatter {
     return { frontmatter: {}, tags: [], body, valid: 'present-but-invalid' };
   }
   const frontmatter = parsed as Record<string, unknown>;
-  const valid: FrontmatterValidity = isValidFrontmatter(frontmatter)
-    ? 'valid'
-    : 'present-but-invalid';
+  // An invalid block reports nothing, exactly as the unparseable and
+  // non-map-root branches above already do. Load-bearing, not tidiness: a
+  // block built from YAML anchors can be CYCLIC, and handing that object back
+  // put it in front of projectRow's JSON.stringify, which threw a raw
+  // TypeError and aborted the entire reconcile sweep.
+  if (!isValidFrontmatter(frontmatter)) {
+    return { frontmatter: {}, tags: [], body, valid: 'present-but-invalid' };
+  }
 
-  return { frontmatter, tags: deriveTags(frontmatter), body, valid };
+  return {
+    frontmatter,
+    tags: deriveTags(frontmatter),
+    body,
+    valid: 'valid',
+  };
 }

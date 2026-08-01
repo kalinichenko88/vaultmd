@@ -58,3 +58,53 @@ text`;
     expect(r.frontmatter.meta).toEqual({ a: 1 });
   });
 });
+
+describe('parseFrontmatter — invalid blocks return nothing', () => {
+  test('a nested map is now valid and its keys survive', () => {
+    const parsed = parseFrontmatter('---\nmeta:\n  x: 1\n---\nbody\n');
+
+    expect(parsed.valid).toBe('valid');
+    expect(parsed.frontmatter).toEqual({ meta: { x: 1 } });
+  });
+
+  test('a YAML cycle is present-but-invalid with an empty map', () => {
+    const parsed = parseFrontmatter('---\na: &x\n  b: *x\n---\nbody\n');
+
+    expect(parsed.valid).toBe('present-but-invalid');
+    expect(parsed.frontmatter).toEqual({});
+    expect(parsed.tags).toEqual([]);
+    expect(parsed.body).toBe('body\n');
+  });
+
+  test('a map anchor reused across keys is present-but-invalid', () => {
+    const parsed = parseFrontmatter('---\nx: &a\n  k: 1\ny: *a\n---\nbody\n');
+
+    expect(parsed.valid).toBe('present-but-invalid');
+    expect(parsed.frontmatter).toEqual({});
+  });
+
+  // Flat today, and editFrontmatter throws a raw Error on it. Now refused.
+  test('a sequence anchor reused across keys is present-but-invalid', () => {
+    const parsed = parseFrontmatter('---\nx: &a [1, 2]\ny: *a\n---\nbody\n');
+
+    expect(parsed.valid).toBe('present-but-invalid');
+    expect(parsed.frontmatter).toEqual({});
+  });
+
+  test('a scalar anchor reused across keys stays valid', () => {
+    const parsed = parseFrontmatter('---\nx: &a hi\ny: *a\n---\nbody\n');
+
+    expect(parsed.valid).toBe('valid');
+    expect(parsed.frontmatter).toEqual({ x: 'hi', y: 'hi' });
+  });
+
+  test('an invalid value drops the tags that shared the block', () => {
+    const parsed = parseFrontmatter(
+      '---\na: .nan\ntags: [x]\ntitle: kept\n---\nbody\n',
+    );
+
+    expect(parsed.valid).toBe('present-but-invalid');
+    expect(parsed.frontmatter).toEqual({});
+    expect(parsed.tags).toEqual([]);
+  });
+});

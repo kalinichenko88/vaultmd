@@ -90,3 +90,40 @@ describe('projectRow', () => {
     expect(row.title).toBe('Real H1');
   });
 });
+
+describe('projectRow — nested and invalid frontmatter', () => {
+  test('a nested map is projected as nested JSON', () => {
+    const row = projectRow(
+      '---\nmeta:\n  status: open\n---\nbody\n',
+      'n.md',
+      io,
+      cfg,
+    );
+
+    expect(JSON.parse(row.frontmatterJson)).toEqual({
+      meta: { status: 'open' },
+    });
+  });
+
+  // A YAML anchor cycle used to reach JSON.stringify and throw a raw
+  // TypeError, aborting the whole reconcile sweep from reconcile.ts:74.
+  test('a cyclic block projects to an empty map without throwing', () => {
+    const row = projectRow('---\na: &x\n  b: *x\n---\nbody\n', 'n.md', io, cfg);
+
+    expect(row.frontmatterJson).toBe('{}');
+    expect(row.tags).toEqual([]);
+  });
+
+  test('an invalid block drops the tags and title that shared it', () => {
+    const row = projectRow(
+      '---\na: .nan\ntags: [x]\ntitle: kept\n---\nbody\n',
+      'n.md',
+      io,
+      cfg,
+    );
+
+    expect(row.frontmatterJson).toBe('{}');
+    expect(row.tags).toEqual([]);
+    expect(row.title).toBe('n');
+  });
+});
