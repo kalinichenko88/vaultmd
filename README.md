@@ -27,8 +27,8 @@ still evolve before `1.0`; see [CHANGELOG.md](./CHANGELOG.md) for what changed.
 
 ## Features
 
-- **CRUD over markdown** — create, read, update, delete `.md` notes with flat
-  YAML frontmatter.
+- **CRUD over markdown** — create, read, update, delete `.md` notes with
+  YAML frontmatter, nested maps and arrays included.
 - **Derived SQLite index** — a rebuildable cache, never the source of truth.
   Delete it and it rebuilds from disk.
 - **Collection queries** — filter notes by tag, frontmatter field, or folder;
@@ -76,10 +76,11 @@ await vault.notes.createNote('Notes/today.md', {
   body: '# Today\n\nSee [[roadmap]] for context.\n',
 });
 
-// Query the collection.
+// Query the collection. A `where` key is a path: a dot descends into a nested
+// map, and `\.` matches a frontmatter key that literally contains a dot.
 const open = vault.query.queryNotes({
   tag: 'project',
-  where: { status: 'open' },
+  where: { status: 'open', 'meta.owner': 'ada' },
   orderBy: { field: 'mtime_ms', dir: 'desc' },
   limit: 20,
 });
@@ -166,7 +167,7 @@ updateNote(path, op:
   | { editByMatch: { old: string; new: string } }  // exact, unambiguous
 ): Promise<void>
 
-// Edit flat frontmatter via a mutator callback. Returns 'edited' | 'unchanged' | 'unverifiable'.
+// Edit frontmatter via a mutator callback. Returns 'edited' | 'unchanged' | 'unverifiable'.
 editFrontmatter(path, mutate: (fm: Record<string, unknown>) => void): Promise<EditOutcome>
 
 // Transform a note's FULL content atomically. Return new content, or null for a
@@ -187,7 +188,7 @@ moveNote(from, to): Promise<void>
 ```
 
 `ReadNoteResult` is `{ frontmatter, tags, body, valid, outbound?, backlinks? }`,
-where `valid` is `'flat' | 'present-but-invalid' | 'none'`.
+where `valid` is `'valid' | 'present-but-invalid' | 'none'`.
 
 ### `vault.query`
 
@@ -324,10 +325,10 @@ import {
   withFileTransform,       // atomic compare-and-swap file edit
   withFileDelete,          // atomic delete with commit hook
   withFileMove,            // move under both per-file locks, rollback on conflict
-  parseFrontmatter,        // pure flat-YAML frontmatter parser
+  parseFrontmatter,        // pure YAML frontmatter parser
   editFrontmatter,         // pure frontmatter editor
-  serializeFrontmatter,    // flat map → fenced YAML block (inverse of parse)
-  isFlatFrontmatter,
+  serializeFrontmatter,    // map → fenced YAML block (inverse of parse)
+  isValidFrontmatter,
   deriveTags,
   extractLinks,            // pull wikilinks / relative links from text
   storedLinksFor,
