@@ -5,16 +5,19 @@ import { join } from 'node:path';
 import { realTargetWithinRoot } from './realpath-guard.ts';
 
 type EnumerateDeps = {
+  can(rel: string, access: 'read' | 'write'): boolean;
   isIgnored(rel: string): boolean;
   resolveVaultPath(rel: string, access?: 'read' | 'write'): string;
   toVaultRelative(rel: string): string;
 };
 
+type Walked = { files: string[]; folders: string[] };
+
 async function walk(
   root: string,
   absDir: string,
   relDir: string,
-  out: string[],
+  out: Walked,
   deps: EnumerateDeps,
 ): Promise<void> {
   let entries: Dirent[];
@@ -48,6 +51,9 @@ async function walk(
       if (!realTargetWithinRoot(childAbs, root)) {
         continue;
       }
+      if (deps.can(childRel, 'read')) {
+        out.folders.push(deps.toVaultRelative(childRel));
+      }
       await walk(root, childAbs, childRel, out, deps);
       continue;
     }
@@ -60,7 +66,7 @@ async function walk(
       } catch {
         continue;
       }
-      out.push(deps.toVaultRelative(childRel));
+      out.files.push(deps.toVaultRelative(childRel));
     }
   }
 }
@@ -70,14 +76,29 @@ export async function listMarkdown(
   dir: string | undefined,
   deps: EnumerateDeps,
 ): Promise<string[]> {
+  return (await enumerate(root, dir, deps)).files.sort();
+}
+
+export async function listFolders(
+  root: string,
+  dir: string | undefined,
+  deps: EnumerateDeps,
+): Promise<string[]> {
+  return (await enumerate(root, dir, deps)).folders.sort();
+}
+
+async function enumerate(
+  root: string,
+  dir: string | undefined,
+  deps: EnumerateDeps,
+): Promise<Walked> {
+  const out: Walked = { files: [], folders: [] };
   const startRel = dir === undefined ? '' : deps.toVaultRelative(dir);
   const startAbs = startRel === '' ? root : join(root, startRel);
   if (!realTargetWithinRoot(startAbs, root)) {
-    return [];
+    return out;
   }
-  const out: string[] = [];
   await walk(root, startAbs, startRel, out, deps);
-  out.sort();
 
   return out;
 }

@@ -12,7 +12,10 @@ import {
 
 import { matches } from './allowlist.ts';
 import { resolveCaseSensitive } from './case-sensitivity.ts';
-import { listMarkdown as enumerateMarkdown } from './enumerate.ts';
+import {
+  listFolders as enumerateFolders,
+  listMarkdown as enumerateMarkdown,
+} from './enumerate.ts';
 import { globToRegExp } from './glob.ts';
 import type { Access } from './models/access.ts';
 import type { VaultIo } from './models/vault-io.ts';
@@ -160,12 +163,14 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
     return ignoreRes.some((re) => re.test(rel));
   }
 
+  const enumerateDeps = { can, isIgnored, resolveVaultPath, toVaultRelative };
+
   function listMarkdown(dir?: string): Promise<string[]> {
-    return enumerateMarkdown(root, dir, {
-      isIgnored,
-      resolveVaultPath,
-      toVaultRelative,
-    });
+    return enumerateMarkdown(root, dir, enumerateDeps);
+  }
+
+  function listFolders(dir?: string): Promise<string[]> {
+    return enumerateFolders(root, dir, enumerateDeps);
   }
 
   return {
@@ -180,5 +185,6 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
     unlinkIfUnchanged,
     stat,
     listMarkdown,
+    listFolders,
   };
 }

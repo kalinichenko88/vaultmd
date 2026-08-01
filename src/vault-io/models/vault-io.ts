@@ -111,4 +111,17 @@ export type VaultIo = {
    * @returns Sorted vault-relative paths of enumerated `.md` files.
    */
   listMarkdown(dir?: string): Promise<string[]>;
+  /**
+   * Enumerate the folders under `dir` (default: vault root) that pass the read
+   * allowlist, skipping dot-folders, `ignore` matches, and directories whose
+   * real target escapes the vault root — the same walk {@link listMarkdown}
+   * uses. Empty folders **are** listed: a directory exists on disk whether or
+   * not it holds markdown. `ignore` globs are matched against the folder path
+   * itself, so `Drafts` prunes the folder and its subtree while `Drafts/**`
+   * hides only its contents. The root itself is never included, and the result
+   * is a flat sorted path list — build a tree from it caller-side if needed.
+   * @param dir Optional vault-relative subdirectory to constrain the listing.
+   * @returns Sorted vault-relative paths of enumerated folders.
+   */
+  listFolders(dir?: string): Promise<string[]>;
 };

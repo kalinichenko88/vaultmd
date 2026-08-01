@@ -400,3 +400,39 @@ describe('listMarkdown', () => {
     await rm(outside, { recursive: true, force: true });
   });
 });
+
+describe('listFolders', () => {
+  test('recurses, includes empty folders, excludes the root, missing dir -> []', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await writeFile(join(vault, 'a.md'), '# a');
+    await mkdir(join(vault, 'notes'));
+    await writeFile(join(vault, 'notes', 'b.md'), '# b');
+    await mkdir(join(vault, 'archive', 'deep'), { recursive: true }); // no .md anywhere
+    expect(await io.listFolders()).toEqual([
+      'archive',
+      'archive/deep',
+      'notes',
+    ]);
+    expect(await io.listFolders('notes')).toEqual([]);
+    expect(await io.listFolders('nope')).toEqual([]);
+  });
+
+  test('skips dotfolders, ignore globs, out-of-read-scope and escaping symlinked dirs', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'vaultmd-out-'));
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: ['Public/'], write: [''] },
+      ignore: ['Public/Drafts'],
+    });
+    await mkdir(join(vault, 'Public', 'Sub'), { recursive: true });
+    await mkdir(join(vault, 'Public', 'Drafts', 'wip'), { recursive: true });
+    await mkdir(join(vault, 'Private'));
+    await mkdir(join(vault, '.obsidian'));
+    await symlink(outside, join(vault, 'Public', 'evil'));
+    expect(await io.listFolders()).toEqual(['Public', 'Public/Sub']);
+    await rm(outside, { recursive: true, force: true });
+  });
+});
