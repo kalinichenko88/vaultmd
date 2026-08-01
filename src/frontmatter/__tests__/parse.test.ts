@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { parseFrontmatter } from '../parse.ts';
 
 describe('parseFrontmatter', () => {
-  test('flat frontmatter -> parsed map + tags + body split', () => {
+  test('valid frontmatter -> parsed map + tags + body split', () => {
     const content = `---
 title: Hello
 tags: [a, b]
@@ -12,7 +12,7 @@ tags: [a, b]
 # Heading
 text`;
     const r = parseFrontmatter(content);
-    expect(r.valid).toBe('flat');
+    expect(r.valid).toBe('valid');
     expect(r.frontmatter.title).toBe('Hello');
     expect(r.tags).toEqual(['a', 'b']);
     expect(r.body).toBe('\n# Heading\ntext');
@@ -27,9 +27,9 @@ text`;
     expect(r.body).toBe(content);
   });
 
-  test('empty frontmatter block -> flat empty', () => {
+  test('empty frontmatter block -> valid empty', () => {
     const r = parseFrontmatter('---\n---\nbody');
-    expect(r.valid).toBe('flat');
+    expect(r.valid).toBe('valid');
     expect(r.frontmatter).toEqual({});
     expect(r.body).toBe('body');
   });
@@ -38,7 +38,7 @@ text`;
     const content = '---\ntitle: A\ntitle: B\n---\nbody';
     expect(() => parseFrontmatter(content)).not.toThrow();
     const r = parseFrontmatter(content);
-    expect(r.valid).toBe('flat');
+    expect(r.valid).toBe('valid');
     expect(r.body).toBe('body');
     expect(r.frontmatter.title).toBeDefined();
   });
@@ -51,10 +51,10 @@ text`;
     expect(r.body).toBe('body');
   });
 
-  test('nested map frontmatter -> present-but-invalid (parsed but not flat)', () => {
+  test('nested map frontmatter -> valid', () => {
     const content = '---\ntitle: x\nmeta:\n  a: 1\n---\nbody';
     const r = parseFrontmatter(content);
-    expect(r.valid).toBe('present-but-invalid');
+    expect(r.valid).toBe('valid');
     expect(r.frontmatter.meta).toEqual({ a: 1 });
   });
 });

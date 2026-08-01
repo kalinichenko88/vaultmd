@@ -124,12 +124,91 @@ body text
     expect(r.content).toBe(content);
   });
 
-  test('mutate introducing a nested map -> unverifiable, no write', () => {
+  test('mutate introducing a non-round-trippable value -> unverifiable, no write', () => {
     const content = '---\ntitle: x\n---\nbody';
     const r = editFrontmatter(content, (fm) => {
-      fm.meta = { a: 1 };
+      fm.when = new Date();
     });
     expect(r.outcome).toBe('unverifiable');
     expect(r.content).toBe(content);
+  });
+});
+
+describe('editFrontmatter — nested values', () => {
+  test('mutating a nested value writes back and preserves the rest', () => {
+    const src = '---\ntitle: keep\nmeta:\n  status: open\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      (fm.meta as Record<string, unknown>).status = 'done';
+    });
+
+    expect(outcome).toBe('edited');
+    expect(parseFrontmatter(content).frontmatter).toEqual({
+      title: 'keep',
+      meta: { status: 'done' },
+    });
+  });
+
+  test('adding a nested key to a flat block works', () => {
+    const { content, outcome } = editFrontmatter(
+      '---\ntitle: keep\n---\nbody\n',
+      (fm) => {
+        fm.meta = { status: 'open' };
+      },
+    );
+
+    expect(outcome).toBe('edited');
+    expect(parseFrontmatter(content).frontmatter).toEqual({
+      title: 'keep',
+      meta: { status: 'open' },
+    });
+  });
+
+  // Regression guard. Reaching doc.set on an anchored container either throws
+  // a raw `Error: Unresolved alias` (replacing the anchor owner) or silently
+  // unrolls the alias into two independent nodes (mutating in place). The
+  // sequence form is flat today, so that path is reachable on current code.
+  test('a map-anchor block is refused, not rewritten', () => {
+    const src = '---\nx: &a\n  k: 1\ny: *a\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      fm.x = { k: 2 };
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
+
+  test('a sequence-anchor block is refused, not rewritten', () => {
+    const src = '---\nx: &a [1, 2]\ny: *a\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      (fm.x as number[]).push(3);
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
+
+  test('a scalar-anchor block still edits and keeps its anchor', () => {
+    const { content, outcome } = editFrontmatter(
+      '---\nx: &a hi\ny: *a\n---\nbody\n',
+      (fm) => {
+        fm.z = 1;
+      },
+    );
+
+    expect(outcome).toBe('edited');
+    expect(content).toContain('&a');
+    expect(content).toContain('*a');
+  });
+
+  test('a mutation that introduces a shared reference is refused', () => {
+    const src = '---\ntitle: keep\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      const shared = { k: 1 };
+      fm.a = shared;
+      fm.b = shared;
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
   });
 });

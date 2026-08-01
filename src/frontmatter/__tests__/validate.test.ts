@@ -3,68 +3,168 @@ import { describe, expect, test } from 'bun:test';
 import { MdVaultError } from '@/errors.ts';
 
 import {
-  assertFlatFrontmatter,
-  isFlatFrontmatter,
-  nonFlatKeys,
+  assertValidFrontmatter,
+  invalidKeys,
+  isValidFrontmatter,
 } from '../validate.ts';
 
-describe('isFlatFrontmatter', () => {
+describe('isValidFrontmatter', () => {
   test('scalars + array-of-scalar + null -> true', () => {
     expect(
-      isFlatFrontmatter({ a: 1, b: 'x', c: true, d: ['p', 'q'], e: null }),
+      isValidFrontmatter({ a: 1, b: 'x', c: true, d: ['p', 'q'], e: null }),
     ).toBe(true);
   });
 
   test('empty object -> true', () => {
-    expect(isFlatFrontmatter({})).toBe(true);
+    expect(isValidFrontmatter({})).toBe(true);
   });
 
-  test('nested map -> false', () => {
-    expect(isFlatFrontmatter({ a: 1, meta: { x: 1 } })).toBe(false);
+  test('nested map -> true', () => {
+    expect(isValidFrontmatter({ a: 1, meta: { x: 1 } })).toBe(true);
   });
 
-  test('array-of-object -> false', () => {
-    expect(isFlatFrontmatter({ a: [{ x: 1 }] })).toBe(false);
+  test('array of maps -> true', () => {
+    expect(isValidFrontmatter({ items: [{ b: 1 }, { c: 2 }] })).toBe(true);
   });
 
-  test('Date value -> false (does not round-trip through YAML)', () => {
-    expect(isFlatFrontmatter({ when: new Date() })).toBe(false);
+  test('deep mixed nesting -> true', () => {
+    expect(isValidFrontmatter({ a: { b: [1, { c: [true, null] }] } })).toBe(
+      true,
+    );
   });
 
-  test('non-finite numbers (NaN / Infinity) -> false', () => {
-    expect(isFlatFrontmatter({ a: Number.NaN })).toBe(false);
-    expect(isFlatFrontmatter({ a: Number.POSITIVE_INFINITY })).toBe(false);
-    expect(isFlatFrontmatter({ a: Number.NEGATIVE_INFINITY })).toBe(false);
+  test('empty nested containers -> true', () => {
+    expect(isValidFrontmatter({ a: {}, b: [] })).toBe(true);
+  });
+
+  test('a scalar repeated across keys -> true (a scalar is not a reference)', () => {
+    expect(isValidFrontmatter({ a: 'x', b: 'x' })).toBe(true);
+  });
+
+  test('two equal-but-distinct maps -> true (identity, not value)', () => {
+    expect(isValidFrontmatter({ a: { n: 1 }, b: { n: 1 } })).toBe(true);
+  });
+
+  test('a map shared across two keys -> false', () => {
+    const shared = { k: 1 };
+
+    expect(isValidFrontmatter({ x: shared, y: shared })).toBe(false);
+  });
+
+  test('an array shared across two keys -> false', () => {
+    const shared = [1, 2];
+
+    expect(isValidFrontmatter({ x: shared, y: shared })).toBe(false);
+  });
+
+  test('a shared reference nested deeper -> false', () => {
+    const shared = { k: 1 };
+
+    expect(isValidFrontmatter({ x: { deep: shared }, y: [shared] })).toBe(
+      false,
+    );
+  });
+
+  test('a cycle -> false', () => {
+    const cyclic: Record<string, unknown> = { k: 1 };
+    cyclic.self = cyclic;
+
+    expect(isValidFrontmatter({ a: cyclic })).toBe(false);
+  });
+
+  test('a self-referencing array -> false', () => {
+    const cyclic: unknown[] = [1];
+    cyclic.push(cyclic);
+
+    expect(isValidFrontmatter({ a: cyclic })).toBe(false);
+  });
+
+  test('Date -> false', () => {
+    expect(isValidFrontmatter({ a: new Date() })).toBe(false);
+  });
+
+  test('Map / Set -> false', () => {
+    expect(isValidFrontmatter({ a: new Map() })).toBe(false);
+    expect(isValidFrontmatter({ a: new Set() })).toBe(false);
+  });
+
+  test('NaN and Infinity -> false', () => {
+    expect(isValidFrontmatter({ a: Number.NaN })).toBe(false);
+    expect(isValidFrontmatter({ a: Number.POSITIVE_INFINITY })).toBe(false);
+  });
+
+  test('undefined -> false', () => {
+    expect(isValidFrontmatter({ a: undefined })).toBe(false);
+  });
+
+  test('a nested Date -> false', () => {
+    expect(isValidFrontmatter({ a: { b: [new Date()] } })).toBe(false);
+  });
+
+  test('a null-prototype map -> true', () => {
+    const bare = Object.create(null) as Record<string, unknown>;
+    bare.k = 1;
+
+    expect(isValidFrontmatter({ a: bare })).toBe(true);
   });
 });
 
-describe('nonFlatKeys', () => {
-  test('returns only the keys whose values are not flat', () => {
-    expect(
-      nonFlatKeys({ ok: 1, list: ['x'], bad: { x: 1 }, badArr: [{ x: 1 }] }),
-    ).toEqual(['bad', 'badArr']);
+describe('invalidKeys', () => {
+  test('names only the offending top-level keys', () => {
+    expect(invalidKeys({ ok: 1, bad: new Date(), also: 'x' })).toEqual(['bad']);
   });
 
-  test('flat map -> empty array', () => {
-    expect(nonFlatKeys({ a: 1, b: 'x' })).toEqual([]);
+  test('a fault nested deep names its top-level key', () => {
+    expect(invalidKeys({ a: { b: { c: new Date() } } })).toEqual(['a']);
+  });
+
+  test('a shared reference names the key where the repeat was found', () => {
+    const shared = { k: 1 };
+
+    expect(invalidKeys({ x: shared, y: shared })).toEqual(['y']);
+  });
+
+  // The `seen` set MUST be hoisted out of the filter callback. With a fresh
+  // set per key, a reference shared BETWEEN two top-level keys is invisible
+  // and this returns [] — the whole shared-reference rule silently does
+  // nothing. This test is that regression guard.
+  test('a shared reference is detected across top-level keys at all', () => {
+    const shared = [1, 2];
+
+    expect(invalidKeys({ x: shared, y: shared }).length).toBeGreaterThan(0);
+  });
+
+  // Documented first-order-diagnostic contract: `every()` short-circuits, so a
+  // fault found early stops the walk before a later shared reference is
+  // recorded. The VERDICT is still correct — only the key list is partial.
+  test('short-circuit can leave the list partial (documented contract)', () => {
+    const shared = { k: 1 };
+
+    expect(invalidKeys({ x: [new Date(), shared], y: shared })).toEqual(['x']);
+    const s2 = { k: 1 };
+    expect(invalidKeys({ x: [s2, new Date()], y: s2 })).toEqual(['x', 'y']);
+  });
+
+  test('empty result for a valid map', () => {
+    expect(invalidKeys({ a: 1, b: { c: [2, 3] } })).toEqual([]);
   });
 });
 
-describe('assertFlatFrontmatter', () => {
-  test('flat input does not throw', () => {
-    expect(() => assertFlatFrontmatter({ a: 1, b: ['x'] })).not.toThrow();
+describe('assertValidFrontmatter', () => {
+  test('no-op for a valid map', () => {
+    expect(() => assertValidFrontmatter({ a: { b: 1 } })).not.toThrow();
   });
 
-  test('non-flat input throws FRONTMATTER_INVALID naming only offenders', () => {
-    let err: MdVaultError | undefined;
+  test('throws FRONTMATTER_INVALID naming the offenders', () => {
+    let caught: unknown;
     try {
-      assertFlatFrontmatter({ ok: 1, bad: { x: 1 } });
-    } catch (e) {
-      err = e as MdVaultError;
+      assertValidFrontmatter({ ok: 1, bad: new Date() });
+    } catch (err) {
+      caught = err;
     }
-    expect(err).toBeInstanceOf(MdVaultError);
-    expect(err?.code).toBe('FRONTMATTER_INVALID');
-    expect(err?.message).toContain('bad');
-    expect(err?.message).not.toContain('ok');
+
+    expect(caught).toBeInstanceOf(MdVaultError);
+    expect((caught as MdVaultError).code).toBe('FRONTMATTER_INVALID');
+    expect((caught as MdVaultError).message).toContain('bad');
   });
 });

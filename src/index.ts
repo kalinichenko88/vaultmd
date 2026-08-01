@@ -8,7 +8,7 @@ export type {
 export {
   deriveTags,
   editFrontmatter,
-  isFlatFrontmatter,
+  isValidFrontmatter,
   parseFrontmatter,
   serializeFrontmatter,
 } from '@/frontmatter/index.ts';

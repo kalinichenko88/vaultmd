@@ -3,7 +3,7 @@ import { parse } from 'yaml';
 import type { FrontmatterValidity } from './models/frontmatter-validity.ts';
 import type { ParsedFrontmatter } from './models/parsed-frontmatter.ts';
 import { deriveTags } from './tags.ts';
-import { isFlatFrontmatter } from './validate.ts';
+import { isValidFrontmatter } from './validate.ts';
 
 type Block = { yaml: string; body: string };
 
@@ -31,7 +31,7 @@ export function extractBlock(content: string): Block | null {
 /**
  * Parse the YAML frontmatter from a markdown file's raw content string.
  * Handles files with no frontmatter, empty blocks, invalid YAML, and
- * flat-safe vs. nested-object blocks. Never throws.
+ * round-trippable vs. non-round-trippable blocks. Never throws.
  *
  * @param content Raw UTF-8 content of a markdown file.
  * @returns A {@link ParsedFrontmatter} with the parsed key-value map, tag
@@ -40,7 +40,7 @@ export function extractBlock(content: string): Block | null {
  * @example
  * ```ts
  * const { frontmatter, tags, body, valid } = parseFrontmatter(fileContent);
- * if (valid === 'flat') { // safe to pass to editFrontmatter }
+ * if (valid === 'valid') { // safe to pass to editFrontmatter }
  * ```
  */
 export function parseFrontmatter(content: string): ParsedFrontmatter {
@@ -56,14 +56,14 @@ export function parseFrontmatter(content: string): ParsedFrontmatter {
     return { frontmatter: {}, tags: [], body, valid: 'present-but-invalid' };
   }
   if (parsed === null || parsed === undefined) {
-    return { frontmatter: {}, tags: [], body, valid: 'flat' };
+    return { frontmatter: {}, tags: [], body, valid: 'valid' };
   }
   if (typeof parsed !== 'object' || Array.isArray(parsed)) {
     return { frontmatter: {}, tags: [], body, valid: 'present-but-invalid' };
   }
   const frontmatter = parsed as Record<string, unknown>;
-  const valid: FrontmatterValidity = isFlatFrontmatter(frontmatter)
-    ? 'flat'
+  const valid: FrontmatterValidity = isValidFrontmatter(frontmatter)
+    ? 'valid'
     : 'present-but-invalid';
 
   return { frontmatter, tags: deriveTags(frontmatter), body, valid };

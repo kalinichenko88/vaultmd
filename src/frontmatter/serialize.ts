@@ -1,6 +1,6 @@
 import { Document } from 'yaml';
 
-import { assertFlatFrontmatter } from './validate.ts';
+import { assertValidFrontmatter } from './validate.ts';
 
 /**
  * Fence one YAML document into a frontmatter block — the single emitter both
@@ -31,14 +31,14 @@ export function emitFrontmatterBlock(doc: Document): string {
 }
 
 /**
- * Build the fenced YAML block for an already-validated flat frontmatter map.
+ * Build the fenced YAML block for an already-validated frontmatter map.
  * The single source of truth for fresh-block emission, shared with
  * `editFrontmatter`'s no-frontmatter path so the two stay byte-identical.
  *
  * Returns the empty string for an empty map (no block to emit); everything else
  * is {@link emitFrontmatterBlock}'s contract.
  *
- * @param frontmatter Flat key-value map; the caller must validate flatness.
+ * @param frontmatter Key-value map; the caller must validate it first.
  * @returns `''` for an empty map, otherwise `---\n<yaml>\n---\n`.
  */
 export function buildFrontmatterBlock(
@@ -52,7 +52,7 @@ export function buildFrontmatterBlock(
 }
 
 /**
- * Serialize a flat frontmatter map to a fenced YAML block ready to prepend to a
+ * Serialize a frontmatter map to a fenced YAML block ready to prepend to a
  * markdown note. The output is byte-identical to the fresh frontmatter block
  * `createNote` / {@link editFrontmatter} emit when a note has no existing block
  * (they preserve an existing block's styling, which this does not reproduce).
@@ -67,11 +67,13 @@ export function buildFrontmatterBlock(
  * carry them — and is emitted as a double-quoted scalar broken at its own line
  * breaks, not at a column limit.
  *
- * @param frontmatter Flat key-value map (scalars and arrays of scalars only).
+ * @param frontmatter Key-value map. Scalars, plain maps and arrays, nested to
+ *   any depth.
  * @returns A string of the form `---\n<yaml>\n---\n`, or `''` for an empty map.
  * @throws {@link MdVaultError} with code `FRONTMATTER_INVALID` when the input
- *   contains nested objects, arrays of non-scalars, `Date`s, or non-finite
- *   numbers — none of which survive a parse round-trip.
+ *   contains a `Date`, a class instance, a non-finite number, `undefined`, or
+ *   a container reference repeated within the map — none of which survive a
+ *   parse round-trip as written.
  *
  * @example
  * ```ts
@@ -82,7 +84,7 @@ export function buildFrontmatterBlock(
 export function serializeFrontmatter(
   frontmatter: Record<string, unknown>,
 ): string {
-  assertFlatFrontmatter(frontmatter);
+  assertValidFrontmatter(frontmatter);
 
   return buildFrontmatterBlock(frontmatter);
 }

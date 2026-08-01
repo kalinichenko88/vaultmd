@@ -67,7 +67,7 @@ describe('readNote', () => {
       '---\ntitle: Hello\ntags: [a, b]\n---\nBody text',
     );
     const res = await notes.readNote('note.md');
-    expect(res.valid).toBe('flat');
+    expect(res.valid).toBe('valid');
     expect(res.frontmatter).toEqual({ title: 'Hello', tags: ['a', 'b'] });
     expect(res.tags).toEqual(['a', 'b']);
     expect(res.body).toBe('Body text');
@@ -248,7 +248,7 @@ describe('updateNote', () => {
       '---\na: 1\n---\nline2',
     );
     const res = await notes.readNote('fm-bare.md');
-    expect(res.valid).toBe('flat');
+    expect(res.valid).toBe('valid');
     expect(res.frontmatter.a).toBe(1); // frontmatter preserved + still parses
     expect(res.body).toBe('line2');
   });
@@ -281,8 +281,8 @@ describe('editFrontmatter', () => {
   });
 
   test('present-but-invalid frontmatter → unverifiable, leaves file AND index untouched', async () => {
-    // nested map is non-flat → present-but-invalid; written directly (never indexed)
-    const raw = '---\nmeta:\n  nested: true\n---\nbody';
+    // malformed YAML → present-but-invalid; written directly (never indexed)
+    const raw = '---\nfoo: [unclosed\n---\nbody';
     await writeFile(join(vaultDir, 'weird.md'), raw);
     const before = await io.stat('weird.md');
 
@@ -634,5 +634,35 @@ describe('exists — review regressions', () => {
   test('is false when a parent segment is a file, not a raw ENOTDIR', async () => {
     await writeFile(join(vaultDir, 'Notes'), 'i am a file');
     expect(await notes.exists('Notes/today.md')).toBe(false);
+  });
+});
+
+describe('createNote — nested frontmatter', () => {
+  test('a nested map round-trips through the index', async () => {
+    await notes.createNote('N.md', {
+      frontmatter: { title: 'N', meta: { status: 'open' } },
+      body: 'body\n',
+    });
+
+    expect(query.queryNotes()[0].frontmatter).toEqual({
+      title: 'N',
+      meta: { status: 'open' },
+    });
+  });
+
+  test('a shared container reference throws FRONTMATTER_INVALID', async () => {
+    const shared = { k: 1 };
+    let caught: unknown;
+    try {
+      await notes.createNote('N.md', {
+        frontmatter: { x: shared, y: shared },
+        body: 'body\n',
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(MdVaultError);
+    expect((caught as MdVaultError).code).toBe('FRONTMATTER_INVALID');
   });
 });

@@ -1,7 +1,10 @@
 /**
  * Describes how a note's YAML frontmatter block parsed:
- * - `'flat'` — present and all values are scalars or arrays of scalars (safe to edit).
- * - `'present-but-invalid'` — YAML exists but contains nested objects or is unparseable.
+ * - `'valid'` — present, and every value round-trips (safe to edit). Nested
+ *   maps and arrays qualify; see `isValidFrontmatter` for what does not.
+ * - `'present-but-invalid'` — a block exists but is unparseable YAML, has a
+ *   non-map root, or holds a value that cannot round-trip. Its keys are NOT
+ *   reported: `parseFrontmatter` returns an empty map for it.
  * - `'none'` — no frontmatter block found; the whole file is body content.
  */
-export type FrontmatterValidity = 'flat' | 'present-but-invalid' | 'none';
+export type FrontmatterValidity = 'valid' | 'present-but-invalid' | 'none';

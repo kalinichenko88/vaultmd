@@ -6,6 +6,6 @@
  *   byte-identical to the current file; no write occurred.
  *
  * Distinct from {@link EditOutcome}: a free-form transform makes no
- * frontmatter-flatness judgement, so `'unverifiable'` is never returned.
+ * frontmatter round-trip judgement, so `'unverifiable'` is never returned.
  */
 export type TransformOutcome = 'edited' | 'unchanged';

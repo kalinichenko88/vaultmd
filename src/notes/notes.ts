@@ -3,7 +3,7 @@ import { stat } from 'node:fs/promises';
 
 import { MdVaultError } from '@/errors.ts';
 import {
-  assertFlatFrontmatter,
+  assertValidFrontmatter,
   type EditOutcome,
   editFrontmatter as fmEditFrontmatter,
   parseFrontmatter,
@@ -95,14 +95,14 @@ export function createNotes(deps: NotesDeps): NotesApi {
     }
     // Validate the caller-supplied frontmatter up front, naming only the
     // offending keys (shared with serializeFrontmatter's guard).
-    assertFlatFrontmatter(fm);
+    assertValidFrontmatter(fm);
     const res = fmEditFrontmatter(input.body, (view) => {
       for (const [k, v] of Object.entries(fm)) {
         view[k] = v;
       }
     });
     if (res.outcome === 'unverifiable') {
-      // fm is flat (asserted above), so the body itself carries an invalid
+      // fm is valid (asserted above), so the body itself carries an invalid
       // frontmatter block.
       throw new MdVaultError(
         'FRONTMATTER_INVALID',

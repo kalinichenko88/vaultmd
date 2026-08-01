@@ -3,13 +3,14 @@ import { type Document, isMap, isScalar, parseDocument } from 'yaml';
 import type { EditOutcome } from './models/edit-outcome.ts';
 import { extractBlock, parseFrontmatter } from './parse.ts';
 import { buildFrontmatterBlock, emitFrontmatterBlock } from './serialize.ts';
-import { isFlatFrontmatter } from './validate.ts';
+import { isValidFrontmatter } from './validate.ts';
 
 /**
  * Apply a mutator callback to a note's frontmatter and return the rewritten
  * file content. Preserves the existing YAML structure and only writes back
- * changed keys. If the frontmatter is non-flat or the mutation would produce a
- * non-flat result, the file is left untouched and `outcome` is `'unverifiable'`.
+ * changed keys. If the existing frontmatter cannot round-trip, or the mutation
+ * would produce a value that cannot, the file is left untouched and `outcome`
+ * is `'unverifiable'`.
  *
  * @param content Raw UTF-8 content of the markdown file.
  * @param mutate  Callback that receives a mutable copy of the frontmatter
@@ -40,7 +41,7 @@ export function editFrontmatter(
   if (parsed.valid === 'none') {
     const view: Record<string, unknown> = {};
     mutate(view);
-    if (!isFlatFrontmatter(view)) {
+    if (!isValidFrontmatter(view)) {
       return { content, outcome: 'unverifiable' };
     }
     if (Object.keys(view).length === 0) {
@@ -61,7 +62,7 @@ export function editFrontmatter(
   const before = (doc.toJS() ?? {}) as Record<string, unknown>;
   const view = structuredClone(before);
   mutate(view);
-  if (!isFlatFrontmatter(view)) {
+  if (!isValidFrontmatter(view)) {
     return { content, outcome: 'unverifiable' };
   }
   let changed = false;

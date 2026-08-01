@@ -7,7 +7,7 @@ import { parseFrontmatter } from '../parse.ts';
 import { serializeFrontmatter } from '../serialize.ts';
 
 describe('serializeFrontmatter', () => {
-  test('round-trip: parseFrontmatter(serializeFrontmatter(fm)) yields flat and deep-equals fm', () => {
+  test('round-trip: parseFrontmatter(serializeFrontmatter(fm)) yields valid and deep-equals fm', () => {
     const fm: Record<string, unknown> = {
       title: 'Hello',
       count: 42,
@@ -16,7 +16,7 @@ describe('serializeFrontmatter', () => {
       tags: ['a', 'b', 'c'],
     };
     const parsed = parseFrontmatter(serializeFrontmatter(fm));
-    expect(parsed.valid).toBe('flat');
+    expect(parsed.valid).toBe('valid');
     expect(parsed.frontmatter).toEqual(fm);
   });
 
@@ -64,16 +64,16 @@ describe('serializeFrontmatter', () => {
     expect(serializeFrontmatter({})).toBe('');
   });
 
-  test('non-flat input throws FRONTMATTER_INVALID naming only the offending keys', () => {
+  test('non-round-trippable input throws FRONTMATTER_INVALID naming only the offending keys', () => {
     let err: MdVaultError | undefined;
     try {
-      serializeFrontmatter({ title: 'ok', count: 3, nested: { x: 1 } });
+      serializeFrontmatter({ title: 'ok', count: 3, bad: new Date() });
     } catch (e) {
       err = e as MdVaultError;
     }
     expect(err).toBeInstanceOf(MdVaultError);
     expect(err?.code).toBe('FRONTMATTER_INVALID');
-    expect(err?.message).toContain('nested');
+    expect(err?.message).toContain('bad');
     expect(err?.message).not.toContain('title');
     expect(err?.message).not.toContain('count');
   });
@@ -126,5 +126,40 @@ describe('serializeFrontmatter', () => {
       });
       expect(serializeFrontmatter(fm)).toBe(fromEdit);
     }
+  });
+});
+
+describe('serializeFrontmatter — nested values', () => {
+  test('a nested map round-trips through parseFrontmatter', () => {
+    const fm = { title: 'x', meta: { status: 'open', tags: [1, 2] } };
+    const parsed = parseFrontmatter(`${serializeFrontmatter(fm)}body\n`);
+
+    expect(parsed.valid).toBe('valid');
+    expect(parsed.frontmatter).toEqual(fm);
+  });
+
+  test('an array of maps round-trips', () => {
+    const fm = { items: [{ name: 'a' }, { name: 'b' }] };
+    const parsed = parseFrontmatter(`${serializeFrontmatter(fm)}body\n`);
+
+    expect(parsed.frontmatter).toEqual(fm);
+  });
+
+  // yaml emits a shared reference as &a1/*a1, which produces a note that
+  // editFrontmatter can no longer rewrite. Refusing the write is the fix.
+  test('a shared map reference throws FRONTMATTER_INVALID', () => {
+    const shared = { k: 1 };
+
+    expect(() => serializeFrontmatter({ x: shared, y: shared })).toThrow(
+      expect.objectContaining({ code: 'FRONTMATTER_INVALID' }),
+    );
+  });
+
+  test('a shared array reference throws FRONTMATTER_INVALID', () => {
+    const shared = [1, 2];
+
+    expect(() => serializeFrontmatter({ x: shared, y: shared })).toThrow(
+      expect.objectContaining({ code: 'FRONTMATTER_INVALID' }),
+    );
   });
 });
