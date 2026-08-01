@@ -107,7 +107,41 @@ describe('isValidFrontmatter', () => {
 
     expect(isValidFrontmatter({ a: bare })).toBe(true);
   });
+
+  // Nesting is bounded so a pathological value cannot reach yaml's emitter or
+  // JSON.stringify, both of which recurse and would die with a raw RangeError.
+  test('nesting at the 100-level bound -> true', () => {
+    expect(isValidFrontmatter({ a: nest(100) })).toBe(true);
+  });
+
+  test('nesting past the bound -> false', () => {
+    expect(isValidFrontmatter({ a: nest(101) })).toBe(false);
+    expect(invalidKeys({ ok: 1, a: nest(101) })).toEqual(['a']);
+  });
+
+  test('depth is per top-level value, not cumulative', () => {
+    expect(isValidFrontmatter({ a: nest(60), b: nest(60) })).toBe(true);
+  });
+
+  test('arrays count toward the bound too', () => {
+    let deep: unknown = 1;
+    for (let i = 0; i < 101; i++) {
+      deep = [deep];
+    }
+
+    expect(isValidFrontmatter({ a: deep })).toBe(false);
+  });
 });
+
+// A chain of `levels` nested maps ending in a scalar.
+function nest(levels: number): Record<string, unknown> {
+  let value: Record<string, unknown> = { leaf: 1 };
+  for (let i = 1; i < levels; i++) {
+    value = { n: value };
+  }
+
+  return value;
+}
 
 describe('invalidKeys', () => {
   test('names only the offending top-level keys', () => {

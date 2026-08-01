@@ -1,11 +1,22 @@
 import { MdVaultError } from '@/errors.ts';
 
+// Nested containers allowed in one frontmatter value. Frontmatter is note
+// metadata, so real blocks are a handful of levels deep at most; the cap exists
+// because yaml's emitter and JSON.stringify both recurse, and without it a
+// pathological map reaches them and dies with a raw RangeError instead of a
+// coded FRONTMATTER_INVALID.
+const MAX_DEPTH = 100;
+
 // One value, walked to the leaves. `seen` carries every container already
 // entered on this map — a repeat is either a cycle or a YAML anchor reused
 // across keys, and both are refused (see the design spec: `editFrontmatter`
 // cannot round-trip an anchored container, and the JSON projection duplicates
 // the sharing anyway).
-function isRoundTrippable(value: unknown, seen: Set<object>): boolean {
+function isRoundTrippable(
+  value: unknown,
+  seen: Set<object>,
+  depth = 0,
+): boolean {
   if (
     value === null ||
     typeof value === 'string' ||
@@ -20,7 +31,7 @@ function isRoundTrippable(value: unknown, seen: Set<object>): boolean {
   if (typeof value !== 'object') {
     return false;
   }
-  if (seen.has(value)) {
+  if (seen.has(value) || depth >= MAX_DEPTH) {
     return false;
   }
   seen.add(value);
@@ -30,28 +41,18 @@ function isRoundTrippable(value: unknown, seen: Set<object>): boolean {
   const proto = Object.getPrototypeOf(value);
 
   return Array.isArray(value)
-    ? value.every((item) => isRoundTrippable(item, seen))
+    ? value.every((item) => isRoundTrippable(item, seen, depth + 1))
     : (proto === Object.prototype || proto === null) &&
-        Object.values(value).every((item) => isRoundTrippable(item, seen));
+        Object.values(value).every((item) =>
+          isRoundTrippable(item, seen, depth + 1),
+        );
 }
 
-/**
- * Return the top-level keys of `fm` whose values cannot survive a
- * serialize/parse round-trip. An empty result means the whole map is valid.
- *
- * A first-order diagnostic, not an exhaustive list: the walk short-circuits at
- * the first fault, so a map with several unrelated problems may report only
- * some of them. The *verdict* is never affected — a short-circuit can only
- * happen once something has already failed — so
- * {@link isValidFrontmatter} is exact regardless.
- *
- * @param fm Frontmatter map to inspect.
- * @returns The offending top-level keys, in insertion order.
- */
+// Offending top-level keys, in insertion order; empty means the map is valid.
+// A first-order diagnostic, not an exhaustive list — the walk short-circuits at
+// the first fault. The verdict is unaffected, so isValidFrontmatter is exact.
 export function invalidKeys(fm: Record<string, unknown>): string[] {
-  // ONE set for the whole map, NOT one per key. A fresh set per key cannot see
-  // a reference shared BETWEEN two top-level keys, so `{ x: o, y: o }` would
-  // pass and the shared-reference rule would do nothing.
+  // ONE set per map — a per-key set cannot see `{ x: o, y: o }`.
   const seen = new Set<object>();
 
   return Object.keys(fm).filter((key) => !isRoundTrippable(fm[key], seen));
@@ -62,12 +63,15 @@ export function invalidKeys(fm: Record<string, unknown>): string[] {
  * and stays editable afterwards.
  *
  * Scalars (`string`, a finite `number`, `boolean`, `null`), plain maps and
- * arrays all qualify, nested to any depth. Disqualified: `Date`s, `Map`/`Set`
- * and other class instances, non-finite numbers (`NaN`, `Infinity`),
- * `undefined` — none of which round-trip through the YAML core schema — and
- * any container reference repeated within the map, whether that is a cycle or
- * a YAML anchor reused across keys (`editFrontmatter` cannot rewrite one
- * without either throwing or silently unrolling the alias).
+ * arrays all qualify, nested up to 100 levels — note metadata never goes that
+ * deep, and the bound keeps a pathological value from reaching the YAML
+ * emitter, which would fail with an uncoded `RangeError` instead.
+ * Disqualified: `Date`s, `Map`/`Set` and other class instances, non-finite
+ * numbers (`NaN`, `Infinity`), `undefined` — none of which round-trip through
+ * the YAML core schema — and any container reference repeated within the map,
+ * whether that is a cycle or a YAML anchor reused across keys
+ * (`editFrontmatter` cannot rewrite one without either throwing or silently
+ * unrolling the alias).
  *
  * @param fm Frontmatter map to validate.
  * @returns `true` if every value round-trips; `false` otherwise.

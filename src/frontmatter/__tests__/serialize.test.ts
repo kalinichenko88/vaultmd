@@ -162,4 +162,17 @@ describe('serializeFrontmatter — nested values', () => {
       expect.objectContaining({ code: 'FRONTMATTER_INVALID' }),
     );
   });
+
+  // Without the depth bound this reached yaml's emitter and died with a raw
+  // RangeError, which carries no `.code` for a caller to switch on.
+  test('nesting past the depth bound throws FRONTMATTER_INVALID', () => {
+    let deep: Record<string, unknown> = { leaf: 1 };
+    for (let i = 0; i < 20_000; i++) {
+      deep = { n: deep };
+    }
+
+    expect(() => serializeFrontmatter({ deep })).toThrow(
+      expect.objectContaining({ code: 'FRONTMATTER_INVALID' }),
+    );
+  });
 });

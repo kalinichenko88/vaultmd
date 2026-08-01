@@ -260,4 +260,20 @@ describe('editFrontmatter — nested values', () => {
       y: 4,
     });
   });
+
+  // The depth bound is what keeps this an outcome rather than a raw RangeError
+  // out of the emitter — editFrontmatter never throws for bad frontmatter.
+  test('a mutation nesting past the depth bound is refused, not thrown', () => {
+    const src = '---\ntitle: keep\n---\nbody\n';
+    let deep: Record<string, unknown> = { leaf: 1 };
+    for (let i = 0; i < 20_000; i++) {
+      deep = { n: deep };
+    }
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      fm.deep = deep;
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
 });

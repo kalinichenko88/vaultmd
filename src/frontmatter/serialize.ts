@@ -71,9 +71,9 @@ export function buildFrontmatterBlock(
  *   any depth.
  * @returns A string of the form `---\n<yaml>\n---\n`, or `''` for an empty map.
  * @throws {@link MdVaultError} with code `FRONTMATTER_INVALID` when the input
- *   contains a `Date`, a class instance, a non-finite number, `undefined`, or
- *   a container reference repeated within the map — none of which survive a
- *   parse round-trip as written.
+ *   contains a `Date`, a class instance, a non-finite number, `undefined`, a
+ *   container reference repeated within the map, or nesting deeper than 100
+ *   levels — none of which survive a parse round-trip as written.
  *
  * @example
  * ```ts

@@ -61,11 +61,8 @@ export function parseFrontmatter(content: string): ParsedFrontmatter {
     return { frontmatter: {}, tags: [], body, valid: 'present-but-invalid' };
   }
   const frontmatter = parsed as Record<string, unknown>;
-  // An invalid block reports nothing, exactly as the unparseable and
-  // non-map-root branches above already do. Load-bearing, not tidiness: a
-  // block built from YAML anchors can be CYCLIC, and handing that object back
-  // put it in front of projectRow's JSON.stringify, which threw a raw
-  // TypeError and aborted the entire reconcile sweep.
+  // Not tidiness: an anchor-built block can be cyclic, and projectRow
+  // stringifies whatever this returns regardless of `valid`.
   if (!isValidFrontmatter(frontmatter)) {
     return { frontmatter: {}, tags: [], body, valid: 'present-but-invalid' };
   }
