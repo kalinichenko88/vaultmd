@@ -348,3 +348,51 @@ for (const r of results) console.log(r.path, r.snippet);
 const note = await vault.notes.readNote('Notes/ideas/first.md', { withLinks: true });
 console.log(note.frontmatter, note.tags, note.backlinks);
 ```
+
+## List the folders in a vault
+
+`vault.io.listMarkdown` enumerates notes; `vault.io.listFolders` enumerates the
+directories they live in. Both walk the same tree under the same rules, so a
+folder outside the read scope, hidden behind a dot, or matched by `ignore` never
+shows up. Pass a subdirectory to enumerate only what is under it.
+
+```ts
+await vault.io.listFolders();        // ['Archive', 'Archive/2024', 'Notes', 'Notes/ideas']
+await vault.io.listFolders('Notes'); // ['Notes/ideas']
+```
+
+**Empty folders are included.** A directory with no markdown anywhere beneath it
+is still a real directory on disk, so it is listed — the same call Obsidian
+makes with `Vault.getAllFolders`. This is the one place the package looks past
+`.md` files. The vault root itself is never in the list; it is `''`.
+
+## Build a folder tree
+
+`listFolders` returns a flat sorted list rather than a nested structure, because
+sorted paths are already everything a tree needs — a parent always sorts before
+its children, so one pass builds it:
+
+```ts
+type Folder = { path: string; children: Folder[] };
+
+const roots: Folder[] = [];
+const byPath = new Map<string, Folder>();
+
+for (const path of await vault.io.listFolders()) {
+  const node: Folder = { path, children: [] };
+  byPath.set(path, node);
+  const cut = path.lastIndexOf('/');
+  const parent = cut === -1 ? undefined : byPath.get(path.slice(0, cut));
+  (parent ? parent.children : roots).push(node);
+}
+```
+
+Keep the fallback to `roots` when the parent lookup misses. A parent genuinely
+can be absent: with `prefixes.read: ['Notes/ideas']`, `Notes` is outside the
+scope and is never listed, so `Notes/ideas` arrives as a root with a path that
+looks nested. Treat a missing parent as an implied one, not as a bug.
+
+One thing to know about `ignore` here: the globs match the folder's own path, so
+`'Drafts'` prunes the folder and everything under it, while `'Drafts/**'` hides
+only the contents and still lists `Drafts` itself. Write the first form if you
+want the folder gone from the tree.

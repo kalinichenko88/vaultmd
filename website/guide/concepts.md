@@ -51,6 +51,10 @@ the instance is allowed to read, and writes outside the write scope throw
 `ALLOWLIST_VIOLATION`. This is the security chokepoint — all path
 canonicalization, `..`-escape rejection, and symlink containment live behind it.
 
+The scope covers enumeration too: `vault.io.listMarkdown` and
+`vault.io.listFolders` walk the vault and report only what this instance may
+read, minus dot-folders and anything the `ignore` globs match.
+
 ## Lazy reconcile
 
 Reads stay synchronous. The first read — and the first after each
