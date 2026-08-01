@@ -6,9 +6,9 @@
 [![runtime: Bun](https://img.shields.io/badge/runtime-Bun%20%E2%89%A5%201.3.14-f9f1e1?logo=bun)](https://bun.sh)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![status: published](https://img.shields.io/badge/status-published-brightgreen.svg)](#status)
-[![docs](https://img.shields.io/badge/docs-VaultMD-3451b2.svg)](https://kalinichenko88.github.io/vaultmd/)
+[![docs](https://img.shields.io/badge/docs-VaultMD-3451b2.svg)](https://vaultmd.kalinichenko.dev/)
 
-📖 **[Documentation & API reference](https://kalinichenko88.github.io/vaultmd/)**
+📖 **[Documentation & API reference](https://vaultmd.kalinichenko.dev/)**
 
 VaultMD (`vaultmd` on npm) gives your Bun app a programmatic data layer over a
 folder of markdown notes. Your `.md` files on disk stay the **single source of
