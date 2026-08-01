@@ -400,3 +400,94 @@ describe('listMarkdown', () => {
     await rm(outside, { recursive: true, force: true });
   });
 });
+
+describe('listFolders', () => {
+  test('recurses, includes empty folders, excludes the root, missing dir -> []', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await writeFile(join(vault, 'a.md'), '# a');
+    await mkdir(join(vault, 'notes'));
+    await writeFile(join(vault, 'notes', 'b.md'), '# b');
+    await mkdir(join(vault, 'archive', 'deep'), { recursive: true }); // no .md anywhere
+    expect(await io.listFolders()).toEqual([
+      'archive',
+      'archive/deep',
+      'notes',
+    ]);
+    expect(await io.listFolders('notes')).toEqual([]);
+    expect(await io.listFolders('nope')).toEqual([]);
+  });
+
+  test('skips dotfolders, ignore globs, out-of-read-scope and escaping symlinked dirs', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'vaultmd-out-'));
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: ['Public/'], write: [''] },
+      ignore: ['Public/Drafts'],
+    });
+    await mkdir(join(vault, 'Public', 'Sub'), { recursive: true });
+    await mkdir(join(vault, 'Public', 'Drafts', 'wip'), { recursive: true });
+    await mkdir(join(vault, 'Private'));
+    await mkdir(join(vault, '.obsidian'));
+    await symlink(outside, join(vault, 'Public', 'evil'));
+    expect(await io.listFolders()).toEqual(['Public', 'Public/Sub']);
+    await rm(outside, { recursive: true, force: true });
+  });
+
+  test('omits unreadable ancestors of the read scope', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: ['Public/Notes'], write: [''] },
+    });
+    await mkdir(join(vault, 'Public', 'Notes', 'Sub'), { recursive: true });
+    expect(await io.listFolders()).toEqual([
+      'Public/Notes',
+      'Public/Notes/Sub',
+    ]);
+  });
+});
+
+describe('enumeration cycle guard', () => {
+  test('a dir symlink onto the directory holding it is not descended into', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, 'notes'));
+    await writeFile(join(vault, 'notes', 'a.md'), '# a');
+    await symlink('.', join(vault, 'notes', 'self')); // -> notes, its own parent
+    expect(await io.listFolders()).toEqual(['notes']);
+    expect(await io.listMarkdown()).toEqual(['notes/a.md']);
+  });
+
+  test('sibling links to one target are not a cycle — both walked, readdir order irrelevant', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, 'real'));
+    await writeFile(join(vault, 'real', 'a.md'), '# a');
+    await symlink(join(vault, 'real'), join(vault, 'alias'));
+    await symlink(join(vault, 'real'), join(vault, 'alias2'));
+    expect(await io.listFolders()).toEqual(['alias', 'alias2', 'real']);
+    expect(await io.listMarkdown()).toEqual([
+      'alias/a.md',
+      'alias2/a.md',
+      'real/a.md',
+    ]);
+  });
+
+  test('breaks a cycle that re-enters a mid-tree ancestor, not just the root', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, 'a', 'b'), { recursive: true });
+    await writeFile(join(vault, 'a', 'b', 'x.md'), '# x');
+    await symlink('..', join(vault, 'a', 'b', 'up')); // -> a, an ancestor
+    expect(await io.listFolders()).toEqual(['a', 'a/b']);
+    expect(await io.listMarkdown()).toEqual(['a/b/x.md']);
+  });
+});

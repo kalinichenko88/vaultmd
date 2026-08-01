@@ -1,20 +1,22 @@
-import type { Dirent } from 'node:fs';
+import { type Dirent, realpathSync } from 'node:fs';
 import { readdir, stat as statEntry } from 'node:fs/promises';
-import { join } from 'node:path';
-
-import { realTargetWithinRoot } from './realpath-guard.ts';
+import { join, sep } from 'node:path';
 
 type EnumerateDeps = {
+  can(rel: string, access: 'read' | 'write'): boolean;
   isIgnored(rel: string): boolean;
   resolveVaultPath(rel: string, access?: 'read' | 'write'): string;
   toVaultRelative(rel: string): string;
 };
 
+type Walked = { files: string[]; folders: string[] };
+
 async function walk(
-  root: string,
+  realRoot: string,
   absDir: string,
+  realDir: string, // fully-resolved location of absDir
   relDir: string,
-  out: string[],
+  out: Walked,
   deps: EnumerateDeps,
 ): Promise<void> {
   let entries: Dirent[];
@@ -45,10 +47,25 @@ async function walk(
       if (deps.isIgnored(childRel)) {
         continue;
       }
-      if (!realTargetWithinRoot(childAbs, root)) {
+      // A real subdirectory of an in-root directory is trivially in-root, so
+      // only a symlink can leave the vault — or aim back at ground we are
+      // standing on and loop: `ln -s .. vault/notes/loop` otherwise
+      // re-enumerates the whole vault at every level. Two *sibling* links to
+      // one target are not a cycle, so the result never depends on readdir order.
+      const childReal = ent.isSymbolicLink()
+        ? realTarget(childAbs)
+        : join(realDir, name);
+      if (
+        childReal === null ||
+        !isUnder(childReal, realRoot) ||
+        isUnder(realDir, childReal)
+      ) {
         continue;
       }
-      await walk(root, childAbs, childRel, out, deps);
+      if (deps.can(childRel, 'read')) {
+        out.folders.push(deps.toVaultRelative(childRel));
+      }
+      await walk(realRoot, childAbs, childReal, childRel, out, deps);
       continue;
     }
     if (isFile && name.endsWith('.md')) {
@@ -60,7 +77,7 @@ async function walk(
       } catch {
         continue;
       }
-      out.push(deps.toVaultRelative(childRel));
+      out.files.push(deps.toVaultRelative(childRel));
     }
   }
 }
@@ -70,14 +87,49 @@ export async function listMarkdown(
   dir: string | undefined,
   deps: EnumerateDeps,
 ): Promise<string[]> {
+  return (await enumerate(root, dir, deps)).files.sort();
+}
+
+export async function listFolders(
+  root: string,
+  dir: string | undefined,
+  deps: EnumerateDeps,
+): Promise<string[]> {
+  return (await enumerate(root, dir, deps)).folders.sort();
+}
+
+async function enumerate(
+  root: string,
+  dir: string | undefined,
+  deps: EnumerateDeps,
+): Promise<Walked> {
+  const out: Walked = { files: [], folders: [] };
   const startRel = dir === undefined ? '' : deps.toVaultRelative(dir);
   const startAbs = startRel === '' ? root : join(root, startRel);
-  if (!realTargetWithinRoot(startAbs, root)) {
-    return [];
+  const realRoot = realTarget(root);
+  const startReal = realTarget(startAbs);
+  if (
+    realRoot === null ||
+    startReal === null ||
+    !isUnder(startReal, realRoot)
+  ) {
+    return out;
   }
-  const out: string[] = [];
-  await walk(root, startAbs, startRel, out, deps);
-  out.sort();
+  await walk(realRoot, startAbs, startReal, startRel, out, deps);
 
   return out;
+}
+
+// `p` is `ancestor` itself or something beneath it. The trailing separators
+// keep `/vault/notes` from reading as a child of `/vault/note`.
+function isUnder(p: string, ancestor: string): boolean {
+  return (p + sep).startsWith(ancestor + sep);
+}
+
+function realTarget(abs: string): string | null {
+  try {
+    return realpathSync(abs);
+  } catch {
+    return null;
+  }
 }
