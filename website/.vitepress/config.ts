@@ -3,7 +3,7 @@ import { defineConfig } from 'vitepress';
 import typedocSidebar from '../api/typedoc-sidebar.json';
 
 export default defineConfig({
-  base: '/vaultmd/',
+  base: '/',
   title: 'VaultMD',
   description:
     'Headless markdown-vault data layer for Bun — CRUD + SQLite index.',
