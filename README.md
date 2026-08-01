@@ -284,7 +284,8 @@ tags(opts?: { prefix?: string; contains?: string; folder?: string; limit?: numbe
 
 ```ts
 // Full sweep now (vs. lazy). Returns ReconcileResult = { added, updated, removed }:
-// sorted vault-relative paths — the watcher-free change feed for outside edits.
+// sorted vault-relative paths changed since the last call — the watcher-free
+// change feed for edits made outside this vault instance.
 vault.reconcile(): Promise<ReconcileResult>
 vault.reconcilePaths(rels: string[]): Promise<void>  // reconcile specific paths
 vault.rebuild(): Promise<void>              // drop & rebuild the index from disk

@@ -250,9 +250,11 @@ const vault = await createVault({
 
 ## Poll for edits made outside the vault
 
-`reconcile()` returns the paths it changed, which makes it a watcher-free change
-feed for edits VaultMD did not make — your editor, `git checkout`, a sync client.
-Empty arrays mean the index was already in step with disk.
+`reconcile()` returns every path that changed since your last call, which makes
+it a watcher-free change feed for edits VaultMD did not make — your editor,
+`git checkout`, a sync client. Empty arrays mean nothing has changed. Reads fire
+their own background sweeps, but those buffer their findings rather than
+consuming them, so polling works with lazy reconcile left on.
 
 ```ts
 setInterval(async () => {

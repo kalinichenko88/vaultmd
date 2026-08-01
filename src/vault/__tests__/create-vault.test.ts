@@ -166,6 +166,37 @@ describe('createVault', () => {
     });
   });
 
+  test('a background sweep does not swallow changes from the next reconcile()', async () => {
+    await writeVaultMd('One.md', '# One\n');
+    const vault = await makeVault({ lazyReconcile: true, reconcileTtlMs: 1 });
+
+    // An out-of-band write that a query-triggered sweep reaches first.
+    await writeVaultMd('Two.md', '# Two\n');
+    await sleep(10);
+    vault.query.queryNotes(); // fires the background sweep
+    await sleep(50); // let it land
+    expect(
+      vault.query
+        .queryNotes()
+        .map((h) => h.path)
+        .sort(),
+    ).toEqual(['One.md', 'Two.md']); // the sweep already indexed it
+
+    // The poller still has to hear about it, even though it is already indexed.
+    expect(await vault.reconcile()).toEqual({
+      added: ['Two.md'],
+      updated: [],
+      removed: [],
+    });
+
+    // ...and exactly once: draining clears the buffer.
+    expect(await vault.reconcile()).toEqual({
+      added: [],
+      updated: [],
+      removed: [],
+    });
+  });
+
   test('an owner rebuilds the index on a config-fingerprint mismatch', async () => {
     await writeVaultMd('A.md', '# A\n[[B]]\n');
     await writeVaultMd('B.md', '# B\n');

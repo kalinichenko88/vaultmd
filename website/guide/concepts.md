@@ -65,17 +65,20 @@ is no watcher and no daemon. The `onCommit` hook is not a change feed — it
 reports writes made through this vault instance, so an edit from your editor,
 `git checkout`, or a sync client updates the index silently, with no event.
 
-What `reconcile()` returns is the substitute for that event. It reports the paths
-the sweep changed, so a live view polls one call instead of diffing query
-results:
+What `reconcile()` returns is the substitute for that event. It reports every
+path that changed since your last call, so a live view polls one call instead of
+diffing query results:
 
 ```ts
 const { added, updated, removed } = await vault.reconcile();
 ```
 
-All three are sorted vault-relative paths, and all three are empty when the index
-was already in step with disk. Writes made through `notes` are indexed
-write-through, so they never show up here — they already fired `onCommit`.
+All three are sorted vault-relative paths, and all three are empty when nothing
+has changed. *Since your last call* is the important part: background sweeps
+fired by reads change the index too, and their findings are buffered until you
+drain them, so a change is never lost to whichever sweep happened to reach it
+first. Writes made through `notes` are indexed write-through, so they never show
+up here — they already fired `onCommit`.
 
 ## Index location
 

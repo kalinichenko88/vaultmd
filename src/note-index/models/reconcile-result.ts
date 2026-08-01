@@ -1,9 +1,10 @@
 /**
- * What one full reconcile sweep changed in the index. Every field holds
- * sorted vault-relative paths, and all three are empty when the sweep found
- * the index already in step with disk. This is the watcher-free change feed:
- * out-of-band edits (an editor, `git checkout`, a sync client) never fire
- * `onCommit`, so polling this result is how a consumer learns about them.
+ * What a reconcile sweep changed in the index. Every field holds sorted
+ * vault-relative paths, and all three are empty when nothing has changed. This
+ * is the watcher-free change feed: out-of-band edits (an editor, `git checkout`,
+ * a sync client) never fire `onCommit`, so polling this result is how a consumer
+ * learns about them. Background sweeps buffer their findings rather than
+ * consuming them, so what a caller drains covers everything since its last call.
  */
 export type ReconcileResult = {
   /** Paths indexed for the first time — no row existed before the sweep. */
