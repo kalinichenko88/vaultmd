@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 // Creates the derived index schema. All statements are IF NOT EXISTS so this is
 // safe to call on every boot. notes.id is the stable rowid AND the FTS docid;

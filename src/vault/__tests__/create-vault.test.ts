@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -276,5 +277,41 @@ describe('createVault', () => {
         .map((h) => h.path)
         .sort(),
     ).toEqual(['One.md', 'Two.md']);
+  });
+
+  // Task 2 changed what a present-but-invalid note projects to. reconcile
+  // skips an unchanged file on mtime+size, so without a SCHEMA_VERSION bump an
+  // upgraded index would keep the old row forever and disagree with a freshly
+  // built one about the same vault.
+  test('an index built at an older schema version is rebuilt on reopen', async () => {
+    await writeVaultMd(
+      'N.md',
+      '---\na: .nan\ntags: [x]\ntitle: kept\n---\nbody\n',
+    );
+
+    const first = await makeVault();
+    // The note is invalid under the new gate: no tags, title from the basename.
+    expect(first.query.queryNotes()[0].tags).toEqual([]);
+    first.close();
+
+    // Simulate an index written by the previous release: stamp the old schema
+    // version and a stale row, without touching the file on disk.
+    const db = new Database(indexPath);
+    db.run("UPDATE meta SET value = '1' WHERE key = 'schema_version'");
+    db.run("UPDATE notes SET frontmatter = ?, title = 'kept'", [
+      '{"a":null,"tags":["x"],"title":"kept"}',
+    ]);
+    db.run(
+      "INSERT INTO note_tags(path_key, tag) VALUES ((SELECT path_key FROM notes), 'x')",
+    );
+    db.close();
+
+    // makeVault already registers the vault in `opened`; afterEach closes it.
+    const second = await makeVault();
+    const hit = second.query.queryNotes()[0];
+
+    expect(hit.frontmatter).toEqual({});
+    expect(hit.tags).toEqual([]);
+    expect(hit.title).toBe('N');
   });
 });
