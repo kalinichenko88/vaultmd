@@ -143,6 +143,29 @@ describe('createVault', () => {
     ).toEqual(['One.md', 'Two.md']);
   });
 
+  test('reconcile() returns the out-of-band changes; own writes report nothing', async () => {
+    await writeVaultMd('One.md', '# One\n');
+    const vault = await makeVault({ lazyReconcile: false });
+
+    // Writes through notes are indexed write-through, so nothing is left over.
+    await vault.notes.createNote('Own.md', { body: '# Own\n' });
+    expect(await vault.reconcile()).toEqual({
+      added: [],
+      updated: [],
+      removed: [],
+    });
+
+    // Edits that bypass notes are the ones reconcile has to report.
+    await writeVaultMd('Two.md', '# Two\n');
+    await writeVaultMd('One.md', '# One\nrewritten with more bytes\n');
+    await rm(join(vaultDir, 'Own.md'));
+    expect(await vault.reconcile()).toEqual({
+      added: ['Two.md'],
+      updated: ['One.md'],
+      removed: ['Own.md'],
+    });
+  });
+
   test('an owner rebuilds the index on a config-fingerprint mismatch', async () => {
     await writeVaultMd('A.md', '# A\n[[B]]\n');
     await writeVaultMd('B.md', '# B\n');

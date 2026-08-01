@@ -81,6 +81,8 @@ const ALL_EXPORTS = [
   'TagFilter',
   'WhereCondition',
   'WhereValue',
+  // — reconcile change feed (new 1) —
+  'ReconcileResult',
 ].sort();
 
 function exportedNames(source: string): string[] {
@@ -101,7 +103,7 @@ function exportedNames(source: string): string[] {
 }
 
 describe('package public API freeze', () => {
-  test('src/index.ts exports exactly the frozen 50 names (Plan 1 + Plan 2 + Plan 3 + 0.2.0 + 0.3.0 + tags + 0.5.0 + 1.0 + rich filters)', () => {
+  test('src/index.ts exports exactly the frozen 51 names (Plan 1 + Plan 2 + Plan 3 + 0.2.0 + 0.3.0 + tags + 0.5.0 + 1.0 + rich filters + reconcile feed)', () => {
     const src = readFileSync(new URL('../index.ts', import.meta.url), 'utf8');
     expect(exportedNames(src)).toEqual(ALL_EXPORTS);
   });

@@ -149,6 +149,64 @@ describe('note-index reconcile', () => {
     expect(ftsPathsFor('vanishword')).toEqual([]);
   });
 
+  test('reconcile reports what it changed: added, then updated, then removed', async () => {
+    await writeMd('a.md', '# A\n\nabody\n');
+    await writeMd('sub/b.md', '# B\n\nbbody\n');
+
+    expect(await reconciler.reconcile()).toEqual({
+      added: ['a.md', 'sub/b.md'],
+      updated: [],
+      removed: [],
+    });
+
+    await writeMd('a.md', '# A\n\nabody rewritten with many more bytes\n');
+    await writeMd('c.md', '# C\n\ncbody\n');
+    expect(await reconciler.reconcile()).toEqual({
+      added: ['c.md'],
+      updated: ['a.md'],
+      removed: [],
+    });
+
+    await rm(path.join(root, 'sub', 'b.md'));
+    await rm(path.join(root, 'c.md'));
+    expect(await reconciler.reconcile()).toEqual({
+      added: [],
+      updated: [],
+      removed: ['c.md', 'sub/b.md'],
+    });
+  });
+
+  test('reconcile reports nothing when the vault is unchanged', async () => {
+    await writeMd('quiet.md', '# Quiet\n\nquietbody\n');
+    await reconciler.reconcile();
+
+    expect(await reconciler.reconcile()).toEqual({
+      added: [],
+      updated: [],
+      removed: [],
+    });
+  });
+
+  test('reconcile reports only in-scope changes', async () => {
+    await writeMd('scopeA/a.md', '# A\n\nabody\n');
+    await writeMd('scopeB/b.md', '# B\n\nbbody\n');
+    const recB = createReconciler(
+      db,
+      createVaultIo({
+        root,
+        prefixes: { read: ['scopeB'], write: ['scopeB'] },
+        caseSensitive: true,
+      }),
+      cfg,
+    );
+
+    expect(await recB.reconcile()).toEqual({
+      added: ['scopeB/b.md'],
+      updated: [],
+      removed: [],
+    });
+  });
+
   test('reconcile reads new/changed files via readConsistent (stat->read->stat)', async () => {
     await writeMd('r.md', '# R\n\nreadpathword\n');
     const spy = spyOn(fsAtomic, 'readConsistent');

@@ -107,7 +107,7 @@ export async function createVault(config: CreateVaultConfig): Promise<Vault> {
   // Reads stay synchronous (their return types must equal createQuery's), so
   // the sweep is fire-and-forget — its result is visible to the NEXT read.
   let lastReconcileMs = 0;
-  let inFlight: Promise<void> | null = null;
+  let inFlight: Promise<unknown> | null = null;
 
   function maybeReconcile(): void {
     if (!lazyReconcile || inFlight) {
@@ -174,8 +174,10 @@ export async function createVault(config: CreateVaultConfig): Promise<Vault> {
     notes,
     query,
     reconcile: async () => {
-      await reconciler.reconcile();
+      const changed = await reconciler.reconcile();
       lastReconcileMs = Date.now();
+
+      return changed;
     },
     reconcilePaths: (rels) => reconciler.reconcilePaths(rels),
     rebuild: () => reconciler.rebuild(),

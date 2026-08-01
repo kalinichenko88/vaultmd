@@ -1,5 +1,6 @@
 export { dropNote, indexNote } from './index-note.ts';
 export type { IndexConfig } from './models/index-config.ts';
+export type { ReconcileResult } from './models/reconcile-result.ts';
 export type { Reconciler } from './models/reconciler.ts';
 export {
   configFingerprint,

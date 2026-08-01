@@ -60,6 +60,23 @@ result is visible to the *next* read, and a failed sweep never breaks a read.
 Need it now instead? Call `vault.reconcile()`, `vault.reconcilePaths([...])`, or
 `vault.rebuild()` to drop and rebuild the index from disk.
 
+Reconcile is how those edits arrive, and it is the *only* way they arrive: there
+is no watcher and no daemon. The `onCommit` hook is not a change feed — it
+reports writes made through this vault instance, so an edit from your editor,
+`git checkout`, or a sync client updates the index silently, with no event.
+
+What `reconcile()` returns is the substitute for that event. It reports the paths
+the sweep changed, so a live view polls one call instead of diffing query
+results:
+
+```ts
+const { added, updated, removed } = await vault.reconcile();
+```
+
+All three are sorted vault-relative paths, and all three are empty when the index
+was already in step with disk. Writes made through `notes` are indexed
+write-through, so they never show up here — they already fired `onCommit`.
+
 ## Index location
 
 The index `.db` and its `-wal` / `-shm` sidecars must live in a data directory
