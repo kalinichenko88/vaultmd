@@ -25,6 +25,14 @@ Released (`0.9.0`) — live on npm. The public API is frozen and tested, and the
 package ships as a bundled `dist/` (ESM + types). Being `0.x`, the surface may
 still evolve before `1.0`; see [CHANGELOG.md](./CHANGELOG.md) for what changed.
 
+> **Upgrading to nested frontmatter?** A dot in a `where` key used to match a
+> frontmatter key that literally contained a dot; it now descends into a nested
+> map. That change is **silent** — a filter like
+> `where: { 'dataview.status': 'open' }` no longer matches those notes and
+> returns an empty result rather than an error. Write `'dataview\\.status'` to
+> keep the old meaning. Everything else in that release is covered by
+> [CHANGELOG.md](./CHANGELOG.md).
+
 ## Features
 
 - **CRUD over markdown** — create, read, update, delete `.md` notes with
