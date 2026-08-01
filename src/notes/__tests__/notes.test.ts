@@ -650,20 +650,18 @@ describe('createNote — nested frontmatter', () => {
     });
   });
 
-  test('a shared container reference throws FRONTMATTER_INVALID', async () => {
-    const shared = { k: 1 };
-    let caught: unknown;
-    try {
-      await notes.createNote('N.md', {
-        frontmatter: { x: shared, y: shared },
-        body: 'body\n',
-      });
-    } catch (err) {
-      caught = err;
-    }
+  test('a shared container reference is stored as two independent values', async () => {
+    const shared = ['a', 'b'];
+    await notes.createNote('N.md', {
+      frontmatter: { tags: shared, aliases: shared },
+      body: 'body\n',
+    });
 
-    expect(caught).toBeInstanceOf(MdVaultError);
-    expect((caught as MdVaultError).code).toBe('FRONTMATTER_INVALID');
+    expect(query.queryNotes()[0].frontmatter).toEqual({
+      tags: ['a', 'b'],
+      aliases: ['a', 'b'],
+    });
+    expect(await Bun.file(join(vaultDir, 'N.md')).text()).not.toContain('&');
   });
 
   // buildContent routes a non-empty `frontmatter` input through

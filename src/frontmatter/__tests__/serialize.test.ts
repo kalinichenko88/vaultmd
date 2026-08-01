@@ -145,22 +145,30 @@ describe('serializeFrontmatter — nested values', () => {
     expect(parsed.frontmatter).toEqual(fm);
   });
 
-  // yaml emits a shared reference as &a1/*a1, which produces a note that
-  // editFrontmatter can no longer rewrite. Refusing the write is the fix.
-  test('a shared map reference throws FRONTMATTER_INVALID', () => {
+  // yaml would emit a shared reference as an &a1/*a1 anchor pair by default,
+  // producing a note editFrontmatter can no longer rewrite in place. Writing
+  // the value out twice keeps the note editable.
+  test('a shared map reference is written out twice, not anchored', () => {
     const shared = { k: 1 };
+    const block = serializeFrontmatter({ x: shared, y: shared });
 
-    expect(() => serializeFrontmatter({ x: shared, y: shared })).toThrow(
-      expect.objectContaining({ code: 'FRONTMATTER_INVALID' }),
-    );
+    expect(block).not.toContain('&');
+    expect(block).not.toContain('*');
+    expect(parseFrontmatter(`${block}body\n`).frontmatter).toEqual({
+      x: { k: 1 },
+      y: { k: 1 },
+    });
   });
 
-  test('a shared array reference throws FRONTMATTER_INVALID', () => {
+  test('a shared array reference is written out twice, not anchored', () => {
     const shared = [1, 2];
+    const block = serializeFrontmatter({ tags: shared, aliases: shared });
 
-    expect(() => serializeFrontmatter({ x: shared, y: shared })).toThrow(
-      expect.objectContaining({ code: 'FRONTMATTER_INVALID' }),
-    );
+    expect(block).not.toContain('&');
+    expect(parseFrontmatter(`${block}body\n`).frontmatter).toEqual({
+      tags: [1, 2],
+      aliases: [1, 2],
+    });
   });
 
   // Without the depth bound this reached yaml's emitter and died with a raw

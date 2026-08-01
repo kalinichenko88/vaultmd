@@ -1,4 +1,11 @@
-import { type Document, isMap, isScalar, parseDocument } from 'yaml';
+import {
+  type Document,
+  isMap,
+  isScalar,
+  isSeq,
+  parseDocument,
+  visit,
+} from 'yaml';
 
 import type { EditOutcome } from './models/edit-outcome.ts';
 import { extractBlock, parseFrontmatter } from './parse.ts';
@@ -58,14 +65,11 @@ export function editFrontmatter(
     return { content, outcome: 'unverifiable' };
   }
   const doc = parseDocument(ext.yaml, { uniqueKeys: false });
-  dropShadowedKeys(doc);
-  // dropShadowedKeys can orphan an alias; toJS then throws a raw ReferenceError.
-  let before: Record<string, unknown>;
-  try {
-    before = (doc.toJS() ?? {}) as Record<string, unknown>;
-  } catch {
+  if (hasContainerAlias(doc)) {
     return { content, outcome: 'unverifiable' };
   }
+  dropShadowedKeys(doc);
+  const before = (doc.toJS() ?? {}) as Record<string, unknown>;
   const view = structuredClone(before);
   mutate(view);
   if (!isValidFrontmatter(view)) {
@@ -95,6 +99,33 @@ export function editFrontmatter(
     content: `${emitFrontmatterBlock(doc)}${ext.body}`,
     outcome: 'edited',
   };
+}
+
+// Whether the block anchors a map or a sequence and refers to it by alias.
+// Such a note cannot be edited a key at a time: `doc.set` on the pair owning
+// the anchor orphans every `*ref` to it and yaml then refuses to emit, throwing
+// a raw, code-less error; mutating the container in place instead unrolls the
+// alias into independent copies, silently losing it. Neither is an edit anyone
+// asked for, so the note is left alone.
+//
+// Scalar anchors are deliberately allowed — `doc.set` rewrites the value and
+// keeps the anchor, so nothing is lost. This also covers the case a value-graph
+// check cannot see: a duplicate top-level key can shadow the pair carrying the
+// anchor, and last-wins resolution then leaves no repeated reference behind.
+function hasContainerAlias(doc: Document): boolean {
+  let found = false;
+  visit(doc, {
+    Alias(_key, node) {
+      const target = node.resolve(doc);
+      if (isMap(target) || isSeq(target)) {
+        found = true;
+
+        return visit.BREAK;
+      }
+    },
+  });
+
+  return found;
 }
 
 // A note may legally repeat a key (`uniqueKeys: false`), and every reader of one

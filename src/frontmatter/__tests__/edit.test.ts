@@ -200,16 +200,20 @@ describe('editFrontmatter — nested values', () => {
     expect(content).toContain('*a');
   });
 
-  test('a mutation that introduces a shared reference is refused', () => {
-    const src = '---\ntitle: keep\n---\nbody\n';
+  // The obvious way to write "copy tags into aliases" binds one array to two
+  // keys. doc.set writes each out on its own, so no anchor reaches the file.
+  test('a mutation that shares a reference writes both keys out', () => {
+    const src = '---\ntags:\n  - a\n  - b\n---\nbody\n';
     const { content, outcome } = editFrontmatter(src, (fm) => {
-      const shared = { k: 1 };
-      fm.a = shared;
-      fm.b = shared;
+      fm.aliases = fm.tags;
     });
 
-    expect(outcome).toBe('unverifiable');
-    expect(content).toBe(src);
+    expect(outcome).toBe('edited');
+    expect(content).not.toContain('&');
+    expect(parseFrontmatter(content).frontmatter).toEqual({
+      tags: ['a', 'b'],
+      aliases: ['a', 'b'],
+    });
   });
 
   // A repeated top-level key is legal (uniqueKeys: false, last-wins), and
