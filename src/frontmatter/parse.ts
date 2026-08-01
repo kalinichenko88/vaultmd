@@ -2,7 +2,7 @@ import { parse } from 'yaml';
 
 import type { ParsedFrontmatter } from './models/parsed-frontmatter.ts';
 import { deriveTags } from './tags.ts';
-import { isValidFrontmatter } from './validate.ts';
+import { isValidFrontmatter, keepValidKeys } from './validate.ts';
 
 type Block = { yaml: string; body: string };
 
@@ -61,16 +61,26 @@ export function parseFrontmatter(content: string): ParsedFrontmatter {
     return { frontmatter: {}, tags: [], body, valid: 'present-but-invalid' };
   }
   const frontmatter = parsed as Record<string, unknown>;
-  // Not tidiness: an anchor-built block can be cyclic, and projectRow
-  // stringifies whatever this returns regardless of `valid`.
-  if (!isValidFrontmatter(frontmatter)) {
-    return { frontmatter: {}, tags: [], body, valid: 'present-but-invalid' };
+  if (isValidFrontmatter(frontmatter)) {
+    return {
+      frontmatter,
+      tags: deriveTags(frontmatter),
+      body,
+      valid: 'valid',
+    };
   }
 
+  // Some value here cannot round-trip. Report the rest anyway: one `.nan` or
+  // stray `!!python/object` should cost the reader that key, not the note's
+  // tags and title as well. Filtering rather than returning the parsed map is
+  // load-bearing, not tidiness — an anchor-built block can be cyclic, and
+  // projectRow stringifies whatever this returns without consulting `valid`.
+  const usable = keepValidKeys(frontmatter);
+
   return {
-    frontmatter,
-    tags: deriveTags(frontmatter),
+    frontmatter: usable,
+    tags: deriveTags(usable),
     body,
-    valid: 'valid',
+    valid: 'present-but-invalid',
   };
 }

@@ -290,28 +290,29 @@ describe('createVault', () => {
     );
 
     const first = await makeVault();
-    // The note is invalid under the new gate: no tags, title from the basename.
-    expect(first.query.queryNotes()[0].tags).toEqual([]);
+    // `.nan` cannot round-trip, so `a` is dropped; every other key survives.
+    expect(first.query.queryNotes()[0].frontmatter).toEqual({
+      tags: ['x'],
+      title: 'kept',
+    });
     first.close();
 
     // Simulate an index written by the previous release: stamp the old schema
-    // version and a stale row, without touching the file on disk.
+    // version and a stale row, without touching the file on disk. The previous
+    // release stored `a` as null rather than dropping it, which is exactly the
+    // projection difference the bump exists to repair.
     const db = new Database(indexPath);
     db.run("UPDATE meta SET value = '1' WHERE key = 'schema_version'");
-    db.run("UPDATE notes SET frontmatter = ?, title = 'kept'", [
+    db.run('UPDATE notes SET frontmatter = ?', [
       '{"a":null,"tags":["x"],"title":"kept"}',
     ]);
-    db.run(
-      "INSERT INTO note_tags(path_key, tag) VALUES ((SELECT path_key FROM notes), 'x')",
-    );
     db.close();
 
     // makeVault already registers the vault in `opened`; afterEach closes it.
     const second = await makeVault();
     const hit = second.query.queryNotes()[0];
 
-    expect(hit.frontmatter).toEqual({});
-    expect(hit.tags).toEqual([]);
-    expect(hit.title).toBe('N');
+    expect(hit.frontmatter).toEqual({ tags: ['x'], title: 'kept' });
+    expect(hit.frontmatter).not.toHaveProperty('a');
   });
 });

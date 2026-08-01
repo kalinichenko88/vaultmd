@@ -114,7 +114,9 @@ describe('projectRow — nested and invalid frontmatter', () => {
     expect(row.tags).toEqual([]);
   });
 
-  test('an invalid block drops the tags and title that shared it', () => {
+  // A note with one unusable key stays queryable by its other keys, keeps its
+  // tags, and keeps the title its author wrote.
+  test('an invalid block indexes every key that survives', () => {
     const row = projectRow(
       '---\na: .nan\ntags: [x]\ntitle: kept\n---\nbody\n',
       'n.md',
@@ -122,8 +124,11 @@ describe('projectRow — nested and invalid frontmatter', () => {
       cfg,
     );
 
-    expect(row.frontmatterJson).toBe('{}');
-    expect(row.tags).toEqual([]);
-    expect(row.title).toBe('n');
+    expect(JSON.parse(row.frontmatterJson)).toEqual({
+      tags: ['x'],
+      title: 'kept',
+    });
+    expect(row.tags).toEqual(['x']);
+    expect(row.title).toBe('kept');
   });
 });
