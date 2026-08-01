@@ -119,7 +119,10 @@ export type VaultIo = {
    * not it holds markdown. `ignore` globs are matched against the folder path
    * itself, so `Drafts` prunes the folder and its subtree while `Drafts/**`
    * hides only its contents. The root itself is never included, and the result
-   * is a flat sorted path list — build a tree from it caller-side if needed.
+   * is a flat sorted path list — build a tree from it caller-side if needed,
+   * treating missing parents as implied: under a nested read prefix such as
+   * `Public/Notes`, `Public` is unreadable and so is never listed even though
+   * `Public/Notes` is.
    * @param dir Optional vault-relative subdirectory to constrain the listing.
    * @returns Sorted vault-relative paths of enumerated folders.
    */

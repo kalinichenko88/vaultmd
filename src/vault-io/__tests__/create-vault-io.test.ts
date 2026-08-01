@@ -435,4 +435,59 @@ describe('listFolders', () => {
     expect(await io.listFolders()).toEqual(['Public', 'Public/Sub']);
     await rm(outside, { recursive: true, force: true });
   });
+
+  test('omits unreadable ancestors of the read scope', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: ['Public/Notes'], write: [''] },
+    });
+    await mkdir(join(vault, 'Public', 'Notes', 'Sub'), { recursive: true });
+    expect(await io.listFolders()).toEqual([
+      'Public/Notes',
+      'Public/Notes/Sub',
+    ]);
+  });
+});
+
+describe('enumeration cycle guard', () => {
+  test('a dir symlink pointing back inside the vault is followed at most once', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, 'notes'));
+    await writeFile(join(vault, 'notes', 'a.md'), '# a');
+    await symlink('..', join(vault, 'notes', 'loop')); // -> vault root
+    expect(await io.listFolders()).toEqual(['notes']);
+    expect(await io.listMarkdown()).toEqual(['notes/a.md']);
+  });
+
+  test('sibling links to one target are not a cycle — both walked, readdir order irrelevant', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, 'real'));
+    await writeFile(join(vault, 'real', 'a.md'), '# a');
+    await symlink(join(vault, 'real'), join(vault, 'alias'));
+    await symlink(join(vault, 'real'), join(vault, 'alias2'));
+    expect(await io.listFolders()).toEqual(['alias', 'alias2', 'real']);
+    expect(await io.listMarkdown()).toEqual([
+      'alias/a.md',
+      'alias2/a.md',
+      'real/a.md',
+    ]);
+  });
+
+  test('breaks a cycle that re-enters a mid-tree ancestor, not just the root', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, 'a', 'b'), { recursive: true });
+    await writeFile(join(vault, 'a', 'b', 'x.md'), '# x');
+    await symlink('..', join(vault, 'a', 'b', 'up')); // -> a, an ancestor
+    expect(await io.listFolders()).toEqual(['a', 'a/b']);
+    expect(await io.listMarkdown()).toEqual(['a/b/x.md']);
+  });
 });
