@@ -209,6 +209,56 @@ const top = vault.query.tags({ limit: 10 });
 const projects = vault.query.tags({ prefix: 'project/' });
 ```
 
+## Rename a tag across the vault
+
+There is no `retag(from, to)` — it is `queryNotes({ tag })` plus one
+`editFrontmatter` per note. Reuse `deriveTags` for the read side so the
+tokenising rules stay the package's, not yours: it reads whichever of `tags` /
+`tag` the note uses, splits strings on whitespace and commas, and strips leading
+`#`.
+
+```ts
+import { deriveTags } from 'vaultmd';
+
+async function renameTag(from: string, to: string) {
+  // Collect first. Each rename drops the note out of `tag: from`, so walking
+  // the offsets while mutating would step over half the matches.
+  const paths: string[] = [];
+  for (let offset = 0; ; offset += 100) {
+    const page = vault.query.queryNotes({ tag: from, limit: 100, offset });
+    paths.push(...page.map((hit) => hit.path));
+    if (page.length < 100) {
+      break;
+    }
+  }
+
+  const skipped: string[] = [];
+  for (const path of paths) {
+    const outcome = await vault.notes.editFrontmatter(path, (fm) => {
+      const tags = deriveTags(fm);
+      if (!tags.includes(from)) {
+        return; // index was stale — leave the note alone
+      }
+      fm[fm.tags !== undefined ? 'tags' : 'tag'] = tags.map((t) =>
+        t === from ? to : t,
+      );
+    });
+    if (outcome === 'unverifiable') {
+      skipped.push(path);
+    }
+  }
+
+  return skipped;
+}
+```
+
+Two things this does on purpose. Writing `deriveTags` output back **normalises**
+the note's tag formatting — `tags: "work, #inbox"` becomes a two-element list —
+which makes the operation idempotent but is a visible diff on notes you did not
+otherwise touch. And `'unverifiable'` notes are collected rather than forced:
+their frontmatter is not flat, so `editFrontmatter` refuses instead of risking
+data loss. Rewrite those by hand.
+
 ## Edit frontmatter and body in one atomic commit
 
 `transformNote` runs a whole-note transform inside the per-file lock, so a
