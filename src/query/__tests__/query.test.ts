@@ -2735,6 +2735,22 @@ describe('queryNotes — nested where paths', () => {
     }
   });
 
+  // `where: { meta: { status } }` reaches pushWhereFilter as an operator bag,
+  // so the error has to point at the path form rather than name an "operator"
+  // the caller never wrote.
+  test('a nested-object where names the dotted path form', () => {
+    const { queryNotes } = mkQuery();
+
+    expect(() =>
+      queryNotes({ where: { meta: { status: 'open' } as never } }),
+    ).toThrow(
+      expect.objectContaining({
+        code: 'VALIDATION_ERROR',
+        message: expect.stringContaining("'meta.status'"),
+      }),
+    );
+  });
+
   test('a bracket in a key is still rejected by the character allowlist', () => {
     const { queryNotes } = mkQuery();
 

@@ -237,9 +237,13 @@ function pushWhereFilter(
       parts.push(`${col} IS ${value ? 'NOT NULL' : 'NULL'}`);
       continue;
     }
+    // Now that frontmatter nests, `where: { meta: { status: 'open' } }` is the
+    // shape a caller reaches for first — and it arrives here as an operator bag
+    // holding `status`. Saying "unknown operator" names something they never
+    // wrote; point at the path form that does what they meant.
     throw new MdVaultError(
       'VALIDATION_ERROR',
-      `unknown where operator on ${key}: ${op}`,
+      `unknown where operator on ${key}: ${op}. To filter a nested value, use the dotted path form: { '${key}.${op}': … }`,
     );
   }
 }

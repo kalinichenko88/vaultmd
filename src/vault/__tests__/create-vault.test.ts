@@ -251,6 +251,39 @@ describe('createVault', () => {
 
     expect(caught).toBeInstanceOf(MdVaultError);
     expect((caught as MdVaultError).code).toBe('INDEX_UNAVAILABLE');
+    // The two triggers call for different actions, so the message has to say
+    // which one fired. Here the schema version matches and the IndexConfig
+    // does not, so booting an owner would not settle it.
+    expect((caught as MdVaultError).message).toContain('IndexConfig');
+    expect((caught as MdVaultError).message).toContain('notes');
+  });
+
+  test('a stale schema version names the upgrade, not a config mismatch', async () => {
+    await writeVaultMd('notes/A.md', '# A\n');
+
+    const owner = await makeVault();
+    owner.close();
+
+    // Same IndexConfig, older schema version — the upgrade case.
+    const db = new Database(indexPath);
+    db.run("UPDATE meta SET value = '1' WHERE key = 'schema_version'");
+    db.close();
+
+    let caught: unknown;
+    try {
+      await createVault({
+        root: vaultDir,
+        prefixes: { read: ['notes'], write: ['notes'] },
+        indexPath,
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect((caught as MdVaultError).code).toBe('INDEX_UNAVAILABLE');
+    expect((caught as MdVaultError).message).toContain('older release');
+    expect((caught as MdVaultError).message).toContain('schema v1');
+    expect((caught as MdVaultError).message).not.toContain('IndexConfig');
   });
 
   test('lazyReconcile true auto-sweeps an external write after the TTL window', async () => {
