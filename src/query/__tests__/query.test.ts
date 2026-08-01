@@ -2642,3 +2642,104 @@ describe('backlinks — case-sensitive vault', () => {
     expect(q.backlinks('folder/foo.md')).toEqual([]);
   });
 });
+
+describe('queryNotes — nested where paths', () => {
+  test('a dotted key descends into a nested map', () => {
+    insertNote(db, { path: 'A.md', frontmatter: { meta: { status: 'open' } } });
+    insertNote(db, { path: 'B.md', frontmatter: { meta: { status: 'done' } } });
+    const { queryNotes } = mkQuery();
+
+    expect(
+      queryNotes({ where: { 'meta.status': 'open' } }).map((h) => h.path),
+    ).toEqual(['A.md']);
+  });
+
+  test('a three-segment path works', () => {
+    insertNote(db, { path: 'A.md', frontmatter: { a: { b: { c: 1 } } } });
+    const { queryNotes } = mkQuery();
+
+    expect(queryNotes({ where: { 'a.b.c': 1 } }).map((h) => h.path)).toEqual([
+      'A.md',
+    ]);
+  });
+
+  test('operators work on a nested path', () => {
+    insertNote(db, { path: 'A.md', frontmatter: { meta: { n: 5 } } });
+    insertNote(db, { path: 'B.md', frontmatter: { meta: { n: 50 } } });
+    const { queryNotes } = mkQuery();
+
+    expect(
+      queryNotes({ where: { 'meta.n': { gte: 10 } } }).map((h) => h.path),
+    ).toEqual(['B.md']);
+  });
+
+  test('exists is false when the parent segment is missing', () => {
+    insertNote(db, { path: 'A.md', frontmatter: { other: 1 } });
+    const { queryNotes } = mkQuery();
+
+    expect(
+      queryNotes({ where: { 'meta.status': { exists: false } } }).map(
+        (h) => h.path,
+      ),
+    ).toEqual(['A.md']);
+  });
+
+  test('an escaped dot matches a key that literally contains one', () => {
+    insertNote(db, { path: 'A.md', frontmatter: { 'meta.status': 'open' } });
+    const { queryNotes } = mkQuery();
+
+    expect(
+      queryNotes({ where: { 'meta\\.status': 'open' } }).map((h) => h.path),
+    ).toEqual(['A.md']);
+    // ...and the unescaped form does NOT match it any more.
+    expect(queryNotes({ where: { 'meta.status': 'open' } })).toEqual([]);
+  });
+
+  test('a single-segment key is unaffected', () => {
+    insertNote(db, { path: 'A.md', frontmatter: { status: 'open' } });
+    const { queryNotes } = mkQuery();
+
+    expect(
+      queryNotes({ where: { status: 'open' } }).map((h) => h.path),
+    ).toEqual(['A.md']);
+  });
+
+  // Pins the documented non-goal: the grammar addresses object labels only.
+  // SQLite needs $."items"[0]."name" for an array element, which this does not
+  // generate — so the filter matches nothing rather than erroring.
+  test('a dotted path does not descend into an array', () => {
+    insertNote(db, { path: 'A.md', frontmatter: { items: [{ name: 'a' }] } });
+    const { queryNotes } = mkQuery();
+
+    expect(queryNotes({ where: { 'items.0.name': 'a' } })).toEqual([]);
+  });
+
+  test('an empty path segment throws VALIDATION_ERROR', () => {
+    const { queryNotes } = mkQuery();
+    for (const key of ['a..b', '.a', 'a.']) {
+      expect(() => queryNotes({ where: { [key]: 1 } })).toThrow(
+        expect.objectContaining({ code: 'VALIDATION_ERROR' }),
+      );
+    }
+  });
+
+  test('a stray backslash throws VALIDATION_ERROR', () => {
+    // Only \. is a defined escape. `$."a\b"` would be emitted raw into the
+    // JSON path, where SQLite reads \b as an escape sequence and matches
+    // nothing — an unreachable query rather than an error.
+    const { queryNotes } = mkQuery();
+    for (const key of ['a\\b', 'a\\']) {
+      expect(() => queryNotes({ where: { [key]: 1 } })).toThrow(
+        expect.objectContaining({ code: 'VALIDATION_ERROR' }),
+      );
+    }
+  });
+
+  test('a bracket in a key is still rejected by the character allowlist', () => {
+    const { queryNotes } = mkQuery();
+
+    expect(() => queryNotes({ where: { 'items[0]': 1 } })).toThrow(
+      expect.objectContaining({ code: 'VALIDATION_ERROR' }),
+    );
+  });
+});

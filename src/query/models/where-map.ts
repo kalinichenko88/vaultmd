@@ -1,6 +1,8 @@
 /**
- * A scalar frontmatter value usable as a filter operand. Frontmatter is flat,
- * so only scalars are comparable.
+ * A scalar frontmatter value usable as a filter operand. Only scalars are
+ * comparable: `json_extract` hands back a nested map or array as its JSON
+ * *text*, so comparing one is a string comparison against serialized JSON, not
+ * a structural match. Filter a leaf, not a subtree.
  */
 export type WhereValue = string | number | boolean;
 
@@ -63,6 +65,26 @@ export type WhereCondition = {
  *     due: { lt: '2026-08-01' },       // range
  *     kind: { in: ['note', 'ref'] },   // set membership
  *     archived: { exists: false },     // field absent
+ *   },
+ * });
+ * ```
+ *
+ * A key is a **path**: a dot separates segments, so `'meta.status'` matches the
+ * `status` key inside a nested `meta` map. Write `\.` for a frontmatter key
+ * that literally contains a dot (`'meta\\.status'` in a TypeScript string
+ * literal). A stray backslash, an empty segment (`'a..b'`, `'.a'`, `'a.'`) or
+ * any character outside `[A-Za-z0-9_.\\-]` throws `VALIDATION_ERROR`.
+ *
+ * Paths address **object labels only** — they do not descend into arrays.
+ * `'items.0.name'` matches nothing rather than reaching the first element.
+ * Read arrays back through `NoteHit.frontmatter` instead.
+ *
+ * @example
+ * ```ts
+ * vault.query.queryNotes({
+ *   where: {
+ *     'meta.status': 'open',        // nested path
+ *     'meta\\.status': 'open',      // key literally named "meta.status"
  *   },
  * });
  * ```

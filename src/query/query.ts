@@ -18,7 +18,7 @@ import type { WhereCondition, WhereValue } from './models/where-map.ts';
 
 const ORDER_FIELDS = new Set<string>(['mtime_ms', 'path', 'title']);
 const ORPHAN_MODES = new Set<string>(['disconnected', 'unreferenced']);
-const WHERE_KEY_RE = /^[A-Za-z0-9_.-]+$/;
+const WHERE_KEY_RE = /^[A-Za-z0-9_.\\-]+$/;
 const DEFAULT_LIMIT = 100;
 const HARD_MAX = 1000;
 
@@ -146,6 +146,42 @@ function assertTagList(value: unknown, label: string): string[] {
   return value;
 }
 
+// One `where` key as a SQLite JSON path. A dot separates path segments —
+// `'meta.status'` descends into a nested map — and `\.` is a literal dot, for
+// a frontmatter key that contains one.
+//
+// WHERE_KEY_RE is the character allowlist; this is the grammar. The two are
+// separate because the class has to admit a backslash for the escape, which
+// would otherwise let through keys that cannot be honoured.
+//
+// Object labels only: `'items.0.name'` builds `$."items"."0"."name"`, which
+// does not reach an array element (SQLite needs `$."items"[0]."name"`), so it
+// matches nothing. Descending into arrays is a documented non-goal — the
+// useful array query is "any element matches", which needs json_each.
+function jsonPath(key: string): string {
+  // Only `\.` is defined. Any other backslash would be emitted raw into the
+  // path, where SQLite reads e.g. `\b` as an escape sequence: `$."a\b"` does
+  // NOT find a key named `a\b` (that needs `$."a\\b"`). Refuse rather than
+  // build a path that silently matches nothing.
+  if (/\\(?!\.)/.test(key)) {
+    throw new MdVaultError(
+      'VALIDATION_ERROR',
+      `where key has a stray backslash (only \\. is an escape): ${key}`,
+    );
+  }
+  const segments = key
+    .split(/(?<!\\)\./)
+    .map((segment) => segment.replace(/\\\./g, '.'));
+  if (segments.some((segment) => segment === '')) {
+    throw new MdVaultError(
+      'VALIDATION_ERROR',
+      `where key has an empty path segment: ${key}`,
+    );
+  }
+
+  return `$.${segments.map((segment) => `"${segment}"`).join('.')}`;
+}
+
 // One `where` entry as SQL over the frontmatter JSON: a bare value is equality,
 // an object is a set of operators AND-ed together. Only `key` reaches the SQL
 // text (WHERE_KEY_RE-guarded by the caller) — every operand stays a parameter.
@@ -155,7 +191,7 @@ function pushWhereFilter(
   key: string,
   cond: WhereValue | WhereCondition,
 ): void {
-  const col = `json_extract(n.frontmatter, '$."${key}"')`;
+  const col = `json_extract(n.frontmatter, '${jsonPath(key)}')`;
   if (typeof cond !== 'object' || cond === null) {
     parts.push(`${col} = ?`);
     params.push(assertWhereValue(cond, `where ${key}`));
