@@ -41,6 +41,10 @@ export type CreateVaultConfig = VaultIoConfig & {
    * Optional callback invoked after each committed file operation. Receives a
    * {@link CommitEvent} describing the `op`, `path`, and (for writes) the new
    * content. Errors thrown here are wrapped in `MdVaultError('COMMIT_FAILED')`.
+   *
+   * This is not a change feed: it reports only writes made through this vault
+   * instance. Edits made out of band — in an editor, by `git checkout`, by a
+   * sync client — surface in the index through reconcile, without an event.
    */
   onCommit?: (e: CommitEvent) => void | Promise<void>;
 };

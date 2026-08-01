@@ -283,7 +283,10 @@ tags(opts?: { prefix?: string; contains?: string; folder?: string; limit?: numbe
 ### Lifecycle
 
 ```ts
-vault.reconcile(): Promise<void>            // full sweep now (vs. lazy)
+// Full sweep now (vs. lazy). Returns ReconcileResult = { added, updated, removed }:
+// sorted vault-relative paths changed since the last call — the watcher-free
+// change feed for edits made outside this vault instance.
+vault.reconcile(): Promise<ReconcileResult>
 vault.reconcilePaths(rels: string[]): Promise<void>  // reconcile specific paths
 vault.rebuild(): Promise<void>              // drop & rebuild the index from disk
 vault.close(): void                         // close the db handle
@@ -303,6 +306,11 @@ Fired after each committed mutation with a `CommitEvent`:
 `moveNote` emits `delete` then `create`. Anything thrown here surfaces as
 `MdVaultError('COMMIT_FAILED')` — the file write has already landed at that
 point, so treat the hook as best-effort mirroring, not a veto.
+
+It is not a change feed: it only reports writes made through this vault
+instance. There is no watcher and no daemon, so an edit from your editor,
+`git checkout`, or a sync client updates the index silently through reconcile.
+Poll `vault.reconcile()` for those — it returns what the sweep changed.
 
 ### Lower-level primitives
 

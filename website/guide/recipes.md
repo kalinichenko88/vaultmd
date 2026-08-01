@@ -232,7 +232,9 @@ const outcome = await vault.notes.transformNote('Notes/today.md', (current) => {
 `onCommit` fires after each committed mutation — `{ op: 'create' | 'update',
 path, content }` or `{ op: 'delete', path }` (a `moveNote` emits `delete` then
 `create`). Anything it throws surfaces as `COMMIT_FAILED` *after* the file write
-has already landed, so treat it as best-effort mirroring, not a veto.
+has already landed, so treat it as best-effort mirroring, not a veto. It mirrors
+only this instance's own writes — out-of-band edits reach the index through
+[lazy reconcile](./concepts#lazy-reconcile), without firing the hook.
 
 ```ts
 const vault = await createVault({
@@ -244,6 +246,26 @@ const vault = await createVault({
   },
 });
 ```
+
+## Poll for edits made outside the vault
+
+`reconcile()` returns every path that changed since your last call, which makes
+it a watcher-free change feed for edits VaultMD did not make — your editor,
+`git checkout`, a sync client. Empty arrays mean nothing has changed. Reads fire
+their own background sweeps, but those buffer their findings rather than
+consuming them, so polling works with lazy reconcile left on.
+
+```ts
+setInterval(async () => {
+  const { added, updated, removed } = await vault.reconcile();
+  if (added.length || updated.length || removed.length) {
+    console.log('vault changed', { added, updated, removed });
+  }
+}, 5_000);
+```
+
+Notes written through `vault.notes` are indexed write-through, so they never
+appear here — use `onCommit` for those.
 
 ## Rewrite a body, keep the frontmatter
 

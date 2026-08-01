@@ -31,6 +31,7 @@ export {
   withFileMove,
   withFileTransform,
 } from '@/locked-file/index.ts';
+export type { ReconcileResult } from '@/note-index/index.ts';
 export type {
   NotesApi,
   ReadNoteResult,

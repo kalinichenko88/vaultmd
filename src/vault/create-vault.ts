@@ -8,6 +8,7 @@ import {
   type IndexConfig,
   openIndexDb,
   probeCapabilities,
+  type ReconcileResult,
   readMeta,
   SCHEMA_VERSION,
 } from '@/note-index/index.ts';
@@ -109,6 +110,53 @@ export async function createVault(config: CreateVaultConfig): Promise<Vault> {
   let lastReconcileMs = 0;
   let inFlight: Promise<void> | null = null;
 
+  // Every sweep folds its result in here and reconcile() drains it. A
+  // background sweep applies changes nobody asked for, so without this buffer
+  // any change a query-triggered sweep happened to reach first would be
+  // indexed and then never reported — the feed would silently lose it.
+  const pending = new Map<string, keyof ReconcileResult>();
+
+  // ponytail: last-wins merge. A path that changes twice between drains reports
+  // only its latest kind, so a create+delete between polls reports `removed` for
+  // a path the consumer never saw (and create+edit reports `updated`). Add
+  // per-path transition precedence if a consumer ever needs those to cancel.
+  function absorb(changed: ReconcileResult): void {
+    for (const kind of ['added', 'updated', 'removed'] as const) {
+      for (const path of changed[kind]) {
+        pending.set(path, kind);
+      }
+    }
+  }
+
+  function drain(): ReconcileResult {
+    const out: ReconcileResult = { added: [], updated: [], removed: [] };
+    for (const [path, kind] of pending) {
+      out[kind].push(path);
+    }
+    pending.clear();
+    out.added.sort();
+    out.updated.sort();
+    out.removed.sort();
+
+    return out;
+  }
+
+  // One sweep at a time, whoever asks. Two overlapping sweeps each snapshot the
+  // index before the other's writes land, so a single change gets double-counted
+  // or split across two reports.
+  function sweep(): Promise<void> {
+    if (!inFlight) {
+      inFlight = reconciler
+        .reconcile()
+        .then(absorb)
+        .finally(() => {
+          inFlight = null;
+        });
+    }
+
+    return inFlight;
+  }
+
   function maybeReconcile(): void {
     if (!lazyReconcile || inFlight) {
       return;
@@ -118,14 +166,9 @@ export async function createVault(config: CreateVaultConfig): Promise<Vault> {
       return;
     }
     lastReconcileMs = now;
-    inFlight = reconciler
-      .reconcile()
-      .catch(() => {
-        // A failed lazy sweep must never break a read; the next sweep retries.
-      })
-      .finally(() => {
-        inFlight = null;
-      });
+    sweep().catch(() => {
+      // A failed lazy sweep must never break a read; the next sweep retries.
+    });
   }
 
   const rawQuery = createQuery(db, io, cfg);
@@ -174,8 +217,15 @@ export async function createVault(config: CreateVaultConfig): Promise<Vault> {
     notes,
     query,
     reconcile: async () => {
-      await reconciler.reconcile();
+      if (inFlight) {
+        // Let a background sweep land instead of racing it; its result is
+        // buffered, so joining it costs nothing and loses nothing.
+        await inFlight.catch(() => {});
+      }
+      await sweep();
       lastReconcileMs = Date.now();
+
+      return drain();
     },
     reconcilePaths: (rels) => reconciler.reconcilePaths(rels),
     rebuild: () => reconciler.rebuild(),

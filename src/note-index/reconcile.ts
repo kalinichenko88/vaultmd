@@ -5,6 +5,7 @@ import type { VaultIo } from '@/vault-io/index.ts';
 
 import { dropNote, indexNote } from './index-note.ts';
 import type { IndexConfig } from './models/index-config.ts';
+import type { ReconcileResult } from './models/reconcile-result.ts';
 import type { Reconciler } from './models/reconciler.ts';
 import { configFingerprint, writeMeta } from './open.ts';
 import { SCHEMA_VERSION } from './schema.ts';
@@ -21,24 +22,24 @@ export function createReconciler(
   vaultIo: VaultIo,
   cfg: IndexConfig,
 ): Reconciler {
-  function storedSigs(): Map<string, Sig> {
+  function storedRows(): Map<string, StoredRow> {
     const rows = db
       .query('SELECT path_key, path, mtime_ms, size FROM notes')
       .all() as StoredRow[];
-    const stored = new Map<string, Sig>();
+    const stored = new Map<string, StoredRow>();
     for (const row of rows) {
       if (!vaultIo.can(row.path, 'read')) {
         continue; // out-of-scope row: never inspected, never dropped
       }
-      stored.set(row.path_key, { mtimeMs: row.mtime_ms, size: row.size });
+      stored.set(row.path_key, row);
     }
 
     return stored;
   }
 
-  async function reconcile(): Promise<void> {
+  async function reconcile(): Promise<ReconcileResult> {
     const rels = await vaultIo.listMarkdown();
-    const stored = storedSigs();
+    const stored = storedRows();
     const onDisk = await Promise.all(
       rels.map(async (rel) => {
         const full = vaultIo.resolveVaultPath(rel, 'read');
@@ -47,6 +48,11 @@ export function createReconciler(
         return { rel, key: vaultIo.toKey(rel), full, sig };
       }),
     );
+    // Report only what actually reached the index: a path skipped as unchanged,
+    // or one that lost its read race, is not a change the consumer can observe.
+    const added: string[] = [];
+    const updated: string[] = [];
+    const removed: string[] = [];
     const seen = new Set<string>();
     for (const entry of onDisk) {
       if (entry.sig === null) {
@@ -56,7 +62,7 @@ export function createReconciler(
       const prev = stored.get(entry.key);
       if (
         prev &&
-        prev.mtimeMs === entry.sig.mtimeMs &&
+        prev.mtime_ms === entry.sig.mtimeMs &&
         prev.size === entry.sig.size
       ) {
         continue;
@@ -66,12 +72,15 @@ export function createReconciler(
         continue;
       }
       indexNote(db, vaultIo, cfg, entry.rel, read.content, read.sig);
+      (prev ? updated : added).push(entry.rel);
     }
-    for (const key of stored.keys()) {
+    for (const [key, row] of stored) {
       if (!seen.has(key)) {
         dropNote(db, key);
+        removed.push(row.path);
       }
     }
+    return { added, updated, removed };
   }
 
   async function reconcilePaths(rels: string[]): Promise<void> {
