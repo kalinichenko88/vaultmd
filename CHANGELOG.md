@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.9.0 — 2026-08-01
+
+`reconcile()` stops returning `void` and starts reporting what it changed — the
+missing half of `onCommit`, which only ever saw this instance's own writes. No
+schema change, so no index rebuild is triggered. Public API freeze goes 50 → 51
+names (`ReconcileResult`). Bun floor unchanged at ≥ 1.3.14.
+
+### Reconcile as a change feed
+
+- **`vault.reconcile()` now resolves to `{ added, updated, removed }`** — sorted
+  vault-relative paths — instead of `void`. The sweep already computed that set
+  to decide what to write, so it is a watcher-free change feed for free: poll it
+  to pick up edits made in an editor, by `git checkout`, or by a sync client.
+- **Every sweep's result is buffered, not only the one you awaited.** With
+  `lazyReconcile` on (the default) a background sweep fired by a read would
+  index an out-of-band edit, and the next explicit `reconcile()` — finding
+  (mtime, size) already in step — would report nothing. Sweeps now fold their
+  results into one pending set that `reconcile()` drains, so the paths returned
+  cover everything since the caller's last call, whichever sweep reached them
+  first.
+- **Explicit and lazy sweeps are now serialised against each other.** Previously
+  only lazy sweeps were guarded between themselves, so an explicit `reconcile()`
+  could run concurrently with one, each snapshotting the index before the
+  other's writes landed.
+- Merging is per path, so a change never lands in two buckets: added-then-
+  updated stays `added`, added-then-removed cancels. Known ceiling: a file
+  created *and* deleted between two polls is reported as `removed` for a path
+  the consumer never saw.
+- `reconcilePaths()` and `rebuild()` still return `void` — the caller already
+  named the paths there, so there is nothing to discover.
+- **`onCommit` is not a change feed**, and now says so in its TSDoc, the README,
+  and the concepts guide. It fires from the locked-file commit path, so it
+  reports only writes made through this vault instance — the name read like more
+  than it delivered.
+
+### Docs
+
+- The site now lives at **<https://vaultmd.kalinichenko.dev/>**; the package
+  `homepage` and the README links follow it.
+- New recipe: **renaming a tag across the whole vault**. Bulk `retag()` stays a
+  non-goal, so the answer lives where consumers actually read instead. It reuses
+  the package's own `deriveTags` on the read side, so `tags` vs `tag`, comma- or
+  space-separated strings and `#` prefixes all behave as the index does; it
+  collects the paths before writing, since a rename drops the note out of
+  `tag: from` and paginating mid-mutation would skip matches; and it surfaces
+  notes whose frontmatter isn't flat rather than forcing a write through them.
+
 ## 0.8.0 — 2026-07-30
 
 Two independent unblocks for consumers writing a vault programmatically: a
