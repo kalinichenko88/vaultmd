@@ -169,7 +169,9 @@ describe('note-index reconcile', () => {
 
     await rm(path.join(root, 'sub', 'b.md'));
     await rm(path.join(root, 'c.md'));
-    expect(await reconciler.reconcile()).toEqual({
+    // Only the vault drains in sorted order; here row order is unspecified.
+    const swept = await reconciler.reconcile();
+    expect({ ...swept, removed: swept.removed.sort() }).toEqual({
       added: [],
       updated: [],
       removed: ['c.md', 'sub/b.md'],

@@ -80,9 +80,6 @@ export function createReconciler(
         removed.push(row.path);
       }
     }
-    // added/updated inherit listMarkdown's sort; row order is unspecified.
-    removed.sort();
-
     return { added, updated, removed };
   }
 

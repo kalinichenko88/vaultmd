@@ -234,8 +234,7 @@ path, content }` or `{ op: 'delete', path }` (a `moveNote` emits `delete` then
 `create`). Anything it throws surfaces as `COMMIT_FAILED` *after* the file write
 has already landed, so treat it as best-effort mirroring, not a veto. It mirrors
 only this instance's own writes — out-of-band edits reach the index through
-[lazy reconcile](./concepts#lazy-reconcile), without firing the hook. To catch
-those, poll `reconcile()` (below).
+[lazy reconcile](./concepts#lazy-reconcile), without firing the hook.
 
 ```ts
 const vault = await createVault({
@@ -266,7 +265,7 @@ setInterval(async () => {
 ```
 
 Notes written through `vault.notes` are indexed write-through, so they never
-appear here — use `onCommit` (above) for those.
+appear here — use `onCommit` for those.
 
 ## Rewrite a body, keep the frontmatter
 

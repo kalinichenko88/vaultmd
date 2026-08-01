@@ -108,7 +108,7 @@ export async function createVault(config: CreateVaultConfig): Promise<Vault> {
   // Reads stay synchronous (their return types must equal createQuery's), so
   // the sweep is fire-and-forget — its result is visible to the NEXT read.
   let lastReconcileMs = 0;
-  let inFlight: Promise<unknown> | null = null;
+  let inFlight: Promise<void> | null = null;
 
   // Every sweep folds its result in here and reconcile() drains it. A
   // background sweep applies changes nobody asked for, so without this buffer
@@ -116,22 +116,15 @@ export async function createVault(config: CreateVaultConfig): Promise<Vault> {
   // indexed and then never reported — the feed would silently lose it.
   const pending = new Map<string, keyof ReconcileResult>();
 
+  // ponytail: last-wins merge. A path that changes twice between drains reports
+  // only its latest kind, so a create+delete between polls reports `removed` for
+  // a path the consumer never saw (and create+edit reports `updated`). Add
+  // per-path transition precedence if a consumer ever needs those to cancel.
   function absorb(changed: ReconcileResult): void {
-    for (const path of changed.added) {
-      // Re-added over a removal nobody has drained yet reads as an update:
-      // the consumer still believes the file is there.
-      pending.set(path, pending.get(path) === 'removed' ? 'updated' : 'added');
-    }
-    for (const path of changed.updated) {
-      // A pending 'added' outranks it — the consumer has not seen the file yet.
-      pending.set(path, pending.get(path) === 'added' ? 'added' : 'updated');
-    }
-    for (const path of changed.removed) {
-      if (pending.get(path) === 'added') {
-        pending.delete(path); // created and deleted between drains: a non-event
-        continue;
+    for (const kind of ['added', 'updated', 'removed'] as const) {
+      for (const path of changed[kind]) {
+        pending.set(path, kind);
       }
-      pending.set(path, 'removed');
     }
   }
 
@@ -151,7 +144,7 @@ export async function createVault(config: CreateVaultConfig): Promise<Vault> {
   // One sweep at a time, whoever asks. Two overlapping sweeps each snapshot the
   // index before the other's writes land, so a single change gets double-counted
   // or split across two reports.
-  function sweep(): Promise<unknown> {
+  function sweep(): Promise<void> {
     if (!inFlight) {
       inFlight = reconciler
         .reconcile()
