@@ -665,4 +665,24 @@ describe('createNote — nested frontmatter', () => {
     expect(caught).toBeInstanceOf(MdVaultError);
     expect((caught as MdVaultError).code).toBe('FRONTMATTER_INVALID');
   });
+
+  // buildContent routes a non-empty `frontmatter` input through
+  // editFrontmatter against `body` (see notes.ts). When body already carries
+  // a block with a duplicate key shadowing a YAML anchor, editFrontmatter used
+  // to escape a raw ReferenceError from the underlying yaml library instead of
+  // the documented MdVaultCode contract.
+  test('an orphaned-alias block in body throws FRONTMATTER_INVALID, not a raw ReferenceError', async () => {
+    let caught: unknown;
+    try {
+      await notes.createNote('N.md', {
+        frontmatter: { title: 'N' },
+        body: '---\nx: &a\n  k: 1\nx: 3\ny: *a\n---\nbody\n',
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(MdVaultError);
+    expect((caught as MdVaultError).code).toBe('FRONTMATTER_INVALID');
+  });
 });

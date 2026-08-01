@@ -59,35 +59,53 @@ export function editFrontmatter(
   }
   const doc = parseDocument(ext.yaml, { uniqueKeys: false });
   dropShadowedKeys(doc);
-  const before = (doc.toJS() ?? {}) as Record<string, unknown>;
+  // A duplicate top-level key can shadow the pair carrying a YAML anchor
+  // (dropShadowedKeys just removed it above) while the parsed object still
+  // held a live, unshared reference through an alias elsewhere — the one case
+  // isValidFrontmatter's shared-reference check cannot see, because last-wins
+  // resolution during `parse()` leaves no repeat behind. toJS() then can't
+  // resolve the now-orphaned alias and throws a raw, code-less ReferenceError.
+  let before: Record<string, unknown>;
+  try {
+    before = (doc.toJS() ?? {}) as Record<string, unknown>;
+  } catch {
+    return { content, outcome: 'unverifiable' };
+  }
   const view = structuredClone(before);
   mutate(view);
   if (!isValidFrontmatter(view)) {
     return { content, outcome: 'unverifiable' };
   }
-  let changed = false;
-  for (const key of Object.keys(before)) {
-    if (!(key in view)) {
-      doc.delete(key);
-      changed = true;
+  // doc.set below can orphan an anchor the same way (replacing the pair that
+  // owns it), which only surfaces when the result is emitted — same raw-throw
+  // risk, guarded the same way.
+  try {
+    let changed = false;
+    for (const key of Object.keys(before)) {
+      if (!(key in view)) {
+        doc.delete(key);
+        changed = true;
+      }
     }
-  }
-  for (const key of Object.keys(view)) {
-    if (
-      !(key in before) ||
-      JSON.stringify(before[key]) !== JSON.stringify(view[key])
-    ) {
-      doc.set(key, view[key]);
-      changed = true;
+    for (const key of Object.keys(view)) {
+      if (
+        !(key in before) ||
+        JSON.stringify(before[key]) !== JSON.stringify(view[key])
+      ) {
+        doc.set(key, view[key]);
+        changed = true;
+      }
     }
+    if (!changed) {
+      return { content, outcome: 'unchanged' };
+    }
+    return {
+      content: `${emitFrontmatterBlock(doc)}${ext.body}`,
+      outcome: 'edited',
+    };
+  } catch {
+    return { content, outcome: 'unverifiable' };
   }
-  if (!changed) {
-    return { content, outcome: 'unchanged' };
-  }
-  return {
-    content: `${emitFrontmatterBlock(doc)}${ext.body}`,
-    outcome: 'edited',
-  };
 }
 
 // A note may legally repeat a key (`uniqueKeys: false`), and every reader of one

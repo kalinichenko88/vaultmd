@@ -211,4 +211,53 @@ describe('editFrontmatter — nested values', () => {
     expect(outcome).toBe('unverifiable');
     expect(content).toBe(src);
   });
+
+  // A repeated top-level key is legal (uniqueKeys: false, last-wins), and
+  // parse()'s last-wins collapse means only ONE live reference to the anchored
+  // container survives the parsed object — the validator's `seen` set never
+  // sees a repeat, so `parseFrontmatter` reports 'valid'. But editFrontmatter
+  // works from parseDocument + dropShadowedKeys, which deletes the pair
+  // carrying `&a` (the shadowed FIRST `x`) — orphaning `*a` — and doc.toJS()
+  // then cannot resolve it. Without a guard this escapes as a raw
+  // `ReferenceError`, not an `MdVaultCode`.
+  test('a map anchor orphaned by a shadowed duplicate key is refused, not a raw throw', () => {
+    const src = '---\nx: &a\n  k: 1\nx: 3\ny: *a\n---\nbody\n';
+    expect(parseFrontmatter(src).valid).toBe('valid');
+
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      fm.z = 1;
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
+
+  // Same hole, sequence form. This one throws on `main` too (pre-existing,
+  // not a regression from nested frontmatter) but gets the same fix here.
+  test('a sequence anchor orphaned by a shadowed duplicate key is refused, not a raw throw', () => {
+    const src = '---\nx: &a [1, 2]\nx: 3\ny: *a\n---\nbody\n';
+    expect(parseFrontmatter(src).valid).toBe('valid');
+
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      fm.z = 1;
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
+
+  // Guard against over-catching: a duplicate key with no anchor involved must
+  // keep working exactly as dropShadowedKeys' last-wins behaviour intends.
+  test('a duplicate key with no anchor still edits normally', () => {
+    const src = '---\nx:\n  k: 1\nx:\n  k: 2\ny: 3\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      fm.y = 4;
+    });
+
+    expect(outcome).toBe('edited');
+    expect(parseFrontmatter(content).frontmatter).toEqual({
+      x: { k: 2 },
+      y: 4,
+    });
+  });
 });
