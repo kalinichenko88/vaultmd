@@ -25,18 +25,11 @@ Released (`0.9.0`) — live on npm. The public API is frozen and tested, and the
 package ships as a bundled `dist/` (ESM + types). Being `0.x`, the surface may
 still evolve before `1.0`; see [CHANGELOG.md](./CHANGELOG.md) for what changed.
 
-> **Upgrading to nested frontmatter?** A dot in a `where` key used to match a
-> frontmatter key that literally contained a dot; it now descends into a nested
-> map. That change is **silent** — a filter like
-> `where: { 'dataview.status': 'open' }` no longer matches those notes and
-> returns an empty result rather than an error. Write `'dataview\\.status'` to
-> keep the old meaning. Everything else in that release is covered by
-> [CHANGELOG.md](./CHANGELOG.md).
-
 ## Features
 
-- **CRUD over markdown** — create, read, update, delete `.md` notes with
-  YAML frontmatter, nested maps and arrays included.
+- **CRUD over markdown** — create, read, update, delete `.md` notes with flat
+  YAML frontmatter. A nested block written by another tool is read and indexed;
+  writes stay flat.
 - **Derived SQLite index** — a rebuildable cache, never the source of truth.
   Delete it and it rebuilds from disk.
 - **Collection queries** — filter notes by tag, frontmatter field, or folder;
@@ -84,11 +77,10 @@ await vault.notes.createNote('Notes/today.md', {
   body: '# Today\n\nSee [[roadmap]] for context.\n',
 });
 
-// Query the collection. A `where` key is a path: a dot descends into a nested
-// map, and `\.` matches a frontmatter key that literally contains a dot.
+// Query the collection. `where` filters on top-level frontmatter keys.
 const open = vault.query.queryNotes({
   tag: 'project',
-  where: { status: 'open', 'meta.owner': 'ada' },
+  where: { status: 'open' },
   orderBy: { field: 'mtime_ms', dir: 'desc' },
   limit: 20,
 });
@@ -196,7 +188,9 @@ moveNote(from, to): Promise<void>
 ```
 
 `ReadNoteResult` is `{ frontmatter, tags, body, valid, outbound?, backlinks? }`,
-where `valid` is `'valid' | 'present-but-invalid' | 'none'`.
+where `valid` is `'flat' | 'nested' | 'present-but-invalid' | 'none'` —
+`'flat'` is the one that is safe to pass to `editFrontmatter`; `'nested'` reads
+and indexes but is not rewritten.
 
 ### `vault.query`
 

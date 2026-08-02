@@ -256,9 +256,10 @@ Two things this does on purpose. Writing `deriveTags` output back **normalises**
 the note's tag formatting — `tags: "work, #inbox"` becomes a two-element list —
 which makes the operation idempotent but is a visible diff on notes you did not
 otherwise touch. And `'unverifiable'` notes are collected rather than forced:
-their frontmatter can't round-trip safely — a `Date`, a non-finite number, or a
-shared container reference — so `editFrontmatter` refuses instead of risking
-data loss. Rewrite those by hand.
+their block either nests (a map or a list of maps, which this package reads but
+does not rewrite) or cannot be stored at all (a `Date`, a non-finite number, a
+YAML anchor cycle). `editFrontmatter` refuses instead of risking data loss.
+Rewrite those by hand.
 
 ## Edit frontmatter and body in one atomic commit
 

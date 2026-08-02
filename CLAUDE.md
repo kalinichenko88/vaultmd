@@ -50,7 +50,7 @@ errors        ← everything
 fs-atomic     ← vault-io, locked-file, notes        race-aware single-file fs ops (atomicWrite, CAS, exclusiveCreate, readConsistent)
 locks         ← locked-file, notes                  concurrency control (in-process mutex + cross-process lockfile)
 vault-io      ← query, notes, vault                 path→safe-IO security chokepoint
-frontmatter   ← notes                               YAML frontmatter parse/edit (nested, round-trip-safe)
+frontmatter   ← notes                               YAML frontmatter: flat writes, nested reads
 links         ← note-index, vault                    wikilink/relative link extraction + resolution
 note-index    ← query, notes, vault                 SQLite schema + projection + reconcile
 query         ← notes, vault                         read-only SQL over the index

@@ -13,7 +13,7 @@ hero:
       link: /api/
 features:
   - title: CRUD over markdown
-    details: Create, read, update, delete .md notes with YAML frontmatter.
+    details: Create, read, update, delete .md notes with flat YAML frontmatter; nested blocks are read and indexed.
   - title: Derived SQLite index
     details: A rebuildable cache, never the source of truth. Delete it and it rebuilds from disk.
   - title: Links & full-text search
