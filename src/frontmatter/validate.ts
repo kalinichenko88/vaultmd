@@ -24,11 +24,26 @@ function isScalarOrArrayOfScalar(value: unknown): boolean {
   return isScalar(value);
 }
 
-// One value, walked to the leaves, for the READ gate. `seen` is the set of
-// containers already entered: a repeat is a cycle, which JSON.stringify refuses
-// outright. Depth is bounded for the same reason — both the stringifier and
-// yaml's emitter recurse.
-function isStorable(value: unknown, seen: Set<object>, depth = 0): boolean {
+// One value, walked to the leaves, for the READ gate.
+//
+// `ancestors` holds the containers on the path currently being walked, and is
+// popped on the way back up. That distinction is the whole point: a container
+// reached twice by DIFFERENT paths is a DAG — `meta: { x: &v {k: 1}, y: *v }`
+// is what yaml gives for one — and `JSON.stringify` writes it out twice
+// without complaint, so the note is readable. Only a container that is its own
+// ancestor is a cycle, which the stringifier refuses.
+//
+// Not memoised, so a wide DAG costs one visit per path rather than per node.
+// Affordable because the only caller is `parseFrontmatter`: yaml's
+// `maxAliasCount` refuses to build a document with that much fan-out (a
+// 5-level diamond is already rejected as a resource-exhaustion attack), so a
+// file cannot deliver one. Depth is bounded separately — both the stringifier
+// and yaml's emitter recurse.
+function isStorable(
+  value: unknown,
+  ancestors: Set<object>,
+  depth = 0,
+): boolean {
   if (isScalar(value)) {
     return true;
   }
@@ -37,19 +52,23 @@ function isStorable(value: unknown, seen: Set<object>, depth = 0): boolean {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
-  if (seen.has(value) || depth >= MAX_DEPTH) {
+  if (ancestors.has(value) || depth >= MAX_DEPTH) {
     return false;
   }
-  seen.add(value);
+  ancestors.add(value);
   // The prototype test keeps Date, Map, Set and class instances out now that
   // "is an object" no longer disqualifies a value by itself. Parsed YAML maps
   // carry Object.prototype.
   const proto = Object.getPrototypeOf(value);
-
-  return Array.isArray(value)
-    ? value.every((item) => isStorable(item, seen, depth + 1))
+  const ok = Array.isArray(value)
+    ? value.every((item) => isStorable(item, ancestors, depth + 1))
     : (proto === Object.prototype || proto === null) &&
-        Object.values(value).every((item) => isStorable(item, seen, depth + 1));
+      Object.values(value).every((item) =>
+        isStorable(item, ancestors, depth + 1),
+      );
+  ancestors.delete(value);
+
+  return ok;
 }
 
 /**

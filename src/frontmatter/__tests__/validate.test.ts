@@ -88,6 +88,38 @@ describe('isStorableFrontmatter', () => {
     expect(isStorableFrontmatter({ a: cyclic })).toBe(false);
   });
 
+  // An anchored container referenced twice is a DAG, not a cycle, and
+  // JSON.stringify writes it out twice without complaint — so the note is
+  // readable. Only an ACTIVE ancestor repeating is a cycle. `meta: { x: &v {k:
+  // 1}, y: *v }` is the shape yaml produces for that.
+  test('a container repeated under one key is storable', () => {
+    const shared = { k: 1 };
+
+    expect(isStorableFrontmatter({ meta: { x: shared, y: shared } })).toBe(
+      true,
+    );
+  });
+
+  test('a container repeated across two keys is storable', () => {
+    const shared = { k: 1 };
+
+    expect(isStorableFrontmatter({ x: shared, y: shared })).toBe(true);
+  });
+
+  // The walk is not memoised, so a wide DAG costs one visit per path. That is
+  // affordable because the only caller is parseFrontmatter and yaml refuses to
+  // build one: `maxAliasCount` rejects a 5-level diamond outright ("Excessive
+  // alias count indicates a resource exhaustion attack"), so a file cannot
+  // deliver more fan-out than this.
+  test('a small diamond DAG — the widest yaml will parse — is storable', () => {
+    let level: unknown = { leaf: 1 };
+    for (let i = 0; i < 4; i++) {
+      level = { x: level, y: level };
+    }
+
+    expect(isStorableFrontmatter({ root: level })).toBe(true);
+  });
+
   // Both the stringifier and yaml's emitter recurse, so an unbounded value
   // dies with an uncoded RangeError rather than a verdict.
   test('nesting at the 100-level bound is storable, past it is not', () => {

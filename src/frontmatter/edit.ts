@@ -37,7 +37,13 @@ export function editFrontmatter(
   outcome: EditOutcome;
 } {
   const parsed = parseFrontmatter(content);
-  if (parsed.valid === 'present-but-invalid') {
+  // Refused BEFORE the mutator runs, not after. A post-mutation flatness check
+  // is not the same rule: a mutator that deletes the nested key, or replaces it
+  // with a scalar, leaves a flat view — and the block would then be re-emitted
+  // whole, flattening an author's untouched `|` scalar on the way past. Only
+  // `'flat'` is editable; a nested note is read through `parseFrontmatter` and
+  // rewritten, if at all, through `transformNote`.
+  if (parsed.valid === 'present-but-invalid' || parsed.valid === 'nested') {
     return { content, outcome: 'unverifiable' };
   }
   if (parsed.valid === 'none') {

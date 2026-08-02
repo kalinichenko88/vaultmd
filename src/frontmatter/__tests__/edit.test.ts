@@ -150,6 +150,40 @@ describe('editFrontmatter — nested is read-only', () => {
     expect(content).toBe(src);
   });
 
+  // A post-mutation flatness check is not enough: a mutator that DELETES the
+  // nested key, or replaces it with a scalar, leaves a flat view and would let
+  // the whole block be re-emitted. That re-emit is the thing being avoided —
+  // it flattens an author's untouched `|` block on the way past.
+  test('deleting the nested key does not unlock the note', () => {
+    const src =
+      '---\nowner: ada\nnote: |\n  line one\n  line two\nmeta:\n  status: open\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      delete fm.meta;
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
+
+  test('replacing the nested key with a scalar does not unlock the note', () => {
+    const src = '---\ntitle: keep\nmeta:\n  status: open\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      fm.meta = 'x';
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
+
+  test('the mutator is not even called for a nested note', () => {
+    let called = false;
+    editFrontmatter('---\nmeta:\n  k: 1\n---\nbody\n', () => {
+      called = true;
+    });
+
+    expect(called).toBe(false);
+  });
+
   test('a flat note stays flat: adding a nested key is refused', () => {
     const src = '---\ntitle: keep\n---\nbody\n';
     const { content, outcome } = editFrontmatter(src, (fm) => {
