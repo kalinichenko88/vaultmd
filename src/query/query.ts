@@ -18,7 +18,7 @@ import type { WhereCondition, WhereValue } from './models/where-map.ts';
 
 const ORDER_FIELDS = new Set<string>(['mtime_ms', 'path', 'title']);
 const ORPHAN_MODES = new Set<string>(['disconnected', 'unreferenced']);
-const WHERE_KEY_RE = /^[A-Za-z0-9_.\\-]+$/;
+const WHERE_KEY_RE = /^[A-Za-z0-9_.-]+$/;
 const DEFAULT_LIMIT = 100;
 const HARD_MAX = 1000;
 
@@ -146,31 +146,6 @@ function assertTagList(value: unknown, label: string): string[] {
   return value;
 }
 
-// One `where` key as a SQLite JSON path. A dot separates path segments —
-// `'meta.status'` descends into a nested map — and `\.` is a literal dot, for
-// a frontmatter key that contains one. Object labels only; see WhereMap.
-function jsonPath(key: string): string {
-  // A backslash not before a dot would reach the path raw, where SQLite reads
-  // it as an escape and matches nothing. Refuse instead.
-  if (/\\(?!\.)/.test(key)) {
-    throw new MdVaultError(
-      'VALIDATION_ERROR',
-      `where key has a stray backslash (only \\. is an escape): ${key}`,
-    );
-  }
-  const segments = key
-    .split(/(?<!\\)\./)
-    .map((segment) => segment.replace(/\\\./g, '.'));
-  if (segments.some((segment) => segment === '')) {
-    throw new MdVaultError(
-      'VALIDATION_ERROR',
-      `where key has an empty path segment: ${key}`,
-    );
-  }
-
-  return `$.${segments.map((segment) => `"${segment}"`).join('.')}`;
-}
-
 // One `where` entry as SQL over the frontmatter JSON: a bare value is equality,
 // an object is a set of operators AND-ed together. Only `key` reaches the SQL
 // text (WHERE_KEY_RE-guarded by the caller) — every operand stays a parameter.
@@ -180,7 +155,7 @@ function pushWhereFilter(
   key: string,
   cond: WhereValue | WhereCondition,
 ): void {
-  const col = `json_extract(n.frontmatter, '${jsonPath(key)}')`;
+  const col = `json_extract(n.frontmatter, '$."${key}"')`;
   if (typeof cond !== 'object' || cond === null) {
     parts.push(`${col} = ?`);
     params.push(assertWhereValue(cond, `where ${key}`));
@@ -243,7 +218,7 @@ function pushWhereFilter(
     // wrote; point at the path form that does what they meant.
     throw new MdVaultError(
       'VALIDATION_ERROR',
-      `unknown where operator on ${key}: ${op}. To filter a nested value, use the dotted path form: { '${key}.${op}': … }`,
+      `unknown where operator on ${key}: ${op}. A nested frontmatter value cannot be filtered — read it from NoteHit.frontmatter instead`,
     );
   }
 }
