@@ -2,10 +2,9 @@
  * Result of an {@link editFrontmatter} call:
  * - `'edited'` — the mutator produced a change and the frontmatter was rewritten.
  * - `'unchanged'` — the mutator left the frontmatter identical; no write occurred.
- * - `'unverifiable'` — the existing frontmatter does not round-trip, the
- *   mutation would produce a value that cannot, or rewriting the existing YAML
- *   document would orphan a container reference (a duplicate key shadowing a
- *   YAML anchor, or a rewrite of the anchor's owner) — and the edit was
- *   skipped to avoid data loss.
+ * - `'unverifiable'` — the edit was skipped to avoid data loss, because the
+ *   existing block is nested or unstorable, the mutation would have made it
+ *   nested or unstorable, or rewriting the YAML document would orphan a YAML
+ *   anchor (a duplicate key shadowing it, or a rewrite of its owner).
  */
 export type EditOutcome = 'edited' | 'unchanged' | 'unverifiable';

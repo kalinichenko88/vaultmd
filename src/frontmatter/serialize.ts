@@ -1,6 +1,6 @@
 import { Document } from 'yaml';
 
-import { assertValidFrontmatter } from './validate.ts';
+import { assertFlatFrontmatter } from './validate.ts';
 
 /**
  * Fence one YAML document into a frontmatter block — the single emitter both
@@ -48,7 +48,13 @@ export function buildFrontmatterBlock(
     return '';
   }
 
-  return emitFrontmatterBlock(new Document(frontmatter));
+  // aliasDuplicateObjects: false — one array bound to two keys is ordinary JS
+  // and stays flat, but the default emits it as an `&a1`/`*a1` anchor pair,
+  // and the next edit to that note orphans the alias. Writing the value twice
+  // costs a few bytes and keeps the note editable.
+  return emitFrontmatterBlock(
+    new Document(frontmatter, { aliasDuplicateObjects: false }),
+  );
 }
 
 /**
@@ -84,7 +90,7 @@ export function buildFrontmatterBlock(
 export function serializeFrontmatter(
   frontmatter: Record<string, unknown>,
 ): string {
-  assertValidFrontmatter(frontmatter);
+  assertFlatFrontmatter(frontmatter);
 
   return buildFrontmatterBlock(frontmatter);
 }

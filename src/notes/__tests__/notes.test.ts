@@ -67,7 +67,7 @@ describe('readNote', () => {
       '---\ntitle: Hello\ntags: [a, b]\n---\nBody text',
     );
     const res = await notes.readNote('note.md');
-    expect(res.valid).toBe('valid');
+    expect(res.valid).toBe('flat');
     expect(res.frontmatter).toEqual({ title: 'Hello', tags: ['a', 'b'] });
     expect(res.tags).toEqual(['a', 'b']);
     expect(res.body).toBe('Body text');
@@ -248,7 +248,7 @@ describe('updateNote', () => {
       '---\na: 1\n---\nline2',
     );
     const res = await notes.readNote('fm-bare.md');
-    expect(res.valid).toBe('valid');
+    expect(res.valid).toBe('flat');
     expect(res.frontmatter.a).toBe(1); // frontmatter preserved + still parses
     expect(res.body).toBe('line2');
   });
@@ -638,16 +638,40 @@ describe('exists — review regressions', () => {
 });
 
 describe('createNote — nested frontmatter', () => {
-  test('a nested map round-trips through the index', async () => {
-    await notes.createNote('N.md', {
-      frontmatter: { title: 'N', meta: { status: 'open' } },
-      body: 'body\n',
-    });
+  // The write gate is flat: this package does not author nesting, even though
+  // it reads and indexes a nested block written by something else.
+  test('a nested map is refused with FRONTMATTER_INVALID', async () => {
+    let caught: unknown;
+    try {
+      await notes.createNote('N.md', {
+        frontmatter: { title: 'N', meta: { status: 'open' } },
+        body: 'body\n',
+      });
+    } catch (err) {
+      caught = err;
+    }
 
-    expect(query.queryNotes()[0].frontmatter).toEqual({
-      title: 'N',
+    expect(caught).toBeInstanceOf(MdVaultError);
+    expect((caught as MdVaultError).code).toBe('FRONTMATTER_INVALID');
+  });
+
+  // ...but a nested block already on disk is read and indexed.
+  test('a nested block written externally is indexed and readable', async () => {
+    const content = '---\ntitle: E\nmeta:\n  status: open\ntags: [x]\n---\nb\n';
+    await writeFile(join(vaultDir, 'E.md'), content);
+    const sig = await io.stat('E.md');
+    if (!sig) {
+      throw new Error('fixture stat failed');
+    }
+    indexNote(db, io, cfg, 'E.md', content, sig);
+
+    const hit = query.queryNotes().find((h) => h.path === 'E.md');
+    expect(hit?.frontmatter).toEqual({
+      title: 'E',
       meta: { status: 'open' },
+      tags: ['x'],
     });
+    expect(hit?.tags).toEqual(['x']);
   });
 
   test('a shared container reference throws FRONTMATTER_INVALID', async () => {

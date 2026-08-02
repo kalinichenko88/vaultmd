@@ -16,7 +16,7 @@ describe('serializeFrontmatter', () => {
       tags: ['a', 'b', 'c'],
     };
     const parsed = parseFrontmatter(serializeFrontmatter(fm));
-    expect(parsed.valid).toBe('valid');
+    expect(parsed.valid).toBe('flat');
     expect(parsed.frontmatter).toEqual(fm);
   });
 
@@ -129,50 +129,40 @@ describe('serializeFrontmatter', () => {
   });
 });
 
-describe('serializeFrontmatter — nested values', () => {
-  test('a nested map round-trips through parseFrontmatter', () => {
-    const fm = { title: 'x', meta: { status: 'open', tags: [1, 2] } };
-    const parsed = parseFrontmatter(`${serializeFrontmatter(fm)}body\n`);
-
-    expect(parsed.valid).toBe('valid');
-    expect(parsed.frontmatter).toEqual(fm);
-  });
-
-  test('an array of maps round-trips', () => {
-    const fm = { items: [{ name: 'a' }, { name: 'b' }] };
-    const parsed = parseFrontmatter(`${serializeFrontmatter(fm)}body\n`);
-
-    expect(parsed.frontmatter).toEqual(fm);
-  });
-
-  // yaml emits a shared reference as &a1/*a1, which produces a note that
-  // editFrontmatter can no longer rewrite. Refusing the write is the fix.
-  test('a shared map reference throws FRONTMATTER_INVALID', () => {
-    const shared = { k: 1 };
-
-    expect(() => serializeFrontmatter({ x: shared, y: shared })).toThrow(
-      expect.objectContaining({ code: 'FRONTMATTER_INVALID' }),
-    );
-  });
-
-  test('a shared array reference throws FRONTMATTER_INVALID', () => {
-    const shared = [1, 2];
-
-    expect(() => serializeFrontmatter({ x: shared, y: shared })).toThrow(
-      expect.objectContaining({ code: 'FRONTMATTER_INVALID' }),
-    );
-  });
-
-  // Without the depth bound this reached yaml's emitter and died with a raw
-  // RangeError, which carries no `.code` for a caller to switch on.
-  test('nesting past the depth bound throws FRONTMATTER_INVALID', () => {
-    let deep: Record<string, unknown> = { leaf: 1 };
-    for (let i = 0; i < 20_000; i++) {
-      deep = { n: deep };
+// Everything this package WRITES is flat, even though a nested block read off
+// disk is indexed and returned. Emitting nesting would mean owning a shape
+// `editFrontmatter` cannot then rewrite a key at a time.
+describe('serializeFrontmatter — the write gate is flat', () => {
+  test('a nested map throws FRONTMATTER_INVALID naming the key', () => {
+    let caught: unknown;
+    try {
+      serializeFrontmatter({ title: 'x', meta: { status: 'open' } });
+    } catch (err) {
+      caught = err;
     }
 
-    expect(() => serializeFrontmatter({ deep })).toThrow(
+    expect((caught as MdVaultError).code).toBe('FRONTMATTER_INVALID');
+    expect((caught as MdVaultError).message).toContain('meta');
+  });
+
+  test('an array of maps throws FRONTMATTER_INVALID', () => {
+    expect(() => serializeFrontmatter({ items: [{ name: 'a' }] })).toThrow(
       expect.objectContaining({ code: 'FRONTMATTER_INVALID' }),
     );
+  });
+
+  // One array bound to two keys is ordinary JS and stays flat, but yaml's
+  // default emits it as an &a1/*a1 anchor pair — producing a note whose next
+  // edit orphans the alias. Written out twice instead.
+  test('a shared array reference is written out twice, not anchored', () => {
+    const shared = [1, 2];
+    const block = serializeFrontmatter({ tags: shared, aliases: shared });
+
+    expect(block).not.toContain('&');
+    expect(block).not.toContain('*');
+    expect(parseFrontmatter(`${block}body\n`).frontmatter).toEqual({
+      tags: [1, 2],
+      aliases: [1, 2],
+    });
   });
 });

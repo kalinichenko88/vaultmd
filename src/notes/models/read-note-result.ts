@@ -9,7 +9,7 @@ export type ReadNoteResult = {
   tags: string[];
   /** The note body: everything after the closing `---` fence. */
   body: string;
-  /** Whether the frontmatter block round-trips, is present but does not, or is absent. */
+  /** Whether the block is flat (editable), nested (readable), unstorable, or absent. */
   valid: FrontmatterValidity;
   /** Outbound links from this note (only populated when `withLinks: true`). */
   outbound?: OutboundLink[];

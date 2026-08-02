@@ -5,7 +5,7 @@ import { MdVaultError } from '@/errors.ts';
 import type { EditOutcome } from './models/edit-outcome.ts';
 import { extractBlock, parseFrontmatter } from './parse.ts';
 import { buildFrontmatterBlock, emitFrontmatterBlock } from './serialize.ts';
-import { isValidFrontmatter } from './validate.ts';
+import { isFlatFrontmatter } from './validate.ts';
 
 /**
  * Apply a mutator callback to a note's frontmatter and return the rewritten
@@ -43,7 +43,7 @@ export function editFrontmatter(
   if (parsed.valid === 'none') {
     const view: Record<string, unknown> = {};
     mutate(view);
-    if (!isValidFrontmatter(view)) {
+    if (!isFlatFrontmatter(view)) {
       return { content, outcome: 'unverifiable' };
     }
     if (Object.keys(view).length === 0) {
@@ -70,7 +70,7 @@ export function editFrontmatter(
   }
   const view = structuredClone(before);
   mutate(view);
-  if (!isValidFrontmatter(view)) {
+  if (!isFlatFrontmatter(view)) {
     return { content, outcome: 'unverifiable' };
   }
   // doc.delete / doc.set can remove the pair that OWNS an anchor, orphaning

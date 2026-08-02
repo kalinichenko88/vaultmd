@@ -5,7 +5,7 @@
  * - `'unchanged'` — the transform returned `null`/`undefined`, or content
  *   byte-identical to the current file; no write occurred.
  *
- * Distinct from {@link EditOutcome}: a free-form transform makes no
- * frontmatter round-trip judgement, so `'unverifiable'` is never returned.
+ * Distinct from {@link EditOutcome}: a free-form transform makes no judgement
+ * about the frontmatter's shape, so `'unverifiable'` is never returned.
  */
 export type TransformOutcome = 'edited' | 'unchanged';

@@ -2,7 +2,7 @@ import { parse } from 'yaml';
 
 import type { ParsedFrontmatter } from './models/parsed-frontmatter.ts';
 import { deriveTags } from './tags.ts';
-import { isValidFrontmatter } from './validate.ts';
+import { isFlatFrontmatter, isStorableFrontmatter } from './validate.ts';
 
 type Block = { yaml: string; body: string };
 
@@ -29,8 +29,14 @@ export function extractBlock(content: string): Block | null {
 
 /**
  * Parse the YAML frontmatter from a markdown file's raw content string.
- * Handles files with no frontmatter, empty blocks, invalid YAML, and
- * round-trippable vs. non-round-trippable blocks. Never throws.
+ * Handles files with no frontmatter, empty blocks, invalid YAML, and nested
+ * blocks. Never throws.
+ *
+ * A nested block is **read**: its keys come back and are indexed, and `valid`
+ * is `'nested'` rather than `'flat'` to say that {@link editFrontmatter} will
+ * refuse it. Only a block that cannot be stored at all — unparseable, a
+ * non-map root, or holding a cycle, over-deep nesting, a non-finite number or
+ * a `Date` — comes back empty.
  *
  * @param content Raw UTF-8 content of a markdown file.
  * @returns A {@link ParsedFrontmatter} with the parsed key-value map, tag
@@ -39,7 +45,8 @@ export function extractBlock(content: string): Block | null {
  * @example
  * ```ts
  * const { frontmatter, tags, body, valid } = parseFrontmatter(fileContent);
- * if (valid === 'valid') { // safe to pass to editFrontmatter }
+ * if (valid === 'flat') { // safe to pass to editFrontmatter }
+ * if (valid === 'nested') { // read frontmatter, but do not edit it }
  * ```
  */
 export function parseFrontmatter(content: string): ParsedFrontmatter {
@@ -55,15 +62,17 @@ export function parseFrontmatter(content: string): ParsedFrontmatter {
     return { frontmatter: {}, tags: [], body, valid: 'present-but-invalid' };
   }
   if (parsed === null || parsed === undefined) {
-    return { frontmatter: {}, tags: [], body, valid: 'valid' };
+    return { frontmatter: {}, tags: [], body, valid: 'flat' };
   }
   if (typeof parsed !== 'object' || Array.isArray(parsed)) {
     return { frontmatter: {}, tags: [], body, valid: 'present-but-invalid' };
   }
   const frontmatter = parsed as Record<string, unknown>;
-  // Not tidiness: an anchor-built block can be cyclic, and projectRow
-  // stringifies whatever this returns regardless of `valid`.
-  if (!isValidFrontmatter(frontmatter)) {
+  // Load-bearing, not tidiness: an anchor-built block can be CYCLIC, and
+  // projectRow stringifies whatever this returns without consulting `valid` —
+  // which threw a raw TypeError out of indexNote and aborted the whole
+  // reconcile sweep.
+  if (!isStorableFrontmatter(frontmatter)) {
     return { frontmatter: {}, tags: [], body, valid: 'present-but-invalid' };
   }
 
@@ -71,6 +80,7 @@ export function parseFrontmatter(content: string): ParsedFrontmatter {
     frontmatter,
     tags: deriveTags(frontmatter),
     body,
-    valid: 'valid',
+    // Nested is readable and indexed; only `'flat'` promises it is editable.
+    valid: isFlatFrontmatter(frontmatter) ? 'flat' : 'nested',
   };
 }
