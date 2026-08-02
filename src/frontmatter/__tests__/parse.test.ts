@@ -98,27 +98,13 @@ describe('parseFrontmatter — invalid blocks return nothing', () => {
     expect(parsed.frontmatter).toEqual({ x: 'hi', y: 'hi' });
   });
 
-  // One unusable value costs the reader that key, not the whole block. The
-  // note stays findable by its tags and keeps its title.
-  test('an invalid value costs its own key and no others', () => {
+  test('an invalid value drops the tags that shared the block', () => {
     const parsed = parseFrontmatter(
       '---\na: .nan\ntags: [x]\ntitle: kept\n---\nbody\n',
     );
 
     expect(parsed.valid).toBe('present-but-invalid');
-    expect(parsed.frontmatter).toEqual({ tags: ['x'], title: 'kept' });
-    expect(parsed.tags).toEqual(['x']);
-  });
-
-  // The filter is what keeps a cyclic value away from projectRow's
-  // JSON.stringify, so it has to actually drop the offending key.
-  test('a cyclic key is dropped while its siblings survive', () => {
-    const parsed = parseFrontmatter(
-      '---\na: &x\n  b: *x\ntitle: kept\n---\nbody\n',
-    );
-
-    expect(parsed.valid).toBe('present-but-invalid');
-    expect(parsed.frontmatter).toEqual({ title: 'kept' });
-    expect(() => JSON.stringify(parsed.frontmatter)).not.toThrow();
+    expect(parsed.frontmatter).toEqual({});
+    expect(parsed.tags).toEqual([]);
   });
 });

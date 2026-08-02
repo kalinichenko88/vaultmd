@@ -81,27 +81,6 @@ export function isValidFrontmatter(fm: Record<string, unknown>): boolean {
 }
 
 /**
- * Return `fm` without the top-level keys whose values cannot round-trip.
- *
- * Each key is judged on its own, so one unusable value costs the reader that
- * key and nothing else — a note with `rating: .nan` keeps its `tags` and its
- * `title`. Unlike {@link invalidKeys} this does not short-circuit: it has to
- * see every key to decide what survives.
- *
- * @param fm Frontmatter map to filter.
- * @returns A new map holding only the round-trippable entries.
- */
-export function keepValidKeys(
-  fm: Record<string, unknown>,
-): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(fm).filter(([, value]) =>
-      isRoundTrippable(value, new Set()),
-    ),
-  );
-}
-
-/**
  * Throw {@link MdVaultError} with code `FRONTMATTER_INVALID` when `fm` contains
  * a value that cannot round-trip, naming the offending keys. A no-op otherwise.
  *
