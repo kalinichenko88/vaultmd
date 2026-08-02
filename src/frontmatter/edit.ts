@@ -10,9 +10,13 @@ import { isFlatFrontmatter } from './validate.ts';
 /**
  * Apply a mutator callback to a note's frontmatter and return the rewritten
  * file content. Preserves the existing YAML structure and only writes back
- * changed keys. If the existing frontmatter cannot round-trip, or the mutation
- * would produce a value that cannot, the file is left untouched and `outcome`
- * is `'unverifiable'`.
+ * changed keys.
+ *
+ * **Flat blocks only.** The file is left untouched, with an `'unverifiable'`
+ * outcome, when the existing block is nested or cannot be stored, when the
+ * mutation would make it either, or when the rewrite would orphan a YAML
+ * anchor. A nested block is read through `parseFrontmatter` and rewritten,
+ * if at all, through `transformNote` — the mutator is not even called for one.
  *
  * @param content Raw UTF-8 content of the markdown file.
  * @param mutate  Callback that receives a mutable copy of the frontmatter
@@ -83,7 +87,7 @@ export function editFrontmatter(
   // every `*ref` to it — yaml then refuses to emit and throws a raw, code-less
   // error out of a function documented never to throw for bad frontmatter. The
   // value graph cannot see this coming: last-wins resolution leaves one live
-  // reference, so `parseFrontmatter` reports the note as `'valid'`.
+  // reference, so `parseFrontmatter` reports the note as `'flat'`.
   //
   // Only a removal or a type change orphans an anchor; yaml rewrites a scalar
   // in place, so `x: &a hi` -> `x: &a bye` keeps working, and so does an edit

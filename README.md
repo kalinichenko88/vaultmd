@@ -327,10 +327,10 @@ import {
   withFileTransform,       // atomic compare-and-swap file edit
   withFileDelete,          // atomic delete with commit hook
   withFileMove,            // move under both per-file locks, rollback on conflict
-  parseFrontmatter,        // pure YAML frontmatter parser
-  editFrontmatter,         // pure frontmatter editor
-  serializeFrontmatter,    // map → fenced YAML block (inverse of parse)
-  isValidFrontmatter,
+  parseFrontmatter,        // pure YAML frontmatter parser (reads nested blocks)
+  editFrontmatter,         // pure frontmatter editor (flat blocks only)
+  serializeFrontmatter,    // flat map → fenced YAML block
+  isFlatFrontmatter,       // the write gate: is this map safe to emit?
   deriveTags,
   extractLinks,            // pull wikilinks / relative links from text
   storedLinksFor,

@@ -62,7 +62,8 @@ export function buildFrontmatterBlock(
  * markdown note. The output is byte-identical to the fresh frontmatter block
  * `createNote` / {@link editFrontmatter} emit when a note has no existing block
  * (they preserve an existing block's styling, which this does not reproduce).
- * `parseFrontmatter` is its inverse: every accepted input round-trips.
+ * `parseFrontmatter` is its inverse: every accepted input round-trips, and
+ * reports the result as `'flat'`.
  *
  * An empty map yields the empty string (no block), matching what `createNote` /
  * {@link editFrontmatter} write for empty frontmatter. Non-empty arrays
@@ -73,13 +74,17 @@ export function buildFrontmatterBlock(
  * carry them — and is emitted as a double-quoted scalar broken at its own line
  * breaks, not at a column limit.
  *
- * @param frontmatter Key-value map. Scalars, plain maps and arrays, nested to
- *   any depth.
+ * @param frontmatter Flat key-value map: scalars (`string`, a finite `number`,
+ *   `boolean`, `null`) and arrays of scalars. Nesting is refused — this
+ *   package does not author a shape {@link editFrontmatter} cannot then rewrite
+ *   one key at a time. A nested block written by something else is still read
+ *   and indexed; see {@link FrontmatterValidity}.
  * @returns A string of the form `---\n<yaml>\n---\n`, or `''` for an empty map.
- * @throws {@link MdVaultError} with code `FRONTMATTER_INVALID` when the input
- *   contains a `Date`, a class instance, a non-finite number, `undefined`, a
- *   container reference repeated within the map, or nesting deeper than 100
- *   levels — none of which survive a parse round-trip as written.
+ * @throws {@link MdVaultError} with code `FRONTMATTER_INVALID`, naming the
+ *   offending keys, when a value is a nested map or array, an array of
+ *   non-scalars, a `Date`, a class instance, a non-finite number, or
+ *   `undefined`. Binding one array to two keys is fine: it is written out
+ *   twice rather than as a YAML anchor.
  *
  * @example
  * ```ts
