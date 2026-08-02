@@ -1,6 +1,7 @@
 /**
- * A scalar frontmatter value usable as a filter operand. Frontmatter is flat,
- * so only scalars are comparable.
+ * A scalar frontmatter value usable as a filter operand. `where` compares
+ * top-level keys only, so a nested map or list is not filterable — read one off
+ * `NoteHit.frontmatter` instead.
  */
 export type WhereValue = string | number | boolean;
 

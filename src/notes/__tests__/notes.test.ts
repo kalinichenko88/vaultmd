@@ -281,8 +281,8 @@ describe('editFrontmatter', () => {
   });
 
   test('present-but-invalid frontmatter → unverifiable, leaves file AND index untouched', async () => {
-    // nested map is non-flat → present-but-invalid; written directly (never indexed)
-    const raw = '---\nmeta:\n  nested: true\n---\nbody';
+    // malformed YAML → present-but-invalid; written directly (never indexed)
+    const raw = '---\nfoo: [unclosed\n---\nbody';
     await writeFile(join(vaultDir, 'weird.md'), raw);
     const before = await io.stat('weird.md');
 
@@ -634,5 +634,79 @@ describe('exists — review regressions', () => {
   test('is false when a parent segment is a file, not a raw ENOTDIR', async () => {
     await writeFile(join(vaultDir, 'Notes'), 'i am a file');
     expect(await notes.exists('Notes/today.md')).toBe(false);
+  });
+});
+
+describe('createNote — nested frontmatter', () => {
+  // The write gate is flat: this package does not author nesting, even though
+  // it reads and indexes a nested block written by something else.
+  test('a nested map is refused with FRONTMATTER_INVALID', async () => {
+    let caught: unknown;
+    try {
+      await notes.createNote('N.md', {
+        frontmatter: { title: 'N', meta: { status: 'open' } },
+        body: 'body\n',
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(MdVaultError);
+    expect((caught as MdVaultError).code).toBe('FRONTMATTER_INVALID');
+  });
+
+  // ...but a nested block already on disk is read and indexed.
+  test('a nested block written externally is indexed and readable', async () => {
+    const content = '---\ntitle: E\nmeta:\n  status: open\ntags: [x]\n---\nb\n';
+    await writeFile(join(vaultDir, 'E.md'), content);
+    const sig = await io.stat('E.md');
+    if (!sig) {
+      throw new Error('fixture stat failed');
+    }
+    indexNote(db, io, cfg, 'E.md', content, sig);
+
+    const hit = query.queryNotes().find((h) => h.path === 'E.md');
+    expect(hit?.frontmatter).toEqual({
+      title: 'E',
+      meta: { status: 'open' },
+      tags: ['x'],
+    });
+    expect(hit?.tags).toEqual(['x']);
+  });
+
+  test('a shared container reference throws FRONTMATTER_INVALID', async () => {
+    const shared = { k: 1 };
+    let caught: unknown;
+    try {
+      await notes.createNote('N.md', {
+        frontmatter: { x: shared, y: shared },
+        body: 'body\n',
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(MdVaultError);
+    expect((caught as MdVaultError).code).toBe('FRONTMATTER_INVALID');
+  });
+
+  // buildContent routes a non-empty `frontmatter` input through
+  // editFrontmatter against `body` (see notes.ts). When body already carries
+  // a block with a duplicate key shadowing a YAML anchor, editFrontmatter used
+  // to escape a raw ReferenceError from the underlying yaml library instead of
+  // the documented MdVaultCode contract.
+  test('an orphaned-alias block in body throws FRONTMATTER_INVALID, not a raw ReferenceError', async () => {
+    let caught: unknown;
+    try {
+      await notes.createNote('N.md', {
+        frontmatter: { title: 'N' },
+        body: '---\nx: &a\n  k: 1\nx: 3\ny: *a\n---\nbody\n',
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(MdVaultError);
+    expect((caught as MdVaultError).code).toBe('FRONTMATTER_INVALID');
   });
 });

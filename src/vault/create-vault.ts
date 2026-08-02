@@ -89,9 +89,15 @@ export async function createVault(config: CreateVaultConfig): Promise<Vault> {
       await reconciler.rebuild();
     } else {
       db.close();
+      // Name which trigger fired: a stale schema version any owning instance
+      // repairs on its next boot, a fingerprint mismatch it will not.
+      const cause =
+        storedVer === String(SCHEMA_VERSION)
+          ? `index was built with a different IndexConfig (linkResolution / caseSensitive / ignore) than this instance asks for`
+          : `index was built by an older release (schema v${storedVer ?? '?'}, this build needs v${SCHEMA_VERSION}) and needs a rebuild`;
       throw new MdVaultError(
         'INDEX_UNAVAILABLE',
-        'index config fingerprint mismatch on a shared index not owned by this scope',
+        `${cause}; this instance reads only [${config.prefixes.read.join(', ')}] so it cannot rebuild a shared index out from under another scope. Start an instance whose read prefixes include the whole vault ('') first.`,
       );
     }
   } else {

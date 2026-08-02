@@ -172,6 +172,23 @@ describe('queryNotes — validation', () => {
     ).toBe(0);
   });
 
+  // Frontmatter may nest, but `where` cannot reach into it. The nested-object
+  // shape is what a caller reaches for first, and it arrives here as an
+  // operator bag — so the error has to say the filtering is unavailable rather
+  // than name an "operator" nobody wrote.
+  test('a nested-object where says nested values cannot be filtered', () => {
+    const { queryNotes } = mkQuery();
+
+    expect(() =>
+      queryNotes({ where: { meta: { status: 'open' } as never } }),
+    ).toThrow(
+      expect.objectContaining({
+        code: 'VALIDATION_ERROR',
+        message: expect.stringContaining('cannot be filtered'),
+      }),
+    );
+  });
+
   test('throws VALIDATION_ERROR on unknown orderBy field', () => {
     const io = createVaultIo({
       root: vaultDir,
@@ -1969,6 +1986,23 @@ describe('orphanNotes', () => {
     expect(q.orphanNotes({ mode: 'unreferenced' }).map((n) => n.path)).toEqual([
       'lonely.md',
     ]);
+  });
+
+  // A full NoteHit, not a bare row. The frontmatter parse and tag lookup now
+  // run after the orphan filter and the slice, so this pins that they still
+  // run at all for the page that is returned.
+  test('returns fully built hits, not raw index rows', () => {
+    insertNote(db, {
+      path: 'lonely.md',
+      frontmatter: { meta: { status: 'open' } },
+      tags: ['x'],
+    });
+
+    expect(mkQuery().orphanNotes()[0]).toMatchObject({
+      path: 'lonely.md',
+      frontmatter: { meta: { status: 'open' } },
+      tags: ['x'],
+    });
   });
 
   test('reports a note with an inbound link in neither mode', () => {

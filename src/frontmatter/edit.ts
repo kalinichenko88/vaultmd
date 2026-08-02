@@ -8,8 +8,13 @@ import { isFlatFrontmatter } from './validate.ts';
 /**
  * Apply a mutator callback to a note's frontmatter and return the rewritten
  * file content. Preserves the existing YAML structure and only writes back
- * changed keys. If the frontmatter is non-flat or the mutation would produce a
- * non-flat result, the file is left untouched and `outcome` is `'unverifiable'`.
+ * changed keys.
+ *
+ * **Flat blocks only.** The file is left untouched, with an `'unverifiable'`
+ * outcome, when the existing block is nested or cannot be stored, when the
+ * mutation would make it either, or when the rewrite would orphan a YAML
+ * anchor. A nested block is read through `parseFrontmatter` and rewritten,
+ * if at all, through `transformNote` — the mutator is not even called for one.
  *
  * @param content Raw UTF-8 content of the markdown file.
  * @param mutate  Callback that receives a mutable copy of the frontmatter
@@ -34,7 +39,10 @@ export function editFrontmatter(
   outcome: EditOutcome;
 } {
   const parsed = parseFrontmatter(content);
-  if (parsed.valid === 'present-but-invalid') {
+  // Refused BEFORE the mutator runs: one that deletes the nested key leaves a
+  // flat view, and the block would then be re-emitted whole, flattening an
+  // author's untouched `|` scalar on the way past.
+  if (parsed.valid === 'present-but-invalid' || parsed.valid === 'nested') {
     return { content, outcome: 'unverifiable' };
   }
   if (parsed.valid === 'none') {
@@ -58,35 +66,51 @@ export function editFrontmatter(
   }
   const doc = parseDocument(ext.yaml, { uniqueKeys: false });
   dropShadowedKeys(doc);
-  const before = (doc.toJS() ?? {}) as Record<string, unknown>;
+  // dropShadowedKeys can orphan an alias; toJS then throws a raw ReferenceError.
+  let before: Record<string, unknown>;
+  try {
+    before = (doc.toJS() ?? {}) as Record<string, unknown>;
+  } catch {
+    return { content, outcome: 'unverifiable' };
+  }
   const view = structuredClone(before);
   mutate(view);
   if (!isFlatFrontmatter(view)) {
     return { content, outcome: 'unverifiable' };
   }
-  let changed = false;
-  for (const key of Object.keys(before)) {
-    if (!(key in view)) {
-      doc.delete(key);
-      changed = true;
+  // A delete or a type change can remove the pair that OWNS an anchor,
+  // orphaning every `*ref` to it — yaml then refuses to emit and throws out of
+  // a function documented never to throw for bad frontmatter. The value graph
+  // cannot see it coming: last-wins resolution leaves one live reference, so
+  // `parseFrontmatter` calls the note `'flat'`.
+  try {
+    let changed = false;
+    for (const key of Object.keys(before)) {
+      if (!(key in view)) {
+        doc.delete(key);
+        changed = true;
+      }
     }
-  }
-  for (const key of Object.keys(view)) {
-    if (
-      !(key in before) ||
-      JSON.stringify(before[key]) !== JSON.stringify(view[key])
-    ) {
-      doc.set(key, view[key]);
-      changed = true;
+    for (const key of Object.keys(view)) {
+      if (
+        !(key in before) ||
+        JSON.stringify(before[key]) !== JSON.stringify(view[key])
+      ) {
+        doc.set(key, view[key]);
+        changed = true;
+      }
     }
+    if (!changed) {
+      return { content, outcome: 'unchanged' };
+    }
+
+    return {
+      content: `${emitFrontmatterBlock(doc)}${ext.body}`,
+      outcome: 'edited',
+    };
+  } catch {
+    return { content, outcome: 'unverifiable' };
   }
-  if (!changed) {
-    return { content, outcome: 'unchanged' };
-  }
-  return {
-    content: `${emitFrontmatterBlock(doc)}${ext.body}`,
-    outcome: 'edited',
-  };
 }
 
 // A note may legally repeat a key (`uniqueKeys: false`), and every reader of one

@@ -102,7 +102,7 @@ export function createNotes(deps: NotesDeps): NotesApi {
       }
     });
     if (res.outcome === 'unverifiable') {
-      // fm is flat (asserted above), so the body itself carries an invalid
+      // fm is valid (asserted above), so the body itself carries an invalid
       // frontmatter block.
       throw new MdVaultError(
         'FRONTMATTER_INVALID',

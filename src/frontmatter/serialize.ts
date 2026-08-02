@@ -31,14 +31,14 @@ export function emitFrontmatterBlock(doc: Document): string {
 }
 
 /**
- * Build the fenced YAML block for an already-validated flat frontmatter map.
+ * Build the fenced YAML block for an already-validated frontmatter map.
  * The single source of truth for fresh-block emission, shared with
  * `editFrontmatter`'s no-frontmatter path so the two stay byte-identical.
  *
  * Returns the empty string for an empty map (no block to emit); everything else
  * is {@link emitFrontmatterBlock}'s contract.
  *
- * @param frontmatter Flat key-value map; the caller must validate flatness.
+ * @param frontmatter Key-value map; the caller must validate it first.
  * @returns `''` for an empty map, otherwise `---\n<yaml>\n---\n`.
  */
 export function buildFrontmatterBlock(
@@ -48,15 +48,21 @@ export function buildFrontmatterBlock(
     return '';
   }
 
-  return emitFrontmatterBlock(new Document(frontmatter));
+  // aliasDuplicateObjects: false — one array bound to two keys is ordinary JS,
+  // but the default emits it as an `&a1`/`*a1` pair that the next edit orphans.
+  // Writing the value twice costs a few bytes and keeps the note editable.
+  return emitFrontmatterBlock(
+    new Document(frontmatter, { aliasDuplicateObjects: false }),
+  );
 }
 
 /**
- * Serialize a flat frontmatter map to a fenced YAML block ready to prepend to a
+ * Serialize a frontmatter map to a fenced YAML block ready to prepend to a
  * markdown note. The output is byte-identical to the fresh frontmatter block
  * `createNote` / {@link editFrontmatter} emit when a note has no existing block
  * (they preserve an existing block's styling, which this does not reproduce).
- * `parseFrontmatter` is its inverse: every accepted input round-trips.
+ * `parseFrontmatter` is its inverse: every accepted input round-trips, and
+ * reports the result as `'flat'`.
  *
  * An empty map yields the empty string (no block), matching what `createNote` /
  * {@link editFrontmatter} write for empty frontmatter. Non-empty arrays
@@ -67,11 +73,17 @@ export function buildFrontmatterBlock(
  * carry them — and is emitted as a double-quoted scalar broken at its own line
  * breaks, not at a column limit.
  *
- * @param frontmatter Flat key-value map (scalars and arrays of scalars only).
+ * @param frontmatter Flat key-value map: scalars (`string`, a finite `number`,
+ *   `boolean`, `null`) and arrays of scalars. Nesting is refused — this
+ *   package does not author a shape {@link editFrontmatter} cannot then rewrite
+ *   one key at a time. A nested block written by something else is still read
+ *   and indexed; see {@link FrontmatterValidity}.
  * @returns A string of the form `---\n<yaml>\n---\n`, or `''` for an empty map.
- * @throws {@link MdVaultError} with code `FRONTMATTER_INVALID` when the input
- *   contains nested objects, arrays of non-scalars, `Date`s, or non-finite
- *   numbers — none of which survive a parse round-trip.
+ * @throws {@link MdVaultError} with code `FRONTMATTER_INVALID`, naming the
+ *   offending keys, when a value is a nested map or array, an array of
+ *   non-scalars, a `Date`, a class instance, a non-finite number, or
+ *   `undefined`. Binding one array to two keys is fine: it is written out
+ *   twice rather than as a YAML anchor.
  *
  * @example
  * ```ts

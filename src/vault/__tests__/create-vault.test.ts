@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -250,6 +251,39 @@ describe('createVault', () => {
 
     expect(caught).toBeInstanceOf(MdVaultError);
     expect((caught as MdVaultError).code).toBe('INDEX_UNAVAILABLE');
+    // The two triggers call for different actions, so the message has to say
+    // which one fired. Here the schema version matches and the IndexConfig
+    // does not, so booting an owner would not settle it.
+    expect((caught as MdVaultError).message).toContain('IndexConfig');
+    expect((caught as MdVaultError).message).toContain('notes');
+  });
+
+  test('a stale schema version names the upgrade, not a config mismatch', async () => {
+    await writeVaultMd('notes/A.md', '# A\n');
+
+    const owner = await makeVault();
+    owner.close();
+
+    // Same IndexConfig, older schema version — the upgrade case.
+    const db = new Database(indexPath);
+    db.run("UPDATE meta SET value = '1' WHERE key = 'schema_version'");
+    db.close();
+
+    let caught: unknown;
+    try {
+      await createVault({
+        root: vaultDir,
+        prefixes: { read: ['notes'], write: ['notes'] },
+        indexPath,
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect((caught as MdVaultError).code).toBe('INDEX_UNAVAILABLE');
+    expect((caught as MdVaultError).message).toContain('older release');
+    expect((caught as MdVaultError).message).toContain('schema v1');
+    expect((caught as MdVaultError).message).not.toContain('IndexConfig');
   });
 
   test('lazyReconcile true auto-sweeps an external write after the TTL window', async () => {
@@ -276,5 +310,41 @@ describe('createVault', () => {
         .map((h) => h.path)
         .sort(),
     ).toEqual(['One.md', 'Two.md']);
+  });
+
+  // Task 2 changed what a present-but-invalid note projects to. reconcile
+  // skips an unchanged file on mtime+size, so without a SCHEMA_VERSION bump an
+  // upgraded index would keep the old row forever and disagree with a freshly
+  // built one about the same vault.
+  test('an index built at an older schema version is rebuilt on reopen', async () => {
+    await writeVaultMd(
+      'N.md',
+      '---\na: .nan\ntags: [x]\ntitle: kept\n---\nbody\n',
+    );
+
+    const first = await makeVault();
+    // The note is invalid under the new gate: no tags, title from the basename.
+    expect(first.query.queryNotes()[0].tags).toEqual([]);
+    first.close();
+
+    // Simulate an index written by the previous release: stamp the old schema
+    // version and a stale row, without touching the file on disk.
+    const db = new Database(indexPath);
+    db.run("UPDATE meta SET value = '1' WHERE key = 'schema_version'");
+    db.run("UPDATE notes SET frontmatter = ?, title = 'kept'", [
+      '{"a":null,"tags":["x"],"title":"kept"}',
+    ]);
+    db.run(
+      "INSERT INTO note_tags(path_key, tag) VALUES ((SELECT path_key FROM notes), 'x')",
+    );
+    db.close();
+
+    // makeVault already registers the vault in `opened`; afterEach closes it.
+    const second = await makeVault();
+    const hit = second.query.queryNotes()[0];
+
+    expect(hit.frontmatter).toEqual({});
+    expect(hit.tags).toEqual([]);
+    expect(hit.title).toBe('N');
   });
 });

@@ -124,12 +124,243 @@ body text
     expect(r.content).toBe(content);
   });
 
-  test('mutate introducing a nested map -> unverifiable, no write', () => {
+  test('mutate introducing a non-round-trippable value -> unverifiable, no write', () => {
     const content = '---\ntitle: x\n---\nbody';
     const r = editFrontmatter(content, (fm) => {
-      fm.meta = { a: 1 };
+      fm.when = new Date();
     });
     expect(r.outcome).toBe('unverifiable');
     expect(r.content).toBe(content);
+  });
+});
+
+describe('editFrontmatter — nested is read-only', () => {
+  // Reading a nested note is supported; rewriting one is not. Editing a key of
+  // a nested block means re-emitting a shape this package did not author, and
+  // every attempt at doing that surgically cost a comment, a block scalar or a
+  // shadowed pair. The note is left alone and the caller is told so.
+  test('mutating a nested value is refused, not written', () => {
+    const src = '---\ntitle: keep\nmeta:\n  status: open\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      (fm.meta as Record<string, unknown>).status = 'done';
+    });
+
+    expect(parseFrontmatter(src).valid).toBe('nested');
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
+
+  // A post-mutation flatness check is not enough: a mutator that DELETES the
+  // nested key, or replaces it with a scalar, leaves a flat view and would let
+  // the whole block be re-emitted. That re-emit is the thing being avoided —
+  // it flattens an author's untouched `|` block on the way past.
+  test('deleting the nested key does not unlock the note', () => {
+    const src =
+      '---\nowner: ada\nnote: |\n  line one\n  line two\nmeta:\n  status: open\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      delete fm.meta;
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
+
+  test('replacing the nested key with a scalar does not unlock the note', () => {
+    const src = '---\ntitle: keep\nmeta:\n  status: open\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      fm.meta = 'x';
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
+
+  test('the mutator is not even called for a nested note', () => {
+    let called = false;
+    editFrontmatter('---\nmeta:\n  k: 1\n---\nbody\n', () => {
+      called = true;
+    });
+
+    expect(called).toBe(false);
+  });
+
+  test('a flat note stays flat: adding a nested key is refused', () => {
+    const src = '---\ntitle: keep\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      fm.meta = { status: 'open' };
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
+
+  test('a map-anchor block is nested, so it is refused', () => {
+    const src = '---\nx: &a\n  k: 1\ny: *a\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      fm.x = { k: 2 };
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
+
+  // An anchored array of scalars IS flat, so it edits. The alias means the two
+  // keys are one value, so mutating through either updates both — and the
+  // anchor dissolves into two literal lists. Style is lost, data is not; this
+  // is what main did too.
+  test('an anchored array of scalars edits, unrolling the alias', () => {
+    const src = '---\nx: &a [1, 2]\ny: *a\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      (fm.x as number[]).push(3);
+    });
+
+    expect(parseFrontmatter(src).valid).toBe('flat');
+    expect(outcome).toBe('edited');
+    expect(content).not.toContain('&a');
+    expect(parseFrontmatter(content).frontmatter).toEqual({
+      x: [1, 2, 3],
+      y: [1, 2, 3],
+    });
+  });
+
+  test('a scalar-anchor block still edits and keeps its anchor', () => {
+    const { content, outcome } = editFrontmatter(
+      '---\nx: &a hi\ny: *a\n---\nbody\n',
+      (fm) => {
+        fm.z = 1;
+      },
+    );
+
+    expect(outcome).toBe('edited');
+    expect(content).toContain('&a');
+    expect(content).toContain('*a');
+  });
+
+  // Removing or replacing the pair that OWNS an anchor orphans every `*a` that
+  // refers to it, and yaml then refuses to emit — a raw, code-less throw out of
+  // a function documented never to throw for bad frontmatter. The note is left
+  // alone instead. `parseFrontmatter` reports these as `'valid'`, so the value
+  // graph cannot see the problem: only one live reference survives resolution.
+  test('deleting the owner of a scalar anchor is refused, not thrown', () => {
+    const src = '---\nx: &a hi\ny: *a\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      delete fm.x;
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
+
+  test('replacing a scalar anchor with a container is refused, not thrown', () => {
+    const src = '---\nx: &a hi\ny: *a\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      fm.x = { k: 1 };
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
+
+  // The guard must not swallow the edits that work. yaml rewrites a scalar in
+  // place, so the anchor survives a scalar-to-scalar replacement.
+  test('replacing a scalar anchor with another scalar still edits', () => {
+    const { content, outcome } = editFrontmatter(
+      '---\nx: &a hi\ny: *a\n---\nbody\n',
+      (fm) => {
+        fm.x = 'bye';
+      },
+    );
+
+    expect(outcome).toBe('edited');
+    expect(content).toContain('x: &a bye');
+    expect(content).toContain('*a');
+  });
+
+  test('deleting the alias side still edits', () => {
+    const { outcome } = editFrontmatter(
+      '---\nx: &a hi\ny: *a\n---\nbody\n',
+      (fm) => {
+        delete fm.y;
+      },
+    );
+
+    expect(outcome).toBe('edited');
+  });
+
+  test('a mutation that introduces a shared reference is refused', () => {
+    const src = '---\ntitle: keep\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      const shared = { k: 1 };
+      fm.a = shared;
+      fm.b = shared;
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
+
+  // A repeated top-level key is legal (uniqueKeys: false, last-wins), and
+  // parse()'s last-wins collapse means only ONE live reference to the anchored
+  // container survives the parsed object — the validator's `seen` set never
+  // sees a repeat, so `parseFrontmatter` reports 'valid'. But editFrontmatter
+  // works from parseDocument + dropShadowedKeys, which deletes the pair
+  // carrying `&a` (the shadowed FIRST `x`) — orphaning `*a` — and doc.toJS()
+  // then cannot resolve it. Without a guard this escapes as a raw
+  // `ReferenceError`, not an `MdVaultCode`.
+  test('a map anchor orphaned by a shadowed duplicate key is refused, not a raw throw', () => {
+    const src = '---\nx: &a\n  k: 1\nx: 3\ny: *a\n---\nbody\n';
+    // The surviving `y` holds a map, so this one is caught as nested before
+    // the orphan can arise. The sequence form below is the case that actually
+    // reaches the guard.
+    expect(parseFrontmatter(src).valid).toBe('nested');
+
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      fm.z = 1;
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
+
+  // Same hole, sequence form. This one throws on `main` too (pre-existing,
+  // not a regression from nested frontmatter) but gets the same fix here.
+  test('a sequence anchor orphaned by a shadowed duplicate key is refused, not a raw throw', () => {
+    const src = '---\nx: &a [1, 2]\nx: 3\ny: *a\n---\nbody\n';
+    expect(parseFrontmatter(src).valid).toBe('flat');
+
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      fm.z = 1;
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
+
+  // Guard against over-catching: a duplicate key with no anchor involved must
+  // keep working exactly as dropShadowedKeys' last-wins behaviour intends.
+  test('a duplicate key with no anchor still edits normally', () => {
+    const src = '---\nx: 1\nx: 2\ny: 3\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      fm.y = 4;
+    });
+
+    expect(outcome).toBe('edited');
+    expect(parseFrontmatter(content).frontmatter).toEqual({ x: 2, y: 4 });
+  });
+
+  // The depth bound is what keeps this an outcome rather than a raw RangeError
+  // out of the emitter — editFrontmatter never throws for bad frontmatter.
+  test('a mutation nesting past the depth bound is refused, not thrown', () => {
+    const src = '---\ntitle: keep\n---\nbody\n';
+    let deep: Record<string, unknown> = { leaf: 1 };
+    for (let i = 0; i < 20_000; i++) {
+      deep = { n: deep };
+    }
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      fm.deep = deep;
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
   });
 });

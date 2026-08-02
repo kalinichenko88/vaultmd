@@ -8,6 +8,6 @@ export type ParsedFrontmatter = {
   tags: string[];
   /** The note body: everything after the closing `---` fence, or the full file content when there is no frontmatter. */
   body: string;
-  /** Whether the frontmatter block is flat-safe, present but unsafe, or absent. */
+  /** Whether the block is flat (editable), nested (readable), unstorable, or absent. */
   valid: FrontmatterValidity;
 };

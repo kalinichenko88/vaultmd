@@ -7,7 +7,7 @@ import { parseFrontmatter } from '../parse.ts';
 import { serializeFrontmatter } from '../serialize.ts';
 
 describe('serializeFrontmatter', () => {
-  test('round-trip: parseFrontmatter(serializeFrontmatter(fm)) yields flat and deep-equals fm', () => {
+  test('round-trip: parseFrontmatter(serializeFrontmatter(fm)) yields valid and deep-equals fm', () => {
     const fm: Record<string, unknown> = {
       title: 'Hello',
       count: 42,
@@ -64,16 +64,16 @@ describe('serializeFrontmatter', () => {
     expect(serializeFrontmatter({})).toBe('');
   });
 
-  test('non-flat input throws FRONTMATTER_INVALID naming only the offending keys', () => {
+  test('non-round-trippable input throws FRONTMATTER_INVALID naming only the offending keys', () => {
     let err: MdVaultError | undefined;
     try {
-      serializeFrontmatter({ title: 'ok', count: 3, nested: { x: 1 } });
+      serializeFrontmatter({ title: 'ok', count: 3, bad: new Date() });
     } catch (e) {
       err = e as MdVaultError;
     }
     expect(err).toBeInstanceOf(MdVaultError);
     expect(err?.code).toBe('FRONTMATTER_INVALID');
-    expect(err?.message).toContain('nested');
+    expect(err?.message).toContain('bad');
     expect(err?.message).not.toContain('title');
     expect(err?.message).not.toContain('count');
   });
@@ -126,5 +126,43 @@ describe('serializeFrontmatter', () => {
       });
       expect(serializeFrontmatter(fm)).toBe(fromEdit);
     }
+  });
+});
+
+// Everything this package WRITES is flat, even though a nested block read off
+// disk is indexed and returned. Emitting nesting would mean owning a shape
+// `editFrontmatter` cannot then rewrite a key at a time.
+describe('serializeFrontmatter — the write gate is flat', () => {
+  test('a nested map throws FRONTMATTER_INVALID naming the key', () => {
+    let caught: unknown;
+    try {
+      serializeFrontmatter({ title: 'x', meta: { status: 'open' } });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect((caught as MdVaultError).code).toBe('FRONTMATTER_INVALID');
+    expect((caught as MdVaultError).message).toContain('meta');
+  });
+
+  test('an array of maps throws FRONTMATTER_INVALID', () => {
+    expect(() => serializeFrontmatter({ items: [{ name: 'a' }] })).toThrow(
+      expect.objectContaining({ code: 'FRONTMATTER_INVALID' }),
+    );
+  });
+
+  // One array bound to two keys is ordinary JS and stays flat, but yaml's
+  // default emits it as an &a1/*a1 anchor pair — producing a note whose next
+  // edit orphans the alias. Written out twice instead.
+  test('a shared array reference is written out twice, not anchored', () => {
+    const shared = [1, 2];
+    const block = serializeFrontmatter({ tags: shared, aliases: shared });
+
+    expect(block).not.toContain('&');
+    expect(block).not.toContain('*');
+    expect(parseFrontmatter(`${block}body\n`).frontmatter).toEqual({
+      tags: [1, 2],
+      aliases: [1, 2],
+    });
   });
 });
