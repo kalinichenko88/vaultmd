@@ -21,7 +21,7 @@ schemas, and sync logic live in whatever you build on top.
 
 ## Status
 
-Released (`0.9.0`) — live on npm. The public API is frozen and tested, and the
+Released (`0.10.0`) — live on npm. The public API is frozen and tested, and the
 package ships as a bundled `dist/` (ESM + types). Being `0.x`, the surface may
 still evolve before `1.0`; see [CHANGELOG.md](./CHANGELOG.md) for what changed.
 
@@ -298,9 +298,11 @@ vault.close(): void                         // close the db handle
 ### `vault.io`
 
 The `VaultIo` chokepoint the vault was built on, exposed for the escape hatch:
-`io.can(path, 'read' | 'write')` to test scope without throwing, plus the
-canonicalizing path/read/write helpers every other surface routes through. You
-rarely need it — `notes` and `query` already go through it.
+`io.can(path, 'read' | 'write')` to test scope without throwing, the
+canonicalizing path/read/write helpers every other surface routes through, and
+the two enumerators — `io.listMarkdown()` and `io.listFolders()`, both read-scope
+filtered and `ignore`-aware. You rarely need the rest — `notes` and `query`
+already go through it.
 
 ### `onCommit`
 

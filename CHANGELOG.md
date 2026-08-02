@@ -1,5 +1,90 @@
 # Changelog
 
+## 0.10.0 — 2026-08-02
+
+A note whose frontmatter nests is no longer second-class: it is read, indexed,
+and queryable, while everything this package *writes* stays flat. Plus
+`listFolders()`, the folder counterpart to `listMarkdown()`. **The index schema
+bumps 1 → 2, so the first boot on an existing index rebuilds it** (automatic,
+and only for an instance that owns the whole index — see the note below). Public
+API freeze stays at 51 names. Bun floor unchanged at ≥ 1.3.14.
+
+### Breaking
+
+- **`FrontmatterValidity` gains a fourth member, `'nested'`.** An exhaustive
+  `switch` over it needs a new arm. `=== 'flat'` keeps exactly its old meaning —
+  "safe to pass to `editFrontmatter`" — so a check written that way is unaffected.
+- **Index rebuild on upgrade.** `SCHEMA_VERSION` is now `2`, because a
+  present-but-nested note projects differently than it did. `reconcile` skips a
+  file whose mtime and size are unchanged, so without the bump an existing index
+  would keep its stale rows forever. A scoped instance that does *not* own the
+  whole index throws `INDEX_UNAVAILABLE` rather than rebuilding a shared index
+  out from under another scope — boot an owning instance once to repair it.
+
+### Nested frontmatter: flat writes, nested reads
+
+The two gates are now separate, because they were never the same question:
+
+- **Reads widened.** A block with a map or an array-of-maps value now reports
+  `valid: 'nested'`, returns its keys, and is indexed — so it answers tag,
+  `where`, and search queries like any other note, and you can read the nested
+  value off `NoteHit.frontmatter`. Previously such a note lost its frontmatter
+  entirely: one nested key cost it its tags and its title, and it dropped out of
+  every query.
+- **Writes unchanged and still flat.** `serializeFrontmatter`, `createNote`, and
+  `editFrontmatter` accept scalars and arrays of scalars only. `editFrontmatter`
+  refuses a `'nested'` note *before* invoking your mutator, so the callback never
+  runs against a block that cannot be rewritten a key at a time. This package
+  never authors a shape it could not then edit.
+- **`where` filters top-level keys only.** Reaching into a nested value is done
+  by reading `NoteHit.frontmatter`, not by the filter — a dotted key like
+  `'meta.status'` still matches a frontmatter key that literally contains a dot,
+  as it always has. The unknown-operator error now says so instead of suggesting
+  a path syntax.
+- **Only genuinely unstorable blocks come back empty** (`'present-but-invalid'`):
+  unparseable YAML, a non-map root, a YAML-anchor cycle, a non-finite number, or
+  nesting deep enough to overflow the serializer.
+- A shared YAML anchor is handled rather than mishandled: a note that anchors a
+  container and aliases it elsewhere parses and indexes normally, and only an
+  *edit* that would orphan the anchor is refused — with a proper
+  `FRONTMATTER_INVALID`, not a raw uncoded `Error`.
+
+### Folder enumeration
+
+- **`vaultIo.listFolders()`** returns every folder in the read scope, sorted.
+  Consumers building a tree previously split `listMarkdown()` paths on `/` and
+  deduped, which never sees a folder holding no markdown. Empty folders *are*
+  listed, matching Obsidian's `Vault.getAllFolders`. Folders pass the same guards
+  as files: read allowlist, dot-folder skip, `ignore` globs, symlink containment.
+- **Fixed: enumeration recursed through symlink cycles.** A directory symlink
+  aimed at its own ancestor (`ln -s .. vault/notes/loop`) stays inside the root,
+  so containment let it through and the walk re-enumerated the vault under an
+  aliased path at every level until the kernel's symlink limit stopped it. On a
+  two-entry vault that yielded 32 `.md` paths for a single note — and since
+  `reconcile` feeds `listMarkdown()` into the index, each alias became a phantom
+  row. Pre-existing in `listMarkdown`; `listFolders` made it visible.
+
+### Fixed
+
+- **A malformed note no longer aborts the whole reconcile sweep.** The
+  values-invalid branch of `parseFrontmatter` handed back the real parsed object,
+  which for a block built from YAML anchors can be cyclic; `projectRow`
+  stringified it and threw a raw `TypeError` out of `indexNote`. Because the lazy
+  sweep is fire-and-forget, that silently left every note after it in scan order
+  unindexed.
+- **`INDEX_UNAVAILABLE` now names which trigger fired** — a stale schema version
+  or an `IndexConfig` disagreement — lists the read prefixes that make the
+  instance a non-owner, and says what to do. The two call for different actions
+  and the message always blamed the second.
+
+### Performance
+
+- **`queryNotes` builds a `NoteHit` only for the page it returns.** It previously
+  parsed every matching row's frontmatter and ran a tag lookup per note *before*
+  slicing, so `limit: 20` over a 5,000-note vault did that work 5,000 times and
+  discarded 4,980. Measured on 5,000 notes with ~1 KB of nested frontmatter each:
+  **20.4 ms → 5.9 ms** per call.
+
 ## 0.9.0 — 2026-08-01
 
 `reconcile()` stops returning `void` and starts reporting what it changed — the
