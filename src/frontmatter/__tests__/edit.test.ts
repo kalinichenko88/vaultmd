@@ -200,6 +200,57 @@ describe('editFrontmatter — nested values', () => {
     expect(content).toContain('*a');
   });
 
+  // Removing or replacing the pair that OWNS an anchor orphans every `*a` that
+  // refers to it, and yaml then refuses to emit — a raw, code-less throw out of
+  // a function documented never to throw for bad frontmatter. The note is left
+  // alone instead. `parseFrontmatter` reports these as `'valid'`, so the value
+  // graph cannot see the problem: only one live reference survives resolution.
+  test('deleting the owner of a scalar anchor is refused, not thrown', () => {
+    const src = '---\nx: &a hi\ny: *a\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      delete fm.x;
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
+
+  test('replacing a scalar anchor with a container is refused, not thrown', () => {
+    const src = '---\nx: &a hi\ny: *a\n---\nbody\n';
+    const { content, outcome } = editFrontmatter(src, (fm) => {
+      fm.x = { k: 1 };
+    });
+
+    expect(outcome).toBe('unverifiable');
+    expect(content).toBe(src);
+  });
+
+  // The guard must not swallow the edits that work. yaml rewrites a scalar in
+  // place, so the anchor survives a scalar-to-scalar replacement.
+  test('replacing a scalar anchor with another scalar still edits', () => {
+    const { content, outcome } = editFrontmatter(
+      '---\nx: &a hi\ny: *a\n---\nbody\n',
+      (fm) => {
+        fm.x = 'bye';
+      },
+    );
+
+    expect(outcome).toBe('edited');
+    expect(content).toContain('x: &a bye');
+    expect(content).toContain('*a');
+  });
+
+  test('deleting the alias side still edits', () => {
+    const { outcome } = editFrontmatter(
+      '---\nx: &a hi\ny: *a\n---\nbody\n',
+      (fm) => {
+        delete fm.y;
+      },
+    );
+
+    expect(outcome).toBe('edited');
+  });
+
   test('a mutation that introduces a shared reference is refused', () => {
     const src = '---\ntitle: keep\n---\nbody\n';
     const { content, outcome } = editFrontmatter(src, (fm) => {

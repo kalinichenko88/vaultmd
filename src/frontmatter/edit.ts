@@ -1,5 +1,7 @@
 import { type Document, isMap, isScalar, parseDocument } from 'yaml';
 
+import { MdVaultError } from '@/errors.ts';
+
 import type { EditOutcome } from './models/edit-outcome.ts';
 import { extractBlock, parseFrontmatter } from './parse.ts';
 import { buildFrontmatterBlock, emitFrontmatterBlock } from './serialize.ts';
@@ -71,30 +73,49 @@ export function editFrontmatter(
   if (!isValidFrontmatter(view)) {
     return { content, outcome: 'unverifiable' };
   }
-  let changed = false;
-  for (const key of Object.keys(before)) {
-    if (!(key in view)) {
-      doc.delete(key);
-      changed = true;
+  // doc.delete / doc.set can remove the pair that OWNS an anchor, orphaning
+  // every `*ref` to it — yaml then refuses to emit and throws a raw, code-less
+  // error out of a function documented never to throw for bad frontmatter. The
+  // value graph cannot see this coming: last-wins resolution leaves one live
+  // reference, so `parseFrontmatter` reports the note as `'valid'`.
+  //
+  // Only a removal or a type change orphans an anchor; yaml rewrites a scalar
+  // in place, so `x: &a hi` -> `x: &a bye` keeps working, and so does an edit
+  // that never touches the anchor-owning key.
+  try {
+    let changed = false;
+    for (const key of Object.keys(before)) {
+      if (!(key in view)) {
+        doc.delete(key);
+        changed = true;
+      }
     }
-  }
-  for (const key of Object.keys(view)) {
-    if (
-      !(key in before) ||
-      JSON.stringify(before[key]) !== JSON.stringify(view[key])
-    ) {
-      doc.set(key, view[key]);
-      changed = true;
+    for (const key of Object.keys(view)) {
+      if (
+        !(key in before) ||
+        JSON.stringify(before[key]) !== JSON.stringify(view[key])
+      ) {
+        doc.set(key, view[key]);
+        changed = true;
+      }
     }
-  }
-  if (!changed) {
-    return { content, outcome: 'unchanged' };
-  }
+    if (!changed) {
+      return { content, outcome: 'unchanged' };
+    }
 
-  return {
-    content: `${emitFrontmatterBlock(doc)}${ext.body}`,
-    outcome: 'edited',
-  };
+    return {
+      content: `${emitFrontmatterBlock(doc)}${ext.body}`,
+      outcome: 'edited',
+    };
+  } catch (error) {
+    // Our own coded failures keep their code rather than being flattened into
+    // an outcome — a caller switching on `.code` must still see them.
+    if (error instanceof MdVaultError) {
+      throw error;
+    }
+
+    return { content, outcome: 'unverifiable' };
+  }
 }
 
 // A note may legally repeat a key (`uniqueKeys: false`), and every reader of one
