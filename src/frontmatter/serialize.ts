@@ -48,10 +48,9 @@ export function buildFrontmatterBlock(
     return '';
   }
 
-  // aliasDuplicateObjects: false — one array bound to two keys is ordinary JS
-  // and stays flat, but the default emits it as an `&a1`/`*a1` anchor pair,
-  // and the next edit to that note orphans the alias. Writing the value twice
-  // costs a few bytes and keeps the note editable.
+  // aliasDuplicateObjects: false — one array bound to two keys is ordinary JS,
+  // but the default emits it as an `&a1`/`*a1` pair that the next edit orphans.
+  // Writing the value twice costs a few bytes and keeps the note editable.
   return emitFrontmatterBlock(
     new Document(frontmatter, { aliasDuplicateObjects: false }),
   );

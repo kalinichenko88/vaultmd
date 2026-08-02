@@ -212,13 +212,11 @@ function pushWhereFilter(
       parts.push(`${col} IS ${value ? 'NOT NULL' : 'NULL'}`);
       continue;
     }
-    // Now that frontmatter nests, `where: { meta: { status: 'open' } }` is the
-    // shape a caller reaches for first — and it arrives here as an operator bag
-    // holding `status`. Saying "unknown operator" names something they never
-    // wrote; point at the path form that does what they meant.
+    // `where: { meta: { status: 'open' } }` lands here too, as an operator bag
+    // holding `status` — hence the hint alongside the operator name.
     throw new MdVaultError(
       'VALIDATION_ERROR',
-      `unknown where operator on ${key}: ${op}. A nested frontmatter value cannot be filtered — read it from NoteHit.frontmatter instead`,
+      `unknown where operator on ${key}: ${op} (a nested frontmatter value cannot be filtered — read it from NoteHit.frontmatter)`,
     );
   }
 }
@@ -542,12 +540,9 @@ export function createQuery(
       .filter((row) => inScope(row.path));
   }
 
-  // One index row as a NoteHit. Deliberately NOT folded into scopedRows: it
-  // parses the frontmatter JSON and runs a tag lookup per note, and callers
-  // slice to a page first, so a `limit: 20` over a 5,000-note vault pays this
-  // twenty times rather than five thousand. The blob it parses is an
-  // arbitrarily deep tree now, so the cost per discarded row is no longer
-  // bounded by anything.
+  // One index row as a NoteHit. Kept out of scopedRows so the frontmatter parse
+  // and the per-note tag lookup land after the slice — a `limit: 20` over a
+  // 5,000-note vault pays it twenty times, not five thousand.
   function toHit(row: RawNoteRow): NoteHit {
     return {
       path: row.path,

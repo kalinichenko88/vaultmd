@@ -122,15 +122,20 @@ describe('parseFrontmatter — nested is read, unstorable is not', () => {
     expect(parsed.tags).toEqual([]);
   });
 
-  test('nesting past the depth bound makes the block unstorable', () => {
-    const lines: string[] = [];
-    for (let i = 0; i < 200; i++) {
-      lines.push(`${'  '.repeat(i)}n:`);
-    }
-    lines.push(`${'  '.repeat(200)}leaf: 1`);
-    const parsed = parseFrontmatter(`---\n${lines.join('\n')}\n---\nbody\n`);
+  // No depth policy of our own: deep is fine until it is too deep for the
+  // stringifier to recurse, and that is a verdict rather than a RangeError.
+  test('nesting too deep to stringify is unstorable, not a throw', () => {
+    const nest = (depth: number) => {
+      const lines = Array.from(
+        { length: depth },
+        (_, i) => `${'  '.repeat(i)}n:`,
+      );
+      lines.push(`${'  '.repeat(depth)}leaf: 1`);
 
-    expect(parsed.valid).toBe('present-but-invalid');
-    expect(parsed.frontmatter).toEqual({});
+      return `---\n${lines.join('\n')}\n---\nbody\n`;
+    };
+
+    expect(parseFrontmatter(nest(200)).valid).toBe('nested');
+    expect(parseFrontmatter(nest(20_000)).valid).toBe('present-but-invalid');
   });
 });

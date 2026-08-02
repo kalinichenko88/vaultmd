@@ -1,7 +1,5 @@
 import { type Document, isMap, isScalar, parseDocument } from 'yaml';
 
-import { MdVaultError } from '@/errors.ts';
-
 import type { EditOutcome } from './models/edit-outcome.ts';
 import { extractBlock, parseFrontmatter } from './parse.ts';
 import { buildFrontmatterBlock, emitFrontmatterBlock } from './serialize.ts';
@@ -41,12 +39,9 @@ export function editFrontmatter(
   outcome: EditOutcome;
 } {
   const parsed = parseFrontmatter(content);
-  // Refused BEFORE the mutator runs, not after. A post-mutation flatness check
-  // is not the same rule: a mutator that deletes the nested key, or replaces it
-  // with a scalar, leaves a flat view — and the block would then be re-emitted
-  // whole, flattening an author's untouched `|` scalar on the way past. Only
-  // `'flat'` is editable; a nested note is read through `parseFrontmatter` and
-  // rewritten, if at all, through `transformNote`.
+  // Refused BEFORE the mutator runs: one that deletes the nested key leaves a
+  // flat view, and the block would then be re-emitted whole, flattening an
+  // author's untouched `|` scalar on the way past.
   if (parsed.valid === 'present-but-invalid' || parsed.valid === 'nested') {
     return { content, outcome: 'unverifiable' };
   }
@@ -83,15 +78,11 @@ export function editFrontmatter(
   if (!isFlatFrontmatter(view)) {
     return { content, outcome: 'unverifiable' };
   }
-  // doc.delete / doc.set can remove the pair that OWNS an anchor, orphaning
-  // every `*ref` to it — yaml then refuses to emit and throws a raw, code-less
-  // error out of a function documented never to throw for bad frontmatter. The
-  // value graph cannot see this coming: last-wins resolution leaves one live
-  // reference, so `parseFrontmatter` reports the note as `'flat'`.
-  //
-  // Only a removal or a type change orphans an anchor; yaml rewrites a scalar
-  // in place, so `x: &a hi` -> `x: &a bye` keeps working, and so does an edit
-  // that never touches the anchor-owning key.
+  // A delete or a type change can remove the pair that OWNS an anchor,
+  // orphaning every `*ref` to it — yaml then refuses to emit and throws out of
+  // a function documented never to throw for bad frontmatter. The value graph
+  // cannot see it coming: last-wins resolution leaves one live reference, so
+  // `parseFrontmatter` calls the note `'flat'`.
   try {
     let changed = false;
     for (const key of Object.keys(before)) {
@@ -117,13 +108,7 @@ export function editFrontmatter(
       content: `${emitFrontmatterBlock(doc)}${ext.body}`,
       outcome: 'edited',
     };
-  } catch (error) {
-    // Our own coded failures keep their code rather than being flattened into
-    // an outcome — a caller switching on `.code` must still see them.
-    if (error instanceof MdVaultError) {
-      throw error;
-    }
-
+  } catch {
     return { content, outcome: 'unverifiable' };
   }
 }

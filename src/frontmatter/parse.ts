@@ -68,10 +68,8 @@ export function parseFrontmatter(content: string): ParsedFrontmatter {
     return { frontmatter: {}, tags: [], body, valid: 'present-but-invalid' };
   }
   const frontmatter = parsed as Record<string, unknown>;
-  // Load-bearing, not tidiness: an anchor-built block can be CYCLIC, and
-  // projectRow stringifies whatever this returns without consulting `valid` —
-  // which threw a raw TypeError out of indexNote and aborted the whole
-  // reconcile sweep.
+  // projectRow stringifies whatever this returns without consulting `valid`, so
+  // a cyclic anchor-built block would throw out of indexNote and abort the sweep.
   if (!isStorableFrontmatter(frontmatter)) {
     return { frontmatter: {}, tags: [], body, valid: 'present-but-invalid' };
   }

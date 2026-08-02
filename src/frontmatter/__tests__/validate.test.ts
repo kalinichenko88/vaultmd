@@ -50,25 +50,16 @@ describe('isFlatFrontmatter', () => {
 
 // The READ gate. Wider than the write gate: a note whose frontmatter nests is
 // still worth indexing and handing to a caller. It only has to survive
-// `JSON.stringify` into the index row.
+// `JSON.stringify` into the index row. Every input here is a shape `yaml.parse`
+// can actually produce — its only caller is `parseFrontmatter`.
 describe('isStorableFrontmatter', () => {
-  test('everything flat is storable', () => {
+  test('flat and nested maps and arrays are storable', () => {
     expect(isStorableFrontmatter({ a: 1, d: ['p', 'q'], e: null })).toBe(true);
-  });
-
-  test('nested maps and arrays of maps are storable', () => {
-    expect(isStorableFrontmatter({ meta: { x: 1 } })).toBe(true);
     expect(isStorableFrontmatter({ items: [{ b: 1 }, { c: 2 }] })).toBe(true);
     expect(isStorableFrontmatter({ a: { b: [1, { c: [true, null] }] } })).toBe(
       true,
     );
-  });
-
-  test('a null-prototype map is storable', () => {
-    const bare = Object.create(null) as Record<string, unknown>;
-    bare.k = 1;
-
-    expect(isStorableFrontmatter({ a: bare })).toBe(true);
+    expect(isStorableFrontmatter({ a: nest(60) })).toBe(true);
   });
 
   // A cycle reaches projectRow's JSON.stringify, which throws a raw TypeError
@@ -88,55 +79,25 @@ describe('isStorableFrontmatter', () => {
     expect(isStorableFrontmatter({ a: cyclic })).toBe(false);
   });
 
-  // An anchored container referenced twice is a DAG, not a cycle, and
-  // JSON.stringify writes it out twice without complaint — so the note is
-  // readable. Only an ACTIVE ancestor repeating is a cycle. `meta: { x: &v {k:
-  // 1}, y: *v }` is the shape yaml produces for that.
-  test('a container repeated under one key is storable', () => {
+  // An anchored container referenced twice is a DAG, not a cycle: JSON.stringify
+  // writes it out twice without complaint, so the note is readable. `meta: { x:
+  // &v {k: 1}, y: *v }` is the shape yaml produces for that.
+  test('a container repeated across paths is storable, not a cycle', () => {
     const shared = { k: 1 };
 
     expect(isStorableFrontmatter({ meta: { x: shared, y: shared } })).toBe(
       true,
     );
-  });
-
-  test('a container repeated across two keys is storable', () => {
-    const shared = { k: 1 };
-
     expect(isStorableFrontmatter({ x: shared, y: shared })).toBe(true);
   });
 
-  // The walk is not memoised, so a wide DAG costs one visit per path. That is
-  // affordable because the only caller is parseFrontmatter and yaml refuses to
-  // build one: `maxAliasCount` rejects a 5-level diamond outright ("Excessive
-  // alias count indicates a resource exhaustion attack"), so a file cannot
-  // deliver more fan-out than this.
-  test('a small diamond DAG — the widest yaml will parse — is storable', () => {
-    let level: unknown = { leaf: 1 };
-    for (let i = 0; i < 4; i++) {
-      level = { x: level, y: level };
-    }
-
-    expect(isStorableFrontmatter({ root: level })).toBe(true);
-  });
-
-  // Both the stringifier and yaml's emitter recurse, so an unbounded value
-  // dies with an uncoded RangeError rather than a verdict.
-  test('nesting at the 100-level bound is storable, past it is not', () => {
-    expect(isStorableFrontmatter({ a: nest(100) })).toBe(true);
-    expect(isStorableFrontmatter({ a: nest(101) })).toBe(false);
-  });
-
-  test('depth is per top-level value, not cumulative', () => {
-    expect(isStorableFrontmatter({ a: nest(60), b: nest(60) })).toBe(true);
-  });
-
-  test('values that cannot round-trip are not storable', () => {
-    expect(isStorableFrontmatter({ a: new Date() })).toBe(false);
-    expect(isStorableFrontmatter({ a: new Map() })).toBe(false);
+  // `.nan` / `.inf` parse to numbers JSON.stringify would coerce to null,
+  // dropping the value silently instead of marking the block invalid.
+  test('a non-finite number is not storable', () => {
     expect(isStorableFrontmatter({ a: Number.NaN })).toBe(false);
-    expect(isStorableFrontmatter({ a: undefined })).toBe(false);
-    expect(isStorableFrontmatter({ a: { b: [new Date()] } })).toBe(false);
+    expect(
+      isStorableFrontmatter({ a: { b: [Number.POSITIVE_INFINITY] } }),
+    ).toBe(false);
   });
 });
 

@@ -89,11 +89,8 @@ export async function createVault(config: CreateVaultConfig): Promise<Vault> {
       await reconciler.rebuild();
     } else {
       db.close();
-      // Name which of the two triggers fired. They call for different actions:
-      // a stale schema version means the package was upgraded and any owning
-      // instance will repair the index on its next boot, while a fingerprint
-      // change means THIS instance's IndexConfig disagrees with whoever built
-      // the index, and booting an owner will not settle that.
+      // Name which trigger fired: a stale schema version any owning instance
+      // repairs on its next boot, a fingerprint mismatch it will not.
       const cause =
         storedVer === String(SCHEMA_VERSION)
           ? `index was built with a different IndexConfig (linkResolution / caseSensitive / ignore) than this instance asks for`
