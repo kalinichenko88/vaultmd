@@ -48,14 +48,7 @@ export function buildFrontmatterBlock(
     return '';
   }
 
-  // aliasDuplicateObjects: false — one array bound to two keys is ordinary JS,
-  // but the default emits it as an `&a1`/`*a1` anchor pair, and a note carrying
-  // an anchored container cannot be edited in place afterwards. Writing the
-  // value twice costs a few bytes and keeps every note editable. (doc.set on an
-  // existing document already duplicates, so only fresh blocks need this.)
-  return emitFrontmatterBlock(
-    new Document(frontmatter, { aliasDuplicateObjects: false }),
-  );
+  return emitFrontmatterBlock(new Document(frontmatter));
 }
 
 /**
@@ -78,9 +71,9 @@ export function buildFrontmatterBlock(
  *   any depth.
  * @returns A string of the form `---\n<yaml>\n---\n`, or `''` for an empty map.
  * @throws {@link MdVaultError} with code `FRONTMATTER_INVALID` when the input
- *   contains a `Date`, a class instance, a non-finite number, `undefined`, or
- *   nesting deeper than 100 levels (which includes a cyclic value) — none of
- *   which survive a parse round-trip as written.
+ *   contains a `Date`, a class instance, a non-finite number, `undefined`, a
+ *   container reference repeated within the map, or nesting deeper than 100
+ *   levels — none of which survive a parse round-trip as written.
  *
  * @example
  * ```ts

@@ -7,13 +7,14 @@ import { MdVaultError } from '@/errors.ts';
 // coded FRONTMATTER_INVALID.
 const MAX_DEPTH = 100;
 
-// One value, walked to the leaves. A repeated container reference is fine —
-// yaml duplicates it on write rather than emitting an anchor — so `cleared`
-// exists only to keep a wide graph from being re-walked exponentially, and a
-// cycle terminates on MAX_DEPTH rather than on a visited-set.
+// One value, walked to the leaves. `seen` carries every container already
+// entered on this map — a repeat is either a cycle or a YAML anchor reused
+// across keys, and both are refused (see the design spec: `editFrontmatter`
+// cannot round-trip an anchored container, and the JSON projection duplicates
+// the sharing anyway).
 function isRoundTrippable(
   value: unknown,
-  cleared: Set<object>,
+  seen: Set<object>,
   depth = 0,
 ): boolean {
   if (
@@ -30,58 +31,47 @@ function isRoundTrippable(
   if (typeof value !== 'object') {
     return false;
   }
-  // Checked before `cleared` so a cycle always terminates here.
-  if (depth >= MAX_DEPTH) {
+  if (seen.has(value) || depth >= MAX_DEPTH) {
     return false;
   }
-  if (cleared.has(value)) {
-    return true;
-  }
+  seen.add(value);
   // The prototype test is what keeps Date, Map, Set and class instances out
   // now that "is an object" no longer disqualifies a value by itself. Parsed
   // YAML maps carry Object.prototype.
   const proto = Object.getPrototypeOf(value);
-  const ok = Array.isArray(value)
-    ? value.every((item) => isRoundTrippable(item, cleared, depth + 1))
-    : (proto === Object.prototype || proto === null) &&
-      Object.values(value).every((item) =>
-        isRoundTrippable(item, cleared, depth + 1),
-      );
-  if (ok) {
-    cleared.add(value);
-  }
 
-  return ok;
+  return Array.isArray(value)
+    ? value.every((item) => isRoundTrippable(item, seen, depth + 1))
+    : (proto === Object.prototype || proto === null) &&
+        Object.values(value).every((item) =>
+          isRoundTrippable(item, seen, depth + 1),
+        );
 }
 
 // Offending top-level keys, in insertion order; empty means the map is valid.
 // A first-order diagnostic, not an exhaustive list — the walk short-circuits at
 // the first fault. The verdict is unaffected, so isValidFrontmatter is exact.
 export function invalidKeys(fm: Record<string, unknown>): string[] {
-  // Shared across the whole map, so a value reachable from several keys is
-  // walked once.
-  const cleared = new Set<object>();
+  // ONE set per map — a per-key set cannot see `{ x: o, y: o }`.
+  const seen = new Set<object>();
 
-  return Object.keys(fm).filter((key) => !isRoundTrippable(fm[key], cleared));
+  return Object.keys(fm).filter((key) => !isRoundTrippable(fm[key], seen));
 }
 
 /**
- * Return `true` when every value in `fm` survives a serialize/parse round-trip.
+ * Return `true` when every value in `fm` survives a serialize/parse round-trip
+ * and stays editable afterwards.
  *
  * Scalars (`string`, a finite `number`, `boolean`, `null`), plain maps and
  * arrays all qualify, nested up to 100 levels — note metadata never goes that
  * deep, and the bound keeps a pathological value from reaching the YAML
- * emitter, which would fail with an uncoded `RangeError` instead. A cyclic
- * value is rejected by the same bound.
- *
+ * emitter, which would fail with an uncoded `RangeError` instead.
  * Disqualified: `Date`s, `Map`/`Set` and other class instances, non-finite
- * numbers (`NaN`, `Infinity`), and `undefined` — none of which round-trip
- * through the YAML core schema.
- *
- * Binding one array or object to two keys is fine: it is written out twice
- * rather than as a YAML anchor, which is also how the index stores it. A note
- * whose *file* contains an anchored container is a separate matter — that one
- * cannot be edited in place, and {@link editFrontmatter} reports it.
+ * numbers (`NaN`, `Infinity`), `undefined` — none of which round-trip through
+ * the YAML core schema — and any container reference repeated within the map,
+ * whether that is a cycle or a YAML anchor reused across keys
+ * (`editFrontmatter` cannot rewrite one without either throwing or silently
+ * unrolling the alias).
  *
  * @param fm Frontmatter map to validate.
  * @returns `true` if every value round-trips; `false` otherwise.

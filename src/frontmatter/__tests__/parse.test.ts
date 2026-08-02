@@ -76,23 +76,19 @@ describe('parseFrontmatter — invalid blocks return nothing', () => {
     expect(parsed.body).toBe('body\n');
   });
 
-  // An anchored container reads back fine and belongs in the index — it is
-  // only *editing* such a note that cannot work, which editFrontmatter reports
-  // for itself rather than hiding the note's data from every reader.
-  test('a map anchor reused across keys parses and keeps its values', () => {
+  test('a map anchor reused across keys is present-but-invalid', () => {
     const parsed = parseFrontmatter('---\nx: &a\n  k: 1\ny: *a\n---\nbody\n');
 
-    expect(parsed.valid).toBe('valid');
-    expect(parsed.frontmatter).toEqual({ x: { k: 1 }, y: { k: 1 } });
+    expect(parsed.valid).toBe('present-but-invalid');
+    expect(parsed.frontmatter).toEqual({});
   });
 
-  test('a sequence anchor reused across keys parses and keeps its tags', () => {
-    const parsed = parseFrontmatter(
-      '---\ntags: &a [x, y]\naliases: *a\n---\nbody\n',
-    );
+  // Flat today, and editFrontmatter throws a raw Error on it. Now refused.
+  test('a sequence anchor reused across keys is present-but-invalid', () => {
+    const parsed = parseFrontmatter('---\nx: &a [1, 2]\ny: *a\n---\nbody\n');
 
-    expect(parsed.valid).toBe('valid');
-    expect(parsed.tags).toEqual(['x', 'y']);
+    expect(parsed.valid).toBe('present-but-invalid');
+    expect(parsed.frontmatter).toEqual({});
   });
 
   test('a scalar anchor reused across keys stays valid', () => {

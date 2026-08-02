@@ -45,36 +45,24 @@ describe('isValidFrontmatter', () => {
     expect(isValidFrontmatter({ a: { n: 1 }, b: { n: 1 } })).toBe(true);
   });
 
-  // Binding one container to two keys is ordinary JS — `fm.aliases = fm.tags`
-  // is the obvious way to write that edit — and it round-trips fine, because
-  // the value is written out twice rather than as a YAML anchor.
-  test('a map shared across two keys -> true', () => {
+  test('a map shared across two keys -> false', () => {
     const shared = { k: 1 };
 
-    expect(isValidFrontmatter({ x: shared, y: shared })).toBe(true);
+    expect(isValidFrontmatter({ x: shared, y: shared })).toBe(false);
   });
 
-  test('an array shared across two keys -> true', () => {
+  test('an array shared across two keys -> false', () => {
     const shared = [1, 2];
 
-    expect(isValidFrontmatter({ x: shared, y: shared })).toBe(true);
+    expect(isValidFrontmatter({ x: shared, y: shared })).toBe(false);
   });
 
-  test('a shared reference nested deeper -> true', () => {
+  test('a shared reference nested deeper -> false', () => {
     const shared = { k: 1 };
 
-    expect(isValidFrontmatter({ x: { deep: shared }, y: [shared] })).toBe(true);
-  });
-
-  // A wide DAG is walked once per distinct node, not once per path. Without
-  // that, 60 diamond levels is 2^60 visits and this test never returns.
-  test('a wide DAG validates without blowing up', () => {
-    let level: unknown = { leaf: 1 };
-    for (let i = 0; i < 60; i++) {
-      level = { a: level, b: level };
-    }
-
-    expect(isValidFrontmatter({ root: level })).toBe(true);
+    expect(isValidFrontmatter({ x: { deep: shared }, y: [shared] })).toBe(
+      false,
+    );
   });
 
   test('a cycle -> false', () => {
@@ -164,19 +152,31 @@ describe('invalidKeys', () => {
     expect(invalidKeys({ a: { b: { c: new Date() } } })).toEqual(['a']);
   });
 
-  test('a shared reference is not a fault and names nothing', () => {
+  test('a shared reference names the key where the repeat was found', () => {
     const shared = { k: 1 };
 
-    expect(invalidKeys({ x: shared, y: shared })).toEqual([]);
+    expect(invalidKeys({ x: shared, y: shared })).toEqual(['y']);
   });
 
-  // A key sharing a reference with a rejected one is judged on its own merits,
-  // in either order — the verdict does not depend on which key is walked first.
-  test('a fault does not spread to keys sharing a clean reference', () => {
+  // The `seen` set MUST be hoisted out of the filter callback. With a fresh
+  // set per key, a reference shared BETWEEN two top-level keys is invisible
+  // and this returns [] — the whole shared-reference rule silently does
+  // nothing. This test is that regression guard.
+  test('a shared reference is detected across top-level keys at all', () => {
+    const shared = [1, 2];
+
+    expect(invalidKeys({ x: shared, y: shared }).length).toBeGreaterThan(0);
+  });
+
+  // Documented first-order-diagnostic contract: `every()` short-circuits, so a
+  // fault found early stops the walk before a later shared reference is
+  // recorded. The VERDICT is still correct — only the key list is partial.
+  test('short-circuit can leave the list partial (documented contract)', () => {
     const shared = { k: 1 };
+
     expect(invalidKeys({ x: [new Date(), shared], y: shared })).toEqual(['x']);
     const s2 = { k: 1 };
-    expect(invalidKeys({ x: [s2, new Date()], y: s2 })).toEqual(['x']);
+    expect(invalidKeys({ x: [s2, new Date()], y: s2 })).toEqual(['x', 'y']);
   });
 
   test('empty result for a valid map', () => {
