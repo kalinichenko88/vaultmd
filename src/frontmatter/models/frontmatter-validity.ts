@@ -8,8 +8,9 @@
  *   `NoteHit.frontmatter`; `editFrontmatter` refuses the note, because
  *   rewriting one key would mean re-emitting a nested block it did not author.
  * - `'present-but-invalid'` — a block exists but is unparseable YAML, has a
- *   non-map root, or holds a value that cannot be stored: a cycle, nesting past
- *   100 levels, a non-finite number, or a `Date`. Its keys are NOT reported —
+ *   non-map root, or holds a value that cannot be projected into the index: a
+ *   cycle (which YAML anchors can build), a non-finite number, or nesting deep
+ *   enough to overflow the serializer. Its keys are NOT reported —
  *   `parseFrontmatter` returns an empty map for it.
  * - `'none'` — no frontmatter block found; the whole file is body content.
  */

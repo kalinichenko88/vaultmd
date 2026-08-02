@@ -35,8 +35,8 @@ export function extractBlock(content: string): Block | null {
  * A nested block is **read**: its keys come back and are indexed, and `valid`
  * is `'nested'` rather than `'flat'` to say that {@link editFrontmatter} will
  * refuse it. Only a block that cannot be stored at all — unparseable, a
- * non-map root, or holding a cycle, over-deep nesting, a non-finite number or
- * a `Date` — comes back empty.
+ * non-map root, or holding a cycle, a non-finite number, or nesting deep
+ * enough to overflow the serializer — comes back empty.
  *
  * @param content Raw UTF-8 content of a markdown file.
  * @returns A {@link ParsedFrontmatter} with the parsed key-value map, tag
