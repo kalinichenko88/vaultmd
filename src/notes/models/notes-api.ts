@@ -9,8 +9,8 @@ import type { UpdateOp } from './update-op.ts';
  * vault-relative path; the six mutating methods (`createNote`, `updateNote`,
  * `editFrontmatter`, `transformNote`, `deleteNote`, `moveNote`) run inside the
  * per-file lock so the `.md` file and its index row never drift (`moveNote`
- * holds both ends' locks). `readNote` and `exists` are consistent reads and do
- * not acquire the lock.
+ * holds both ends' locks). `readNote`, `readSection`, and `exists` are
+ * consistent reads and do not acquire the lock.
  */
 export type NotesApi = {
   /**

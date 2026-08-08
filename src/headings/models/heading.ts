@@ -7,7 +7,7 @@ export type Heading = {
   text: string;
   /** ATX depth, 1 to 6. */
   level: number;
-  /** Offset of the heading line's first `#`. */
+  /** Offset of the start of the heading line, before any 0–3 spaces of indent. */
   start: number;
   /**
    * Offset of the section body's first character — the start of the first

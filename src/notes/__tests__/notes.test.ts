@@ -983,6 +983,20 @@ describe('setSection stability', () => {
     expect(events).toEqual([]);
   });
 
+  test('read then write is byte-identical on a CRLF file with a spaced section and a subsection', async () => {
+    const original =
+      '## Notes\r\n\r\nfirst\r\n\r\n### Sub\r\nmore\r\n\r\n## Links\r\n- x\r\n';
+    await writeFile(join(vaultDir, 'note.md'), original);
+    const before = await stat(join(vaultDir, 'note.md'));
+    const section = await notes.readSection('note.md', 'Notes');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: section },
+    });
+    const after = await stat(join(vaultDir, 'note.md'));
+    expect(await read('note.md')).toBe(original);
+    expect(after.mtimeMs).toBe(before.mtimeMs);
+  });
+
   test('read then write survives a section that ends inside an unclosed fence', async () => {
     const original = '## Notes\n```\ncode\n## Links\n';
     await writeFile(join(vaultDir, 'note.md'), original);

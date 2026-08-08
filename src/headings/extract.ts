@@ -53,8 +53,16 @@ export function extractHeadings(content: string): Heading[] {
 
   return found.map((heading, i) => {
     // The section ends at the next heading that is same-or-shallower; anything
-    // deeper is a subsection and stays inside.
-    const closer = found.slice(i + 1).find((x) => x.level <= heading.level);
+    // deeper is a subsection and stays inside. A plain indexed loop avoids
+    // allocating a fresh sliced array per heading — deriveTitle runs this on
+    // every note of every index rebuild.
+    let closer: Found | undefined;
+    for (let j = i + 1; j < found.length; j++) {
+      if (found[j].level <= heading.level) {
+        closer = found[j];
+        break;
+      }
+    }
     const stop = closer ? closer.index : lines.length;
     const filled = lines
       .slice(heading.index + 1, stop)

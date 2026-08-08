@@ -418,7 +418,7 @@ await vault.notes.transformNote('daily/2026-08-08.md', (current) => {
     return null;
   }
 
-  return `${current.slice(0, at + notes.bodyStart)}- one more\n${current.slice(at + notes.end)}`;
+  return `${current.slice(0, at + notes.end)}- one more\n${current.slice(at + notes.end)}`;
 });
 ```
 

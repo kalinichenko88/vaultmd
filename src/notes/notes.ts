@@ -310,6 +310,15 @@ export function createNotes(deps: NotesDeps): NotesApi {
         // blank edge line migrates outside the span and grows the file on every
         // repeat of an identical call.
         const lead = next.replace(/^(?:[^\S\r\n]*\r?\n)+/, '');
+        // Trailing blank lines collapse to the newline that already terminates
+        // the last non-blank line — CRLF stays CRLF, LF stays LF. A `\r` is not
+        // a byte that can migrate outside the span, so there is nothing to
+        // normalise there; only the run of blank LINES after it is boundary
+        // material.
+        const trimmed = lead.replace(
+          /(\r?\n)(?:[^\S\r\n]*\r?\n)*[^\S\r\n]*$/,
+          '$1',
+        );
         // Terminate the replacement only when something follows it; at EOF a
         // file with no trailing newline must not grow one.
         const text =
@@ -317,7 +326,9 @@ export function createNotes(deps: NotesDeps): NotesApi {
             ? ''
             : tail === ''
               ? lead
-              : `${lead.replace(/(?:[^\S\r\n]*\r?\n)+[^\S\r\n]*$/, '')}\n`;
+              : trimmed.endsWith('\n')
+                ? trimmed
+                : `${trimmed}\n`;
         // A heading that is the file's last line has no newline of its own.
         const sep = text !== '' && !head.endsWith('\n') ? '\n' : '';
 
