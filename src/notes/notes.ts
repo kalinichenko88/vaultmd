@@ -158,7 +158,7 @@ export function createNotes(deps: NotesDeps): NotesApi {
   function assertPayloadFits(
     payload: string,
     target: Heading,
-    body: string,
+    atEof: boolean,
     display: string,
   ): void {
     // extractHeadings is fence-aware, so a heading hidden inside a CLOSED fence
@@ -174,7 +174,7 @@ export function createNotes(deps: NotesDeps): NotesApi {
     // the section already ends at EOF there is nothing to swallow — and
     // skipping the check there is what keeps read → write byte-identical for a
     // section that itself ends inside an unclosed fence.
-    if (target.end === body.length) {
+    if (atEof) {
       return;
     }
     const tracker = createFenceTracker();
@@ -300,15 +300,26 @@ export function createNotes(deps: NotesDeps): NotesApi {
         // next call reads as empty and inserts BEFORE — growing the file on
         // every write, while readSection keeps answering ''.
         const next = op.setSection.body.trim() === '' ? '' : op.setSection.body;
-        assertPayloadFits(next, target, body, display);
         const head = body.slice(0, target.bodyStart);
         const tail = body.slice(target.end);
-        // A heading that is the file's last line has no newline of its own.
-        const sep = next !== '' && !head.endsWith('\n') ? '\n' : '';
+        assertPayloadFits(next, target, tail === '', display);
+        // Blank lines at either edge are boundary material, not payload text:
+        // the span is LINE-shaped, so they are normalised as LINES (a horizontal-
+        // whitespace-only match, agreeing with extractHeadings' `.trim()` blank
+        // rule) rather than as lone `\n` characters — otherwise a payload with a
+        // blank edge line migrates outside the span and grows the file on every
+        // repeat of an identical call.
+        const lead = next.replace(/^(?:[^\S\r\n]*\r?\n)+/, '');
         // Terminate the replacement only when something follows it; at EOF a
         // file with no trailing newline must not grow one.
         const text =
-          next === '' || tail === '' ? next : next.replace(/\n*$/, '\n');
+          lead === ''
+            ? ''
+            : tail === ''
+              ? lead
+              : `${lead.replace(/(?:[^\S\r\n]*\r?\n)+[^\S\r\n]*$/, '')}\n`;
+        // A heading that is the file's last line has no newline of its own.
+        const sep = text !== '' && !head.endsWith('\n') ? '\n' : '';
 
         return `${prefix}${head}${sep}${text}${tail}`;
       }

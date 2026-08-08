@@ -1006,4 +1006,53 @@ describe('setSection stability', () => {
     ]);
     expect(query.searchText('zygomorphic')).toEqual([]);
   });
+
+  test('a leading-blank payload is stripped as a line and does not grow the file on repeat', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## Notes\nold\n## Links\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: '\n\nx' },
+    });
+    const once = await read('note.md');
+    expect(once).toBe('## Notes\nx\n## Links\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: '\n\nx' },
+    });
+    expect(await read('note.md')).toBe(once);
+  });
+
+  test('a CRLF trailing-blank payload does not grow the file on repeat', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## Notes\nold\n## Links\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: 'x\r\n\r\n' },
+    });
+    const once = await read('note.md');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: 'x\r\n\r\n' },
+    });
+    expect(await read('note.md')).toBe(once);
+  });
+
+  test('a whitespace-then-newline trailing-blank payload does not grow the file on repeat', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## Notes\nold\n## Links\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: 'x\n \n' },
+    });
+    const once = await read('note.md');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: 'x\n \n' },
+    });
+    expect(await read('note.md')).toBe(once);
+  });
+
+  test('a leading-blank payload on a section that runs to EOF does not grow the file on repeat', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## Notes\nold\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: '\n\nx' },
+    });
+    const once = await read('note.md');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: '\n\nx' },
+    });
+    expect(await read('note.md')).toBe(once);
+  });
 });
