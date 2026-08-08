@@ -1,15 +1,12 @@
+import { createFenceTracker } from '@/headings/index.ts';
+
 import type { ExtractedLinks } from './models/extracted-links.ts';
 
 function stripFencedCode(content: string): string {
-  const lines = content.split('\n');
+  const tracker = createFenceTracker();
   const out: string[] = [];
-  let inFence = false;
-  for (const line of lines) {
-    if (/^[ \t]*(```|~~~)/.test(line)) {
-      inFence = !inFence;
-      continue;
-    }
-    if (!inFence) {
+  for (const line of content.split('\n')) {
+    if (!tracker.inFence(line)) {
       out.push(line);
     }
   }
