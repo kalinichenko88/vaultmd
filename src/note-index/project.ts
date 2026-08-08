@@ -1,6 +1,7 @@
 import { basename } from 'node:path';
 
 import { deriveTags, parseFrontmatter } from '@/frontmatter/index.ts';
+import { extractHeadings } from '@/headings/index.ts';
 import { type StoredLink, storedLinksFor } from '@/links/index.ts';
 import type { VaultIo } from '@/vault-io/index.ts';
 
@@ -16,11 +17,11 @@ export function deriveTitle(
     return fmTitle;
   }
 
-  for (const line of body.split('\n')) {
-    const match = /^#\s+(.+?)\s*$/.exec(line);
-    if (match) {
-      return match[1];
-    }
+  // One ATX grammar for the whole package: fence-aware, 0-3 spaces of indent,
+  // closing hashes stripped. An empty heading is not a title.
+  const h1 = extractHeadings(body).find((h) => h.level === 1 && h.text !== '');
+  if (h1) {
+    return h1.text;
   }
 
   return basename(rel).replace(/\.md$/i, '');
