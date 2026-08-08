@@ -55,6 +55,14 @@ export type UpdateOp =
        * Does NOT create a missing note — like `editByMatch` it needs something
        * to match, so a missing file throws `NO_MATCH`.
        *
+       * The payload itself is trimmed at its edges to match: blank lines at its
+       * head are stripped, and blank lines at its tail are normalised to a
+       * single newline when something follows the section (at the end of the
+       * file the tail is left verbatim, so a file without a trailing newline
+       * does not gain one). Those edge bytes would otherwise fall outside the
+       * section's span and be re-added on every repeated write. The payload's
+       * interior is untouched.
+       *
        * The payload may not restructure the document around it: a heading of
        * the same or a shallower level than the target, or a code fence left
        * unclosed while a heading still follows the section, both throw
