@@ -710,3 +710,76 @@ describe('createNote — nested frontmatter', () => {
     expect((caught as MdVaultError).code).toBe('FRONTMATTER_INVALID');
   });
 });
+
+describe('readSection', () => {
+  test('returns the section body, subsections included, edges trimmed', async () => {
+    await writeFile(
+      join(vaultDir, 'note.md'),
+      '# Day\n\n## Notes\n\nfirst\n\n### Sub\nmore\n\n## Links\n- x\n',
+    );
+    expect(await notes.readSection('note.md', 'Notes')).toBe(
+      'first\n\n### Sub\nmore\n',
+    );
+  });
+
+  test('an empty section reads as the empty string', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## Notes\n\n## Links\n');
+    expect(await notes.readSection('note.md', 'Notes')).toBe('');
+  });
+
+  test('missing file → NOT_FOUND', async () => {
+    let err: unknown;
+    try {
+      await notes.readSection('ghost.md', 'Notes');
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(MdVaultError);
+    expect((err as MdVaultError).code).toBe('NOT_FOUND');
+  });
+
+  test('no such heading → NO_MATCH', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## Notes\nbody\n');
+    let err: unknown;
+    try {
+      await notes.readSection('note.md', 'Nope');
+    } catch (e) {
+      err = e;
+    }
+    expect((err as MdVaultError).code).toBe('NO_MATCH');
+  });
+
+  test('two headings with the same text → AMBIGUOUS_MATCH', async () => {
+    await writeFile(
+      join(vaultDir, 'note.md'),
+      '# Daily\n## Notes\na\n# Weekly\n## Notes\nb\n',
+    );
+    let err: unknown;
+    try {
+      await notes.readSection('note.md', 'Notes');
+    } catch (e) {
+      err = e;
+    }
+    expect((err as MdVaultError).code).toBe('AMBIGUOUS_MATCH');
+  });
+
+  test('a hash comment inside closed frontmatter is not a heading', async () => {
+    await writeFile(
+      join(vaultDir, 'note.md'),
+      '---\n# just a yaml comment\ntitle: T\n---\n## Notes\nbody\n',
+    );
+    let err: unknown;
+    try {
+      await notes.readSection('note.md', 'just a yaml comment');
+    } catch (e) {
+      err = e;
+    }
+    expect((err as MdVaultError).code).toBe('NO_MATCH');
+    expect(await notes.readSection('note.md', 'Notes')).toBe('body\n');
+  });
+
+  test('an unterminated --- is not frontmatter, so its headings are addressable', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '---\n# Notes\nsecret: yes\n');
+    expect(await notes.readSection('note.md', 'Notes')).toBe('secret: yes\n');
+  });
+});

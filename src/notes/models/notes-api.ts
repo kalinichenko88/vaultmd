@@ -25,6 +25,30 @@ export type NotesApi = {
     opts?: { withLinks?: boolean },
   ): Promise<ReadNoteResult>;
   /**
+   * Read the body of the section opened by a heading — everything after the
+   * heading line up to the next heading of the same or a shallower level, or
+   * the end of the file. Subsections are included; blank lines directly after
+   * the heading and directly before the next one are not, so the result can be
+   * written straight back with `updateNote({ setSection })` without disturbing
+   * the file's spacing.
+   *
+   * The heading is matched by exact, case-sensitive text against a CLOSED
+   * frontmatter block's body; an unterminated `---` is not frontmatter and its
+   * headings are addressable like any other content.
+   *
+   * This is a plain read and takes no lock. Pairing it with `setSection` is
+   * therefore last-writer-wins across the two calls — use `transformNote` with
+   * `extractHeadings` when a concurrent writer must not be lost.
+   *
+   * @param path Vault-relative path to the `.md` file.
+   * @param heading Exact heading text, without the leading `#` characters.
+   * @returns The section body, verbatim, or `''` when the section is empty.
+   * @throws {@link MdVaultError} `NOT_FOUND` if the file does not exist,
+   * `NO_MATCH` if no heading has that text, or `AMBIGUOUS_MATCH` if more than
+   * one does — drop to {@link extractHeadings} to disambiguate.
+   */
+  readSection(path: string, heading: string): Promise<string>;
+  /**
    * Whether a note exists at `path` — the non-throwing probe that turns the
    * create-or-update dance into a plain branch instead of a `try`/`catch` on
    * `ALREADY_EXISTS`. Checked against the READ allowlist.

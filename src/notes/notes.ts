@@ -9,6 +9,7 @@ import {
   parseFrontmatter,
 } from '@/frontmatter/index.ts';
 import { exclusiveCreate, statSig } from '@/fs-atomic/index.ts';
+import { extractHeadings, type Heading } from '@/headings/index.ts';
 import {
   type CommitEvent,
   type CrossLock,
@@ -61,6 +62,21 @@ export function createNotes(deps: NotesDeps): NotesApi {
     return result;
   }
 
+  async function readSection(path: string, heading: string): Promise<string> {
+    const read = await vaultIo.readVaultFile(path);
+    if (!read) {
+      throw new MdVaultError('NOT_FOUND', `note not found: ${path}`);
+    }
+    // Match against the body only, so a `#` comment inside a CLOSED frontmatter
+    // block cannot be addressed. An unterminated `---` is not frontmatter at
+    // all — parseFrontmatter returns the whole file as body — and stays
+    // addressable, exactly as it does for setBody/append/prepend.
+    const { body } = parseFrontmatter(read.content);
+    const target = locateSection(body, heading, vaultIo.toVaultRelative(path));
+
+    return body.slice(target.bodyStart, target.end);
+  }
+
   async function exists(path: string): Promise<boolean> {
     // resolveVaultPath keeps the NOT_MARKDOWN / ALLOWLIST_VIOLATION contract;
     // any stat failure just means "no note here" and must not escape as a raw
@@ -111,6 +127,28 @@ export function createNotes(deps: NotesDeps): NotesApi {
     }
 
     return res.content;
+  }
+
+  function locateSection(
+    body: string,
+    heading: string,
+    display: string,
+  ): Heading {
+    const hits = extractHeadings(body).filter((h) => h.text === heading);
+    if (hits.length === 0) {
+      throw new MdVaultError(
+        'NO_MATCH',
+        `no heading "${heading}" in ${display}`,
+      );
+    }
+    if (hits.length > 1) {
+      throw new MdVaultError(
+        'AMBIGUOUS_MATCH',
+        `ambiguous heading "${heading}" (${hits.length} matches) in ${display}`,
+      );
+    }
+
+    return hits[0];
   }
 
   async function createNote(
@@ -307,6 +345,7 @@ export function createNotes(deps: NotesDeps): NotesApi {
 
   return {
     readNote,
+    readSection,
     exists,
     createNote,
     updateNote,
