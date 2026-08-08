@@ -3,12 +3,17 @@ type FenceTracker = {
   isOpen(): boolean;
 };
 
-const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+const FENCE = /^[ \t]*(`{3,}|~{3,})(.*)$/;
 
 /**
  * Create a stateful scanner for CommonMark fenced code blocks
  * ({@link https://spec.commonmark.org/0.31.2/#fenced-code-blocks | §4.5}), fed
  * one line at a time in document order.
+ *
+ * Any amount of leading whitespace (spaces or tabs) can precede a fence marker.
+ * This deviates from CommonMark's 0–3 space rule because this scanner has no
+ * indented-code-block rule; erring toward "still a fence" hides content rather
+ * than leaking it into a write path.
  *
  * A closer must use the SAME marker character as its opener and be at least as
  * long; anything else is ordinary content. That is what separates this from a

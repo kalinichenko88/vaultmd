@@ -59,4 +59,15 @@ describe('extractLinks', () => {
     const md = ['````', '```', '[[Hidden]]', '````', '[[Shown]]'].join('\n');
     expect(extractLinks(md).wikilinks).toEqual(['Shown']);
   });
+
+  test('a fenced block indented 4+ spaces hides its links', () => {
+    const md = [
+      '1. Item',
+      '    ```',
+      '    [[Hidden]]',
+      '    ```',
+      '[[Shown]]',
+    ].join('\n');
+    expect(extractLinks(md).wikilinks).toEqual(['Shown']);
+  });
 });

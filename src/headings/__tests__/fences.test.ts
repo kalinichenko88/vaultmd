@@ -44,13 +44,10 @@ describe('createFenceTracker', () => {
     expect(outside('a\n```\nb\nc')).toEqual(['a']);
   });
 
-  test('0-3 spaces of indent still opens a fence, 4 does not', () => {
+  test('any amount of leading whitespace opens a fence', () => {
     expect(outside('   ```\nhidden\n   ```\nafter')).toEqual(['after']);
-    expect(outside('    ```\nplain\n    ```')).toEqual([
-      '    ```',
-      'plain',
-      '    ```',
-    ]);
+    expect(outside('    ```\nhidden\n    ```\nafter')).toEqual(['after']);
+    expect(outside('\t```\nhidden\n\t```\nafter')).toEqual(['after']);
   });
 
   test('a backtick opener whose info string holds a backtick is not an opener', () => {
