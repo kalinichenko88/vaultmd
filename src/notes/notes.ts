@@ -9,7 +9,11 @@ import {
   parseFrontmatter,
 } from '@/frontmatter/index.ts';
 import { exclusiveCreate, statSig } from '@/fs-atomic/index.ts';
-import { extractHeadings, type Heading } from '@/headings/index.ts';
+import {
+  createFenceTracker,
+  extractHeadings,
+  type Heading,
+} from '@/headings/index.ts';
 import {
   type CommitEvent,
   type CrossLock,
@@ -151,6 +155,40 @@ export function createNotes(deps: NotesDeps): NotesApi {
     return hits[0];
   }
 
+  function assertPayloadFits(
+    payload: string,
+    target: Heading,
+    body: string,
+    display: string,
+  ): void {
+    // extractHeadings is fence-aware, so a heading hidden inside a CLOSED fence
+    // is not a heading here — and stays hidden once written.
+    const inner = extractHeadings(payload).find((h) => h.level <= target.level);
+    if (inner) {
+      throw new MdVaultError(
+        'VALIDATION_ERROR',
+        `setSection body has a level-${inner.level} heading "${inner.text}", which would end the target section in ${display}`,
+      );
+    }
+    // An unclosed fence runs to EOF and would swallow every later heading. When
+    // the section already ends at EOF there is nothing to swallow — and
+    // skipping the check there is what keeps read → write byte-identical for a
+    // section that itself ends inside an unclosed fence.
+    if (target.end === body.length) {
+      return;
+    }
+    const tracker = createFenceTracker();
+    for (const line of payload.split('\n')) {
+      tracker.inFence(line);
+    }
+    if (tracker.isOpen()) {
+      throw new MdVaultError(
+        'VALIDATION_ERROR',
+        `setSection body leaves a code fence unclosed in ${display}`,
+      );
+    }
+  }
+
   async function createNote(
     path: string,
     input: { frontmatter?: Record<string, unknown>; body: string },
@@ -245,6 +283,34 @@ export function createNotes(deps: NotesDeps): NotesApi {
       }
       if ('setBody' in op) {
         return `${prefix}${fenceNl}${op.setBody}`;
+      }
+      if ('setSection' in op) {
+        // No fenceNl guard needed here: a frontmatter block with no trailing
+        // newline parses to an empty body, an empty body has no headings, and
+        // that is NO_MATCH below before anything is written.
+        if (body === null) {
+          throw new MdVaultError(
+            'NO_MATCH',
+            `no section in missing file: ${display}`,
+          );
+        }
+        const target = locateSection(body, op.setSection.heading, display);
+        // A whitespace-only payload is the EMPTY payload: it is non-empty as a
+        // string but blank as a line, so writing it would leave a section the
+        // next call reads as empty and inserts BEFORE — growing the file on
+        // every write, while readSection keeps answering ''.
+        const next = op.setSection.body.trim() === '' ? '' : op.setSection.body;
+        assertPayloadFits(next, target, body, display);
+        const head = body.slice(0, target.bodyStart);
+        const tail = body.slice(target.end);
+        // A heading that is the file's last line has no newline of its own.
+        const sep = next !== '' && !head.endsWith('\n') ? '\n' : '';
+        // Terminate the replacement only when something follows it; at EOF a
+        // file with no trailing newline must not grow one.
+        const text =
+          next === '' || tail === '' ? next : next.replace(/\n*$/, '\n');
+
+        return `${prefix}${head}${sep}${text}${tail}`;
       }
       const { old, new: replacement } = op.editByMatch;
       if (body === null) {

@@ -71,10 +71,12 @@ export type NotesApi = {
   /**
    * Mutate a note's body, leaving any frontmatter block verbatim: `append` and
    * `prepend` add text at either end (both create the note when it is absent),
-   * `setBody` replaces the body wholesale, and `editByMatch` replaces a single
-   * unique substring.
+   * `setBody` replaces the body wholesale, `editByMatch` replaces a single
+   * unique substring, and `setSection` replaces the body under one heading.
    * @throws {@link MdVaultError} `NO_MATCH` / `AMBIGUOUS_MATCH` for
-   * `editByMatch`, or `REFUSE_CREATE` when `setBody` targets a missing note.
+   * `editByMatch` and `setSection`, `REFUSE_CREATE` when `setBody` targets a
+   * missing note, or `VALIDATION_ERROR` when a `setSection` body would
+   * restructure the document outside its own section.
    */
   updateNote(path: string, op: UpdateOp): Promise<void>;
   /**

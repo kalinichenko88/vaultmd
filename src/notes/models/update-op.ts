@@ -42,4 +42,29 @@ export type UpdateOp =
        * {@link NotesApi.createNote} for that.
        */
       setBody: string;
+    }
+  | {
+      /**
+       * Replace the body of the section opened by a heading, leaving the
+       * heading line itself untouched. The replaced span runs from the first
+       * non-blank line after the heading to the last non-blank line before the
+       * next heading of the same or a shallower level, so blank lines at either
+       * edge are preserved and none are invented. An empty `body` empties the
+       * section; a whitespace-only `body` is treated as empty.
+       *
+       * Does NOT create a missing note — like `editByMatch` it needs something
+       * to match, so a missing file throws `NO_MATCH`.
+       *
+       * The payload may not restructure the document around it: a heading of
+       * the same or a shallower level than the target, or a code fence left
+       * unclosed while a heading still follows the section, both throw
+       * `VALIDATION_ERROR`. Use {@link NotesApi.transformNote} for edits that
+       * intentionally do either.
+       */
+      setSection: {
+        /** Exact, case-sensitive heading text, without the leading `#`s. */
+        heading: string;
+        /** Replacement text for the section body. */
+        body: string;
+      };
     };
