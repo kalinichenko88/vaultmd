@@ -170,16 +170,9 @@ export function createNotes(deps: NotesDeps): NotesApi {
 
   /** The heading texts that appear more than once — i.e. are unaddressable. */
   function duplicateHeadings(md: string): Set<string> {
-    const seen = new Set<string>();
-    const duplicated = new Set<string>();
-    for (const { text } of extractHeadings(md)) {
-      if (seen.has(text)) {
-        duplicated.add(text);
-      }
-      seen.add(text);
-    }
+    const texts = extractHeadings(md).map((h) => h.text);
 
-    return duplicated;
+    return new Set(texts.filter((t, i) => texts.indexOf(t) !== i));
   }
 
   /**
@@ -212,12 +205,12 @@ export function createNotes(deps: NotesDeps): NotesApi {
 
   function assertPayloadFits(
     payload: string,
-    target: Heading,
+    level: number,
     display: string,
   ): void {
     // extractHeadings is fence-aware, so a heading hidden inside a CLOSED fence
     // is not a heading here — and stays hidden once written.
-    const inner = extractHeadings(payload).find((h) => h.level <= target.level);
+    const inner = extractHeadings(payload).find((h) => h.level <= level);
     if (inner) {
       throw new MdVaultError(
         'VALIDATION_ERROR',
@@ -254,7 +247,7 @@ export function createNotes(deps: NotesDeps): NotesApi {
     // call reads as empty and inserts BEFORE — growing the file on every write,
     // while readSection keeps answering ''.
     const next = op.body.trim() === '' ? '' : op.body;
-    assertPayloadFits(next, target, display);
+    assertPayloadFits(next, target.level, display);
     // Emptying a section merges the blank run under the heading with the one
     // before the next heading; keeping both would widen the gap on every clear.
     const lineBreak = body.indexOf('\n', target.start);
@@ -275,10 +268,11 @@ export function createNotes(deps: NotesDeps): NotesApi {
       '$1',
     );
     // Match the terminator the replaced span itself carried, so a file keeps
-    // its trailing newline — or its absence — wherever the section sits.
-    const spanTerminated = body
-      .slice(target.bodyStart, target.end)
-      .endsWith('\n');
+    // its trailing newline — or its absence — wherever the section sits. The
+    // emptiness check is load-bearing: for an empty span the preceding byte is
+    // the heading's own newline, which must not count as the span's.
+    const spanTerminated =
+      target.end > target.bodyStart && body[target.end - 1] === '\n';
     const text =
       lead === ''
         ? ''
@@ -292,13 +286,14 @@ export function createNotes(deps: NotesDeps): NotesApi {
     // this stops it colliding with a heading that already exists, which would
     // leave the caller locked out of its own section with AMBIGUOUS_MATCH.
     const before = duplicateHeadings(body);
-    for (const collision of duplicateHeadings(result)) {
-      if (!before.has(collision)) {
-        throw new MdVaultError(
-          'VALIDATION_ERROR',
-          `setSection body would make the heading "${collision}" ambiguous in ${display}`,
-        );
-      }
+    const collision = [...duplicateHeadings(result)].find(
+      (text) => !before.has(text),
+    );
+    if (collision !== undefined) {
+      throw new MdVaultError(
+        'VALIDATION_ERROR',
+        `setSection body would make the heading "${collision}" ambiguous in ${display}`,
+      );
     }
 
     return result;

@@ -3,7 +3,7 @@ import type { Heading } from './models/heading.ts';
 
 const ATX = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/;
 
-type Line = { start: number; text: string; hasNewline: boolean };
+type Line = { start: number; text: string };
 type Found = { index: number; level: number; text: string; start: number };
 
 /**
@@ -67,33 +67,33 @@ export function extractHeadings(content: string): Heading[] {
     const filled = lines
       .slice(heading.index + 1, stop)
       .filter((line) => line.text.trim() !== '');
-    if (filled.length === 0) {
+    const { text, level, start } = heading;
+    const last = filled[filled.length - 1];
+    if (last === undefined) {
       // Empty section: collapse to the line after the heading so an insert
       // lands directly under it and any separator blank line survives.
       const at = lines[heading.index + 1]?.start ?? content.length;
 
-      return { ...toHeading(heading), bodyStart: at, end: at };
+      return { text, level, start, bodyStart: at, end: at };
     }
-    const first = filled[0];
-    const last = filled[filled.length - 1];
 
     return {
-      ...toHeading(heading),
-      bodyStart: first.start,
-      end: last.start + last.text.length + (last.hasNewline ? 1 : 0),
+      text,
+      level,
+      start,
+      bodyStart: filled[0].start,
+      // One past the last non-blank line, including its newline — Math.min
+      // caps that at EOF, where the line has none.
+      end: Math.min(last.start + last.text.length + 1, content.length),
     };
   });
-}
-
-function toHeading(found: Found): Omit<Heading, 'bodyStart' | 'end'> {
-  return { text: found.text, level: found.level, start: found.start };
 }
 
 function splitLines(content: string): Line[] {
   const out: Line[] = [];
   let start = 0;
   for (const text of content.split('\n')) {
-    out.push({ start, text, hasNewline: start + text.length < content.length });
+    out.push({ start, text });
     start += text.length + 1;
   }
 
