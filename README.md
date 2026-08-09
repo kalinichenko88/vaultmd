@@ -153,6 +153,8 @@ The only public entry point is `createVault`. Everything below hangs off the
 readNote(path, opts?: { withLinks?: boolean }): Promise<ReadNoteResult>
 
 // Read the body under one heading — subsections in, edge blank lines out.
+// A section running into an unterminated code fence has no defined end and is
+// refused (VALIDATION_ERROR) rather than handed back as "the rest of the file".
 readSection(path, heading: string): Promise<string>
 
 // Is there a note here? Non-throwing probe, so create-or-update is a plain branch.

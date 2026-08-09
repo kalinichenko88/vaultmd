@@ -24,6 +24,26 @@ const FENCE = /^[ \t]*(`{3,}|~{3,})(.*)$/;
  * delimiter or lies inside a fence, and whose `isOpen` reports whether a fence
  * is still unterminated after every line fed so far.
  */
+/**
+ * Whether `content` leaves a code fence unterminated.
+ *
+ * Per CommonMark an unclosed fence runs to the end of the document, so every
+ * heading after it is fence content rather than a heading. Callers that address
+ * or rewrite content by heading use this to refuse a region whose boundary is
+ * therefore undefined.
+ *
+ * @param content Markdown text, scanned from its first line.
+ * @returns `true` when a fence is still open after the last line.
+ */
+export function hasUnclosedFence(content: string): boolean {
+  const tracker = createFenceTracker();
+  for (const line of content.split('\n')) {
+    tracker.inFence(line);
+  }
+
+  return tracker.isOpen();
+}
+
 export function createFenceTracker(): FenceTracker {
   let open: { marker: string; length: number } | null = null;
 

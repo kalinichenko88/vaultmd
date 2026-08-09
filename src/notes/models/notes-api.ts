@@ -40,12 +40,20 @@ export type NotesApi = {
    * therefore last-writer-wins across the two calls — use `transformNote` with
    * `extractHeadings` when a concurrent writer must not be lost.
    *
+   * A section whose span runs into an **unterminated code fence** is not
+   * addressable and throws `VALIDATION_ERROR`. Per CommonMark such a fence runs
+   * to the end of the file, so the section would swallow every heading after it
+   * — reading it would return content the author never meant as this section,
+   * and writing it back would delete that content. Close the fence, or reach
+   * for {@link NotesApi.transformNote}.
+   *
    * @param path Vault-relative path to the `.md` file.
    * @param heading Exact heading text, without the leading `#` characters.
    * @returns The section body, verbatim, or `''` when the section is empty.
    * @throws {@link MdVaultError} `NOT_FOUND` if the file does not exist,
-   * `NO_MATCH` if no heading has that text, or `AMBIGUOUS_MATCH` if more than
-   * one does — drop to {@link extractHeadings} to disambiguate.
+   * `NO_MATCH` if no heading has that text, `AMBIGUOUS_MATCH` if more than one
+   * does — drop to {@link extractHeadings} to disambiguate — or
+   * `VALIDATION_ERROR` if the section runs into an unterminated fence.
    */
   readSection(path: string, heading: string): Promise<string>;
   /**

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createFenceTracker } from '../fences.ts';
+import { createFenceTracker, hasUnclosedFence } from '../fences.ts';
 
 /** Feed every line and collect the lines the tracker says are OUTSIDE a fence. */
 function outside(doc: string): string[] {
@@ -64,6 +64,14 @@ describe('createFenceTracker', () => {
 
   test('CRLF line endings do not break marker matching', () => {
     expect(outside('```\r\nhidden\r\n```\r\nafter\r')).toEqual(['after\r']);
+  });
+
+  test('hasUnclosedFence answers the whole-string question', () => {
+    expect(hasUnclosedFence('```\ncode\n```')).toBe(false);
+    expect(hasUnclosedFence('```\ncode')).toBe(true);
+    expect(hasUnclosedFence('```ts\n~~~\n## Fake\n```')).toBe(false);
+    expect(hasUnclosedFence('')).toBe(false);
+    expect(hasUnclosedFence('    ```\nstill a fence to us\n')).toBe(true);
   });
 
   test('isOpen tracks the final state, which inFence alone cannot express', () => {
