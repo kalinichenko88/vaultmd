@@ -27,7 +27,7 @@ bun test src/query                # one module's tests
 bun test src/notes/__tests__/notes.test.ts   # one file
 bun test -t "backlinks"           # tests matching a name
 
-bun run check                     # biome check . && tsc --noEmit — the gate; run before claiming done
+bun run check                     # biome check . && tsc --noEmit — the gate
 bun run typecheck                 # tsc --noEmit only
 bun run lint                      # biome lint only
 bun run format                    # biome format --write
@@ -39,7 +39,7 @@ bun run smoke                     # pack the tarball + install/import/typecheck 
 - `bun run docs:build` — generate API ref + build the site (the CI rot gate)
 
 `tsconfig.include` is `["src"]`, so a single dangling import anywhere fails
-`tsc --noEmit`. `bun run check` is the authoritative green/red gate.
+`tsc --noEmit`.
 
 ## Architecture
 
@@ -142,7 +142,7 @@ All failures throw `MdVaultError` with a `code: MdVaultCode` (see
   even for a single statement. This is enforced by `bun run check`: the
   `style/useBlockStatements` lint rule requires the braces, and the Biome
   formatter expands the braced block onto separate lines — so both halves fail
-  the gate. No separate config is needed; just run the gate before committing.
+  the gate. No separate config is needed.
 - **One area per module folder**; each testable file has a co-located unit test
   in the module's `__tests__/`. Intra-file order: imports → primary export(s) →
   private helpers below.
