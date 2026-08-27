@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { parseFrontmatter } from '../parse.ts';
+import { captureWarnings } from './capture-warnings.ts';
 
 describe('parseFrontmatter', () => {
   test('valid frontmatter -> parsed map + tags + body split', () => {
@@ -137,5 +138,39 @@ describe('parseFrontmatter — nested is read, unstorable is not', () => {
 
     expect(parseFrontmatter(nest(200)).valid).toBe('nested');
     expect(parseFrontmatter(nest(20_000)).valid).toBe('present-but-invalid');
+  });
+});
+
+// An unrendered Obsidian/Templater placeholder (`{{DATE:...}}`) parses as a
+// flow map used as a map KEY, and yaml warns on stderr while stringifying it.
+// Reading such a note is correct and stays correct — the warning is noise the
+// consumer cannot act on, since it is vaultmd that calls yaml.
+describe('parseFrontmatter — yaml warnings never reach stderr', () => {
+  test('a templater placeholder value is read silently', () => {
+    const content =
+      '---\ncreated: {{DATE:YYYY-MM-DD HH:mm}}\ntags:\n  - movie\n---\nbody';
+    let parsed: ReturnType<typeof parseFrontmatter> | undefined;
+    const warnings = captureWarnings(() => {
+      parsed = parseFrontmatter(content);
+    });
+    expect(warnings).toEqual([]);
+    expect(parsed?.valid).toBe('nested');
+    expect(parsed?.tags).toEqual(['movie']);
+  });
+
+  test('a collection used as a top-level key is read silently', () => {
+    const warnings = captureWarnings(() => {
+      parseFrontmatter('---\n{{DATE}}: x\n---\nbody');
+    });
+    expect(warnings).toEqual([]);
+  });
+
+  test('invalid yaml is still classified, not swallowed', () => {
+    const warnings = captureWarnings(() => {
+      expect(parseFrontmatter('---\na: [1, 2\nb: {\n---\nbody').valid).toBe(
+        'present-but-invalid',
+      );
+    });
+    expect(warnings).toEqual([]);
   });
 });
