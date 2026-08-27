@@ -226,19 +226,12 @@ export function createNotes(deps: NotesDeps): NotesApi {
     }
     // A bullet, or an ordered marker numbered 1, always opens a list item —
     // even mid-paragraph — so the underline underlines the item's own
-    // paragraph rather than anything outside it. Measure from the item's
-    // content column: shallower closes the list (a plain thematic break),
-    // four past it is indented code INSIDE the item, and a paragraph cannot
-    // be interrupted by that either.
-    const item = /^( {0,3})([-*+]|1[.)])([ \t]+)\S/.exec(previous);
-    const content = item
-      ? item[1].length +
-        item[2].length +
-        // Over four spaces is already indented code, so the content starts one
-        // column past the marker. A tab is left at that minimum too, rather
-        // than modelling tab stops for a shape nobody writes.
-        (/^ {1,4}$/.test(item[3]) ? item[3].length : 1)
-      : 0;
+    // paragraph. Measure from the item's content column: shallower closes the
+    // list (a plain thematic break), four past it is indented code INSIDE the
+    // item, and neither interrupts a paragraph. A gap wider than four spaces,
+    // or a tab, falls through to the paragraph window and fails closed.
+    const item = /^( {0,3})([-*+]|1[.)])( {1,4})\S/.exec(previous);
+    const content = item ? item[1].length + item[2].length + item[3].length : 0;
 
     return indent >= content && indent <= content + 3;
   }
