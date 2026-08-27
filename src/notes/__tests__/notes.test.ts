@@ -988,6 +988,20 @@ describe('setSection payload guards', () => {
     await rejects('- item\n  ---\nafter', 'VALIDATION_ERROR');
   });
 
+  test('an underline inside a list item is caught however deep the item sits', async () => {
+    await rejects('- item\n    ---\nafter', 'VALIDATION_ERROR');
+    await rejects('-   item\n    ---\nafter', 'VALIDATION_ERROR');
+    await rejects('  - item\n    ---\nafter', 'VALIDATION_ERROR');
+  });
+
+  test('a rule inside an indented code block is not a setext underline', async () => {
+    const body = 'Config:\n\n    key: value\n    ---\n    other';
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body },
+    });
+    expect(await read('note.md')).toBe(`## Notes\n${body}\n## Links\n- x\n`);
+  });
+
   test('a payload heading colliding with an existing one is rejected', async () => {
     await rejects('### Notes\nx', 'VALIDATION_ERROR');
     await rejects('### Links\nx', 'VALIDATION_ERROR');

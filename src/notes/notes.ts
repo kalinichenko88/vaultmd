@@ -42,7 +42,7 @@ export type NotesDeps = {
 };
 
 /** A line shaped like a setext underline — whether it is one depends on what precedes it. */
-const UNDERLINE = /^ {0,3}(?:=+|-+)[ \t]*$/;
+const UNDERLINE = /^( *)(?:=+|-+)[ \t]*$/;
 /** `***`, `---` or `___`, three or more, spaced or not — never paragraph text. */
 const THEMATIC_BREAK =
   /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/;
@@ -194,7 +194,8 @@ export function createNotes(deps: NotesDeps): NotesApi {
         previous = '';
         continue;
       }
-      if (UNDERLINE.test(line) && underlinesParagraph(previous, line)) {
+      const underline = UNDERLINE.exec(line);
+      if (underline && underlinesParagraph(previous, underline[1].length)) {
         return previous.trim();
       }
       previous = line;
@@ -204,15 +205,14 @@ export function createNotes(deps: NotesDeps): NotesApi {
   }
 
   /**
-   * Whether an underline-shaped `line` really underlines `previous`. CommonMark
-   * makes `===` / `---` a heading only after a PARAGRAPH; after a heading, a
-   * thematic break, a block quote or a list item it is an ordinary thematic
-   * break. What cannot be decided line-by-line fails CLOSED — an indented
-   * `previous` may be a lazy paragraph continuation or a code block, and an
-   * ordered marker other than `1.` cannot interrupt a paragraph, so both stay
-   * headings here.
+   * Whether an underline-shaped line at `indent` really underlines `previous`.
+   * CommonMark makes `===` / `---` a heading only after a PARAGRAPH; after a
+   * heading, a thematic break, a block quote or a list item it is an ordinary
+   * thematic break. What cannot be decided line-by-line fails CLOSED — an
+   * ordered marker other than `1.` cannot interrupt a paragraph, so it stays a
+   * heading here.
    */
-  function underlinesParagraph(previous: string, line: string): boolean {
+  function underlinesParagraph(previous: string, indent: number): boolean {
     if (previous.trim() === '') {
       return false;
     }
@@ -225,16 +225,22 @@ export function createNotes(deps: NotesDeps): NotesApi {
       return false;
     }
     // A bullet, or an ordered marker numbered 1, always opens a list item —
-    // even mid-paragraph. The underline then belongs to the item's own
-    // paragraph only if it is indented into the item's content. Take the
-    // SHALLOWEST content column the marker could have, so a near miss keeps
-    // treating the line as a heading.
-    const item = /^( {0,3})([-*+]|1[.)])[ \t]+\S/.exec(previous);
-    if (item) {
-      return line.search(/[^ ]/) >= item[1].length + item[2].length + 1;
-    }
+    // even mid-paragraph — so the underline underlines the item's own
+    // paragraph rather than anything outside it. Measure from the item's
+    // content column: shallower closes the list (a plain thematic break),
+    // four past it is indented code INSIDE the item, and a paragraph cannot
+    // be interrupted by that either.
+    const item = /^( {0,3})([-*+]|1[.)])([ \t]+)\S/.exec(previous);
+    const content = item
+      ? item[1].length +
+        item[2].length +
+        // Over four spaces is already indented code, so the content starts one
+        // column past the marker. A tab is left at that minimum too, rather
+        // than modelling tab stops for a shape nobody writes.
+        (/^ {1,4}$/.test(item[3]) ? item[3].length : 1)
+      : 0;
 
-    return true;
+    return indent >= content && indent <= content + 3;
   }
 
   function assertPayloadFits(
