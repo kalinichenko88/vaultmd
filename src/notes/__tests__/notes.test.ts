@@ -841,6 +841,30 @@ describe('updateNote setSection', () => {
     expect(await read('note.md')).toBe('## Notes\nx');
   });
 
+  test('writing into an empty section does not weld onto the next heading', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '# A\n# B\nz\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'A', body: 'x' },
+    });
+    expect(await read('note.md')).toBe('# A\nx\n# B\nz\n');
+  });
+
+  test('writing into an empty section keeps the separator blank line', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '# A\n\n# B\nz\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'A', body: 'again' },
+    });
+    expect(await read('note.md')).toBe('# A\nagain\n\n# B\nz\n');
+  });
+
+  test('an empty last section keeps the file trailing newline', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '---\ntitle: T\n---\n# A\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'A', body: 'x' },
+    });
+    expect(await read('note.md')).toBe('---\ntitle: T\n---\n# A\nx\n');
+  });
+
   test('writing into a CRLF file inserts an LF-terminated line', async () => {
     await writeFile(
       join(vaultDir, 'note.md'),

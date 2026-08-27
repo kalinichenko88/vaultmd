@@ -268,11 +268,11 @@ export function createNotes(deps: NotesDeps): NotesApi {
       '$1',
     );
     // Match the terminator the replaced span itself carried, so a file keeps
-    // its trailing newline — or its absence — wherever the section sits. The
-    // emptiness check is load-bearing: for an empty span the preceding byte is
-    // the heading's own newline, which must not count as the span's.
-    const spanTerminated =
-      target.end > target.bodyStart && body[target.end - 1] === '\n';
+    // its trailing newline — or its absence — wherever the section sits. An
+    // EMPTY span carries no terminator of its own, so the question is what
+    // follows: anything at all has to start on its own line, and at the end of
+    // the file the file's own ending decides.
+    const spanTerminated = tail !== '' || body.endsWith('\n');
     const text =
       lead === ''
         ? ''

@@ -418,7 +418,12 @@ await vault.notes.transformNote('daily/2026-08-08.md', (current) => {
     return null;
   }
 
-  return `${current.slice(0, at + notes.end)}- one more\n${current.slice(at + notes.end)}`;
+  const head = current.slice(0, at + notes.end);
+  // An empty section, or one ending at a file with no trailing newline, hands
+  // back an `end` that is not on a line boundary — terminate it yourself.
+  const sep = head.endsWith('\n') ? '' : '\n';
+
+  return `${head}${sep}- one more\n${current.slice(at + notes.end)}`;
 });
 ```
 
