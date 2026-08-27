@@ -1,24 +1,33 @@
 # Concepts
 
+How VaultMD behaves, and why. Signatures for everything named here live in the
+[API Reference](/api/).
+
 ## The vault and its derived index
 
-`createVault` wires four layers: the **IO chokepoint** (`vault.io`), the derived
-**SQLite index**, the **query** surface, and the **notes** CRUD surface. The
-index is a cache — delete the database file and it rebuilds from the `.md` files.
+[`createVault`](/api/functions/createVault) wires four layers: the **IO
+chokepoint** (`vault.io`), the derived **SQLite index**, the **query** surface,
+and the **notes** CRUD surface. The index is a cache — delete the database file
+and it rebuilds from the `.md` files. What it hands back is a
+[`Vault`](/api/type-aliases/Vault); what it takes is a
+[`CreateVaultConfig`](/api/type-aliases/CreateVaultConfig).
 
 ## Write-through indexing
 
 Every mutation updates the index inside the **same per-file lock** as the file
 write, so a note and its index row never drift. Concurrency is guarded by an
-in-process mutex plus optional cross-process lockfiles.
+in-process mutex plus optional cross-process lockfiles. The mutating calls are
+on [`NotesApi`](/api/type-aliases/NotesApi).
 
 ## Links
 
 Links are extracted as `[[wikilink]]` or relative links and resolved
-asymmetrically via `linkResolution: 'wikilink' | 'relative'`. `vault.query`
-exposes `backlinks` (who points here), `outboundLinks` (where this points, each
-with its resolved target or `null`), and `danglingLinks` (the vault-wide sweep
-for links that resolve to nothing).
+asymmetrically via `linkResolution: 'wikilink' | 'relative'` — see
+[`LinkResolution`](/api/type-aliases/LinkResolution).
+[`vault.query`](/api/type-aliases/QueryApi) exposes `backlinks` (who points
+here), `outboundLinks` (where this points, each with its resolved target or
+`null`), and `danglingLinks` (the vault-wide sweep for links that resolve to
+nothing).
 
 `outboundLinks` reports **raw** resolution: a link to an attachment such as
 `[[diagram.png]]` comes back `resolved: null`, because nothing outside `.md` is
@@ -45,15 +54,17 @@ which is a change to the index schema rather than to these methods.
 
 ## Scoped access
 
-Each vault instance carries read/write path allowlists (`prefixes.read` /
-`prefixes.write`, where `''` means the whole vault). Queries return only notes
-the instance is allowed to read, and writes outside the write scope throw
+Each vault instance carries read/write path allowlists
+([`prefixes.read` / `prefixes.write`](/api/type-aliases/VaultPrefixes), where
+`''` means the whole vault). Queries return only notes the instance is allowed
+to read, and writes outside the write scope throw
 `ALLOWLIST_VIOLATION`. This is the security chokepoint — all path
 canonicalization, `..`-escape rejection, and symlink containment live behind it.
 
-The scope covers enumeration too: `vault.io.listMarkdown` and
-`vault.io.listFolders` walk the vault and report only what this instance may
-read, minus dot-folders and anything the `ignore` globs match.
+The scope covers enumeration too — `vault.io.listMarkdown` and
+`vault.io.listFolders` ([`VaultIo`](/api/type-aliases/VaultIo)) walk the vault
+and report only what this instance may read, minus dot-folders and anything the
+`ignore` globs match.
 
 ## Lazy reconcile
 
@@ -77,6 +88,8 @@ diffing query results:
 const { added, updated, removed } = await vault.reconcile();
 ```
 
+See [`ReconcileResult`](/api/type-aliases/ReconcileResult) for the exact shape.
+
 All three are sorted vault-relative paths, and all three are empty when nothing
 has changed. *Since your last call* is the important part: background sweeps
 fired by reads change the index too, and their findings are buffered until you
@@ -92,7 +105,8 @@ synced as if it were content — it is derived state, rebuildable at any time.
 
 ## Errors
 
-Every failure throws an `MdVaultError` carrying a stable `code`. Branch on
+Every failure throws an [`MdVaultError`](/api/classes/MdVaultError) carrying a
+stable [`code`](/api/type-aliases/MdVaultCode). Branch on
 `err.code`, never on the message:
 
 ```ts
@@ -112,5 +126,3 @@ try {
 Codes: `ALLOWLIST_VIOLATION`, `NOT_MARKDOWN`, `NOT_FOUND`, `ALREADY_EXISTS`,
 `NO_MATCH`, `AMBIGUOUS_MATCH`, `MTIME_CONFLICT`, `REFUSE_CREATE`,
 `FRONTMATTER_INVALID`, `VALIDATION_ERROR`, `COMMIT_FAILED`, `INDEX_UNAVAILABLE`.
-
-See the [API Reference](/api/) for exact signatures.

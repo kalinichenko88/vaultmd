@@ -1,0 +1,38 @@
+/*
+ * The hero carries no image, so the stock theme leaves a third of its row empty.
+ * Centre it instead — everything else stays default.
+ */
+.VPHero .container {
+  text-align: center;
+}
+
+.VPHero .name,
+.VPHero .text,
+.VPHero .tagline {
+  margin-inline: auto;
+}
+
+.VPHero .actions {
+  justify-content: center;
+}
+
+@media (min-width: 960px) {
+  .VPHero .main {
+    width: 100%;
+  }
+}
+
+/*
+ * The stock theme marks the current nav item with colour alone, which reads the
+ * same as :hover. Underline it, and light up the sidebar indicator the theme
+ * already renders (it only wires it up from level 2 down).
+ */
+.VPNavBarMenuLink.active {
+  text-decoration: underline;
+  text-underline-offset: 8px;
+  text-decoration-thickness: 2px;
+}
+
+.VPSidebarItem.level-1.is-active > .item > .indicator {
+  background-color: var(--vp-c-brand-1);
+}

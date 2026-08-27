@@ -1,5 +1,11 @@
 # Recipes
 
+Task-shaped snippets. Each assumes an open `vault` from the
+[Quick start](./quick-start); the reasoning behind them is in
+[Concepts](./concepts). Read methods live on
+[`QueryApi`](/api/type-aliases/QueryApi), writes on
+[`NotesApi`](/api/type-aliases/NotesApi).
+
 ## Query notes by tag and frontmatter
 
 ```ts
