@@ -1,5 +1,6 @@
 import { parse } from 'yaml';
 
+import { YAML_OPTIONS } from './constants.ts';
 import type { ParsedFrontmatter } from './models/parsed-frontmatter.ts';
 import { deriveTags } from './tags.ts';
 import { isFlatFrontmatter, isStorableFrontmatter } from './validate.ts';
@@ -57,7 +58,7 @@ export function parseFrontmatter(content: string): ParsedFrontmatter {
   const { yaml: yamlText, body } = block;
   let parsed: unknown;
   try {
-    parsed = parse(yamlText, { uniqueKeys: false });
+    parsed = parse(yamlText, YAML_OPTIONS);
   } catch {
     return { frontmatter: {}, tags: [], body, valid: 'present-but-invalid' };
   }

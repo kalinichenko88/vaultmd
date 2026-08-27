@@ -1,5 +1,6 @@
 import { type Document, isMap, isScalar, parseDocument } from 'yaml';
 
+import { YAML_OPTIONS } from './constants.ts';
 import type { EditOutcome } from './models/edit-outcome.ts';
 import { extractBlock, parseFrontmatter } from './parse.ts';
 import { buildFrontmatterBlock, emitFrontmatterBlock } from './serialize.ts';
@@ -64,7 +65,7 @@ export function editFrontmatter(
   if (!ext) {
     return { content, outcome: 'unverifiable' };
   }
-  const doc = parseDocument(ext.yaml, { uniqueKeys: false });
+  const doc = parseDocument(ext.yaml, YAML_OPTIONS);
   dropShadowedKeys(doc);
   // dropShadowedKeys can orphan an alias; toJS then throws a raw ReferenceError.
   let before: Record<string, unknown>;

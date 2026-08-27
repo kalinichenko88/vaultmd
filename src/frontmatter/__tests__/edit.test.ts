@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { editFrontmatter } from '../edit.ts';
 import { parseFrontmatter } from '../parse.ts';
+import { captureWarnings } from './capture-warnings.ts';
 
 describe('editFrontmatter', () => {
   test('multi-field mutate preserves comments, order, 1.0, empty aliases', () => {
@@ -362,5 +363,22 @@ describe('editFrontmatter — nested is read-only', () => {
 
     expect(outcome).toBe('unverifiable');
     expect(content).toBe(src);
+  });
+});
+
+// A collection used as a TOP-LEVEL key stringifies to a scalar key with a
+// scalar value, so the block reads as flat and the edit path re-parses it —
+// the same yaml warning, on the other surface.
+describe('editFrontmatter — yaml warnings never reach stderr', () => {
+  test('a collection key is rewritten silently', () => {
+    const src = '---\n{{DATE}}: x\ntitle: Old\n---\nbody';
+    const mutate = () =>
+      editFrontmatter(src, (fm) => {
+        fm.title = 'New';
+      });
+    expect(captureWarnings(mutate)).toEqual([]);
+    const { content, outcome } = mutate();
+    expect(outcome).toBe('edited');
+    expect(parseFrontmatter(content).frontmatter.title).toBe('New');
   });
 });
