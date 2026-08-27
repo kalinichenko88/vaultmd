@@ -41,6 +41,12 @@ export type NotesDeps = {
   cross?: CrossLock | false;
 };
 
+/** A line shaped like a setext underline — whether it is one depends on what precedes it. */
+const UNDERLINE = /^( *)(?:=+|-+)[ \t]*$/;
+/** `***`, `---` or `___`, three or more, spaced or not — never paragraph text. */
+const THEMATIC_BREAK =
+  /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/;
+
 export function createNotes(deps: NotesDeps): NotesApi {
   const { db, vaultIo, cfg, query, onCommit, cross = false } = deps;
 
@@ -181,7 +187,6 @@ export function createNotes(deps: NotesDeps): NotesApi {
    */
   function setextHeading(md: string): string | null {
     const tracker = createFenceTracker();
-    const rule = /^ {0,3}(?:=+|-+)[ \t]*$/;
     let previous = '';
     for (const raw of md.split('\n')) {
       const line = raw.replace(/\r$/, '');
@@ -189,18 +194,46 @@ export function createNotes(deps: NotesDeps): NotesApi {
         previous = '';
         continue;
       }
-      const underlines =
-        previous.trim() !== '' &&
-        !/^ {0,3}#{1,6}(?:[ \t]|$)/.test(previous) &&
-        !rule.test(previous) &&
-        rule.test(line);
-      if (underlines) {
+      const underline = UNDERLINE.exec(line);
+      if (underline && underlinesParagraph(previous, underline[1].length)) {
         return previous.trim();
       }
       previous = line;
     }
 
     return null;
+  }
+
+  /**
+   * Whether an underline-shaped line at `indent` really underlines `previous`.
+   * CommonMark makes `===` / `---` a heading only after a PARAGRAPH; after a
+   * heading, a thematic break, a block quote or a list item it is an ordinary
+   * thematic break. What cannot be decided line-by-line fails CLOSED — an
+   * ordered marker other than `1.` cannot interrupt a paragraph, so it stays a
+   * heading here.
+   */
+  function underlinesParagraph(previous: string, indent: number): boolean {
+    if (previous.trim() === '') {
+      return false;
+    }
+    // None of these is ever paragraph text. A block quote ends here too: an
+    // underline cannot be a lazy continuation, so it closes the quote.
+    if (
+      /^ {0,3}(?:#{1,6}(?:[ \t]|$)|>)/.test(previous) ||
+      THEMATIC_BREAK.test(previous)
+    ) {
+      return false;
+    }
+    // A bullet, or an ordered marker numbered 1, always opens a list item —
+    // even mid-paragraph — so the underline underlines the item's own
+    // paragraph. Measure from the item's content column: shallower closes the
+    // list (a plain thematic break), four past it is indented code INSIDE the
+    // item, and neither interrupts a paragraph. A gap wider than four spaces,
+    // or a tab, falls through to the paragraph window and fails closed.
+    const item = /^( {0,3})([-*+]|1[.)])( {1,4})\S/.exec(previous);
+    const content = item ? item[1].length + item[2].length + item[3].length : 0;
+
+    return indent >= content && indent <= content + 3;
   }
 
   function assertPayloadFits(

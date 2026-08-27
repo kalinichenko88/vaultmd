@@ -963,6 +963,45 @@ describe('setSection payload guards', () => {
     await rejects('See below\n---\nmore text', 'VALIDATION_ERROR');
   });
 
+  test('a thematic break after a list, a quote or another break is accepted', async () => {
+    // CommonMark only makes `---` an underline after a PARAGRAPH; here it
+    // closes the block above it and is an ordinary horizontal rule.
+    for (const body of ['- one\n- two\n---', '> quoted\n---', '***\n---']) {
+      await writeFile(
+        join(vaultDir, 'note.md'),
+        '## Notes\nold\n## Links\n- x\n',
+      );
+      await notes.updateNote('note.md', {
+        setSection: { heading: 'Notes', body },
+      });
+      expect(await read('note.md')).toBe(`## Notes\n${body}\n## Links\n- x\n`);
+    }
+  });
+
+  test('a setext underline is still caught wherever a paragraph precedes it', async () => {
+    // `| a | b |` has no matching GFM delimiter row, so it stays a paragraph;
+    // `===` and `--` are too short to be thematic breaks. Each makes an h2.
+    await rejects('| a | b |\n---\nafter', 'VALIDATION_ERROR');
+    await rejects('===\n---\nafter', 'VALIDATION_ERROR');
+    await rejects('--\n---\nafter', 'VALIDATION_ERROR');
+    // Indented into the item's own content, so it underlines the item.
+    await rejects('- item\n  ---\nafter', 'VALIDATION_ERROR');
+  });
+
+  test('an underline inside a list item is caught however deep the item sits', async () => {
+    await rejects('- item\n    ---\nafter', 'VALIDATION_ERROR');
+    await rejects('-   item\n    ---\nafter', 'VALIDATION_ERROR');
+    await rejects('  - item\n    ---\nafter', 'VALIDATION_ERROR');
+  });
+
+  test('a rule inside an indented code block is not a setext underline', async () => {
+    const body = 'Config:\n\n    key: value\n    ---\n    other';
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body },
+    });
+    expect(await read('note.md')).toBe(`## Notes\n${body}\n## Links\n- x\n`);
+  });
+
   test('a payload heading colliding with an existing one is rejected', async () => {
     await rejects('### Notes\nx', 'VALIDATION_ERROR');
     await rejects('### Links\nx', 'VALIDATION_ERROR');
