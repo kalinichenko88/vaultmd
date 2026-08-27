@@ -81,7 +81,8 @@ vault.close();
 ```
 
 The `.md` file on disk is the source of truth. The SQLite index is derived from
-it, and is rebuilt from disk whenever it goes missing or stale.
+it: delete the database and it rebuilds, and edits made outside the process are
+picked up by a background [reconcile](/guide/concepts#lazy-reconcile) sweep.
 
 ## Where to next
 
