@@ -70,7 +70,7 @@ export function editFrontmatter(
   // dropShadowedKeys can orphan an alias; toJS then throws a raw ReferenceError.
   let before: Record<string, unknown>;
   try {
-    before = (doc.toJS(YAML_OPTIONS) ?? {}) as Record<string, unknown>;
+    before = (doc.toJS() ?? {}) as Record<string, unknown>;
   } catch {
     return { content, outcome: 'unverifiable' };
   }

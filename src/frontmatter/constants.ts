@@ -1,7 +1,9 @@
-import type { DocumentOptions, ParseOptions, ToJSOptions } from 'yaml';
+import type { DocumentOptions, ParseOptions } from 'yaml';
 
 /**
- * Options for every `yaml` call in this module.
+ * Options for every `yaml` PARSE in this module — `parse` and `parseDocument`.
+ * `Document.toJS` does not read them: it takes the options its document was
+ * parsed with, so the `parseDocument` call is the only place they apply.
  *
  * `uniqueKeys: false` — a note may legally repeat a key; every reader here is
  * last-wins rather than a throw.
@@ -14,7 +16,7 @@ import type { DocumentOptions, ParseOptions, ToJSOptions } from 'yaml';
  * `parse` from throwing on invalid YAML, which is how a block earns
  * `'present-but-invalid'`.
  */
-export const YAML_OPTIONS: ParseOptions & DocumentOptions & ToJSOptions = {
+export const YAML_OPTIONS: ParseOptions & DocumentOptions = {
   uniqueKeys: false,
   logLevel: 'error',
 };
