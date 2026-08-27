@@ -44,11 +44,3 @@ Every option above is documented on
 `createVault` hands back on [`Vault`](/api/type-aliases/Vault) —
 [`vault.notes`](/api/type-aliases/NotesApi) for writes,
 [`vault.query`](/api/type-aliases/QueryApi) for reads.
-
-## Next steps
-
-- [Concepts](./concepts) — why the index is a cache, how links resolve, what
-  scopes and reconcile do.
-- [Recipes](./recipes) — querying, pagination, backlinks, search, bulk imports,
-  section edits.
-- [API Reference](/api/) — the full exported surface.

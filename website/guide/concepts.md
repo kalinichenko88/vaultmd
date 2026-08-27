@@ -126,8 +126,3 @@ try {
 Codes: `ALLOWLIST_VIOLATION`, `NOT_MARKDOWN`, `NOT_FOUND`, `ALREADY_EXISTS`,
 `NO_MATCH`, `AMBIGUOUS_MATCH`, `MTIME_CONFLICT`, `REFUSE_CREATE`,
 `FRONTMATTER_INVALID`, `VALIDATION_ERROR`, `COMMIT_FAILED`, `INDEX_UNAVAILABLE`.
-
-## Where to go next
-
-- [Recipes](./recipes) — these concepts as code you can paste.
-- [API Reference](/api/) — exact signatures for every name above.

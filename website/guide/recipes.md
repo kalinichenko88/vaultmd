@@ -460,11 +460,3 @@ const target = hs.find(
   (h) => h.text === 'Notes' && h.start > weekly.start && h.start < weekly.end,
 );
 ```
-
-## Where to go next
-
-- [Concepts](./concepts) — why these calls behave the way they do.
-- [API Reference](/api/) — every option on
-  [`NoteFilter`](/api/type-aliases/NoteFilter),
-  [`QueryApi`](/api/type-aliases/QueryApi) and
-  [`NotesApi`](/api/type-aliases/NotesApi).

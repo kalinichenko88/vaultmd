@@ -31,16 +31,8 @@ export default defineConfig({
         link: '/guide/introduction',
         activeMatch: '^/guide/(introduction|quick-start)',
       },
-      {
-        text: 'Concepts',
-        link: '/guide/concepts',
-        activeMatch: '^/guide/concepts',
-      },
-      {
-        text: 'Recipes',
-        link: '/guide/recipes',
-        activeMatch: '^/guide/recipes',
-      },
+      { text: 'Concepts', link: '/guide/concepts' },
+      { text: 'Recipes', link: '/guide/recipes' },
       { text: 'API', link: '/api/', activeMatch: '^/api/' },
     ],
     sidebar: {
@@ -50,15 +42,12 @@ export default defineConfig({
         { text: 'API Reference', items: typedocSidebar },
       ],
     },
-    outline: { level: [2, 3], label: 'On this page' },
+    outline: [2, 3],
     search: { provider: 'local' },
     socialLinks: [
       { icon: 'github', link: 'https://github.com/kalinichenko88/vaultmd' },
       { icon: 'npm', link: 'https://www.npmjs.com/package/vaultmd' },
     ],
-    footer: {
-      message: 'Released under the MIT License.',
-      copyright: 'Copyright © 2026 Ivan Kalinichenko',
-    },
+    footer: { message: 'Released under the MIT License.' },
   },
 });
