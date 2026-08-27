@@ -2,6 +2,23 @@ import { defineConfig } from 'vitepress';
 
 import typedocSidebar from '../api/typedoc-sidebar.json';
 
+const guideSidebar = [
+  {
+    text: 'Getting started',
+    items: [
+      { text: 'Introduction', link: '/guide/introduction' },
+      { text: 'Quick start', link: '/guide/quick-start' },
+    ],
+  },
+  {
+    text: 'Guides',
+    items: [
+      { text: 'Concepts', link: '/guide/concepts' },
+      { text: 'Recipes', link: '/guide/recipes' },
+    ],
+  },
+];
+
 export default defineConfig({
   base: '/',
   title: 'VaultMD',
@@ -9,26 +26,39 @@ export default defineConfig({
     'Headless markdown-vault data layer for Bun — CRUD + SQLite index.',
   themeConfig: {
     nav: [
-      { text: 'Guide', link: '/guide/introduction' },
-      { text: 'API', link: '/api/' },
+      {
+        text: 'Getting started',
+        link: '/guide/introduction',
+        activeMatch: '^/guide/(introduction|quick-start)',
+      },
+      {
+        text: 'Concepts',
+        link: '/guide/concepts',
+        activeMatch: '^/guide/concepts',
+      },
+      {
+        text: 'Recipes',
+        link: '/guide/recipes',
+        activeMatch: '^/guide/recipes',
+      },
+      { text: 'API', link: '/api/', activeMatch: '^/api/' },
     ],
     sidebar: {
-      '/guide/': [
-        {
-          text: 'Guide',
-          items: [
-            { text: 'Introduction', link: '/guide/introduction' },
-            { text: 'Quick start', link: '/guide/quick-start' },
-            { text: 'Concepts', link: '/guide/concepts' },
-            { text: 'Recipes', link: '/guide/recipes' },
-          ],
-        },
+      '/guide/': guideSidebar,
+      '/api/': [
+        ...guideSidebar.map((group) => ({ ...group, collapsed: true })),
+        { text: 'API Reference', items: typedocSidebar },
       ],
-      '/api/': [{ text: 'API Reference', items: typedocSidebar }],
     },
+    outline: { level: [2, 3], label: 'On this page' },
     search: { provider: 'local' },
     socialLinks: [
       { icon: 'github', link: 'https://github.com/kalinichenko88/vaultmd' },
+      { icon: 'npm', link: 'https://www.npmjs.com/package/vaultmd' },
     ],
+    footer: {
+      message: 'Released under the MIT License.',
+      copyright: 'Copyright © 2026 Ivan Kalinichenko',
+    },
   },
 });

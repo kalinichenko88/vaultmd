@@ -16,4 +16,10 @@ schemas, and sync logic live in whatever you build on top.
 - You're on [Bun](https://bun.sh) (≥ 1.3.14) — VaultMD uses `bun:sqlite` and does
   not run under Node.
 
-Next: [Quick start](./quick-start).
+## Where to go next
+
+- [Quick start](./quick-start) — install, open a vault, write and query a note.
+- [Concepts](./concepts) — the derived index, links, scopes, and reconcile.
+- [Recipes](./recipes) — task-shaped snippets to paste into your own code.
+- [API Reference](/api/) — every exported name, generated from the source; start
+  at [`createVault`](/api/functions/createVault).

@@ -1,5 +1,11 @@
 # Recipes
 
+Task-shaped snippets. Each assumes an open `vault` from the
+[Quick start](./quick-start); the reasoning behind them is in
+[Concepts](./concepts). Read methods live on
+[`QueryApi`](/api/type-aliases/QueryApi), writes on
+[`NotesApi`](/api/type-aliases/NotesApi).
+
 ## Query notes by tag and frontmatter
 
 ```ts
@@ -454,3 +460,11 @@ const target = hs.find(
   (h) => h.text === 'Notes' && h.start > weekly.start && h.start < weekly.end,
 );
 ```
+
+## Where to go next
+
+- [Concepts](./concepts) — why these calls behave the way they do.
+- [API Reference](/api/) — every option on
+  [`NoteFilter`](/api/type-aliases/NoteFilter),
+  [`QueryApi`](/api/type-aliases/QueryApi) and
+  [`NotesApi`](/api/type-aliases/NotesApi).

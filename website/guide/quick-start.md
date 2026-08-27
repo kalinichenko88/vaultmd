@@ -1,10 +1,16 @@
 # Quick start
 
+Install VaultMD, open a vault, write a note, and read it back — the whole loop
+in one file. For what the pieces mean, read [Concepts](./concepts) next.
+
 ## Install
 
 ```bash
 bun add vaultmd
 ```
+
+Requires [Bun](https://bun.sh) ≥ 1.3.14. VaultMD uses `bun:sqlite`, `Bun.file`
+and other Bun built-ins — it does **not** run under Node.
 
 ## Open a vault
 
@@ -31,5 +37,18 @@ vault.close();
 ```
 
 The `.md` file on disk is the source of truth; the SQLite index is rebuilt from
-it. See [Concepts](./concepts) for how that works, and the
-[API Reference](/api/) for the full surface.
+it.
+
+Every option above is documented on
+[`CreateVaultConfig`](/api/type-aliases/CreateVaultConfig), and what
+`createVault` hands back on [`Vault`](/api/type-aliases/Vault) —
+[`vault.notes`](/api/type-aliases/NotesApi) for writes,
+[`vault.query`](/api/type-aliases/QueryApi) for reads.
+
+## Next steps
+
+- [Concepts](./concepts) — why the index is a cache, how links resolve, what
+  scopes and reconcile do.
+- [Recipes](./recipes) — querying, pagination, backlinks, search, bulk imports,
+  section edits.
+- [API Reference](/api/) — the full exported surface.
