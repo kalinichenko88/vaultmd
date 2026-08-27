@@ -70,8 +70,10 @@ export type UpdateOp =
        *
        * The payload may not restructure the document around it. All four throw
        * `VALIDATION_ERROR`: a heading of the same or a shallower level than the
-       * target; a setext underline (`===` / `---`), which `extractHeadings`
-       * cannot see but every renderer can; a heading whose text collides with
+       * target; a setext underline — a `===` / `---` line closing a paragraph,
+       * which `extractHeadings` cannot see but every renderer can, while the
+       * same line after a list, a quote or another break is an ordinary
+       * thematic break and passes; a heading whose text collides with
        * one already in the note, which would leave the caller locked out with
        * `AMBIGUOUS_MATCH`; and a code fence left unclosed, which runs to the
        * end of the file and swallows both what follows the section today and
