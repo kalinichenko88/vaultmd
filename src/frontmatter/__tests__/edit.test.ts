@@ -371,17 +371,14 @@ describe('editFrontmatter — nested is read-only', () => {
 // the same yaml warning, on the other surface.
 describe('editFrontmatter — yaml warnings never reach stderr', () => {
   test('a collection key is rewritten silently', () => {
-    const content = '---\n{{DATE}}: x\ntitle: Old\n---\nbody';
-    let result: ReturnType<typeof editFrontmatter> | undefined;
-    const warnings = captureWarnings(() => {
-      result = editFrontmatter(content, (fm) => {
+    const src = '---\n{{DATE}}: x\ntitle: Old\n---\nbody';
+    const mutate = () =>
+      editFrontmatter(src, (fm) => {
         fm.title = 'New';
       });
-    });
-    expect(warnings).toEqual([]);
-    expect(result?.outcome).toBe('edited');
-    expect(parseFrontmatter(result?.content ?? '').frontmatter.title).toBe(
-      'New',
-    );
+    expect(captureWarnings(mutate)).toEqual([]);
+    const { content, outcome } = mutate();
+    expect(outcome).toBe('edited');
+    expect(parseFrontmatter(content).frontmatter.title).toBe('New');
   });
 });

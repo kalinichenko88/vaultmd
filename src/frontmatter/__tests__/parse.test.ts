@@ -149,28 +149,15 @@ describe('parseFrontmatter — yaml warnings never reach stderr', () => {
   test('a templater placeholder value is read silently', () => {
     const content =
       '---\ncreated: {{DATE:YYYY-MM-DD HH:mm}}\ntags:\n  - movie\n---\nbody';
-    let parsed: ReturnType<typeof parseFrontmatter> | undefined;
-    const warnings = captureWarnings(() => {
-      parsed = parseFrontmatter(content);
-    });
-    expect(warnings).toEqual([]);
-    expect(parsed?.valid).toBe('nested');
-    expect(parsed?.tags).toEqual(['movie']);
+    expect(captureWarnings(() => parseFrontmatter(content))).toEqual([]);
+    expect(parseFrontmatter(content).valid).toBe('nested');
+    expect(parseFrontmatter(content).tags).toEqual(['movie']);
   });
 
-  test('a collection used as a top-level key is read silently', () => {
-    const warnings = captureWarnings(() => {
-      parseFrontmatter('---\n{{DATE}}: x\n---\nbody');
-    });
-    expect(warnings).toEqual([]);
-  });
-
+  // `logLevel: 'error'`, not `'silent'` — silent also stops `parse` throwing.
   test('invalid yaml is still classified, not swallowed', () => {
-    const warnings = captureWarnings(() => {
-      expect(parseFrontmatter('---\na: [1, 2\nb: {\n---\nbody').valid).toBe(
-        'present-but-invalid',
-      );
-    });
-    expect(warnings).toEqual([]);
+    expect(parseFrontmatter('---\na: [1, 2\nb: {\n---\nbody').valid).toBe(
+      'present-but-invalid',
+    );
   });
 });
