@@ -51,6 +51,7 @@ fs-atomic     ← vault-io, locked-file, notes        race-aware single-file fs 
 locks         ← locked-file, notes                  concurrency control (in-process mutex + cross-process lockfile)
 vault-io      ← query, notes, vault                 path→safe-IO security chokepoint
 frontmatter   ← notes                               YAML frontmatter: flat writes, nested reads
+headings      ← links, note-index, notes             ATX heading scan + the CommonMark fenced-code rule
 links         ← note-index, vault                    wikilink/relative link extraction + resolution
 note-index    ← query, notes, vault                 SQLite schema + projection + reconcile
 query         ← notes, vault                         read-only SQL over the index
@@ -67,7 +68,7 @@ assembles.
 
 1. **Package public API — `src/index.ts`.** The *only* `exports` entry (`"."`).
    Its exact name set is **frozen** and guarded by `src/__tests__/index.test.ts`
-   (currently 51 names, value + type). Adding/removing/renaming an export means
+   (currently 53 names, value + type). Adding/removing/renaming an export means
    updating that test deliberately. No `vaultmd/<subpath>` is reachable — only
    `"."` is exported.
 2. **Module barrels — `<module>/index.ts`.** The stable *internal* integration

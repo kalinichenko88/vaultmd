@@ -398,3 +398,59 @@ One thing to know about `ignore` here: the globs match the folder's own path, so
 `'Drafts'` prunes the folder and everything under it, while `'Drafts/**'` hides
 only the contents and still lists `Drafts` itself. Write the first form if you
 want the folder gone from the tree.
+
+## Edit one section of a note
+
+`transformNote` first — the whole read-modify-write happens inside one lock, so
+a concurrent writer cannot be lost:
+
+```ts
+import { extractHeadings, parseFrontmatter } from 'vaultmd';
+
+await vault.notes.transformNote('daily/2026-08-08.md', (current) => {
+  if (current === null) {
+    return null;
+  }
+  const { body } = parseFrontmatter(current);
+  const at = current.length - body.length; // frontmatter is an exact prefix
+  const notes = extractHeadings(body).find((h) => h.text === 'Notes');
+  if (!notes) {
+    return null;
+  }
+
+  const head = current.slice(0, at + notes.end);
+  // An empty section, or one ending at a file with no trailing newline, hands
+  // back an `end` that is not on a line boundary — terminate it yourself.
+  const sep = head.endsWith('\n') ? '' : '\n';
+
+  return `${head}${sep}- one more\n${current.slice(at + notes.end)}`;
+});
+```
+
+When there is only one writer, the two-call form reads better:
+
+```ts
+const section = await vault.notes.readSection(path, 'Notes');
+await vault.notes.updateNote(path, {
+  setSection: { heading: 'Notes', body: `${section}- one more\n` },
+});
+```
+
+Note that this pair is last-writer-wins: another process can commit between the
+read and the write.
+
+### Two headings with the same text
+
+`readSection` and `setSection` refuse to guess — they throw `AMBIGUOUS_MATCH`.
+Because a heading's `end` bounds its whole subtree, ancestry is a range check:
+
+```ts
+const hs = extractHeadings(body);
+const weekly = hs.find((h) => h.text === 'Weekly');
+if (!weekly) {
+  return null;
+}
+const target = hs.find(
+  (h) => h.text === 'Notes' && h.start > weekly.start && h.start < weekly.end,
+);
+```

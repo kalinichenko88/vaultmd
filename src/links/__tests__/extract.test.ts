@@ -41,4 +41,33 @@ describe('extractLinks', () => {
     const { mdLinks } = extractLinks(md);
     expect(mdLinks).toEqual(['doc.md']);
   });
+
+  test('a mismatched marker does not end a fence, so its links stay hidden', () => {
+    const md = [
+      'Real [[Outside]] link.',
+      '```ts',
+      '~~~',
+      'const x = "[[Leaked]]"',
+      '```',
+      'Another [[After]].',
+    ].join('\n');
+    const { wikilinks } = extractLinks(md);
+    expect(wikilinks).toEqual(['Outside', 'After']);
+  });
+
+  test('a shorter run does not close a longer fence', () => {
+    const md = ['````', '```', '[[Hidden]]', '````', '[[Shown]]'].join('\n');
+    expect(extractLinks(md).wikilinks).toEqual(['Shown']);
+  });
+
+  test('a fenced block indented 4+ spaces hides its links', () => {
+    const md = [
+      '1. Item',
+      '    ```',
+      '    [[Hidden]]',
+      '    ```',
+      '[[Shown]]',
+    ].join('\n');
+    expect(extractLinks(md).wikilinks).toEqual(['Shown']);
+  });
 });

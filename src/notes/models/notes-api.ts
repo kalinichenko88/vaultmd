@@ -9,8 +9,8 @@ import type { UpdateOp } from './update-op.ts';
  * vault-relative path; the six mutating methods (`createNote`, `updateNote`,
  * `editFrontmatter`, `transformNote`, `deleteNote`, `moveNote`) run inside the
  * per-file lock so the `.md` file and its index row never drift (`moveNote`
- * holds both ends' locks). `readNote` and `exists` are consistent reads and do
- * not acquire the lock.
+ * holds both ends' locks). `readNote`, `readSection`, and `exists` are
+ * consistent reads and do not acquire the lock.
  */
 export type NotesApi = {
   /**
@@ -24,6 +24,38 @@ export type NotesApi = {
     path: string,
     opts?: { withLinks?: boolean },
   ): Promise<ReadNoteResult>;
+  /**
+   * Read the body of the section opened by a heading — everything after the
+   * heading line up to the next heading of the same or a shallower level, or
+   * the end of the file. Subsections are included; blank lines directly after
+   * the heading and directly before the next one are not, so the result can be
+   * written straight back with `updateNote({ setSection })` without disturbing
+   * the file's spacing.
+   *
+   * The heading is matched by exact, case-sensitive text against a CLOSED
+   * frontmatter block's body; an unterminated `---` is not frontmatter and its
+   * headings are addressable like any other content.
+   *
+   * This is a plain read and takes no lock. Pairing it with `setSection` is
+   * therefore last-writer-wins across the two calls — use `transformNote` with
+   * `extractHeadings` when a concurrent writer must not be lost.
+   *
+   * A section whose span runs into an **unterminated code fence** is not
+   * addressable and throws `VALIDATION_ERROR`. Per CommonMark such a fence runs
+   * to the end of the file, so the section would swallow every heading after it
+   * — reading it would return content the author never meant as this section,
+   * and writing it back would delete that content. Close the fence, or reach
+   * for {@link NotesApi.transformNote}.
+   *
+   * @param path Vault-relative path to the `.md` file.
+   * @param heading Exact heading text, without the leading `#` characters.
+   * @returns The section body, verbatim, or `''` when the section is empty.
+   * @throws {@link MdVaultError} `NOT_FOUND` if the file does not exist,
+   * `NO_MATCH` if no heading has that text, `AMBIGUOUS_MATCH` if more than one
+   * does — drop to {@link extractHeadings} to disambiguate — or
+   * `VALIDATION_ERROR` if the section runs into an unterminated fence.
+   */
+  readSection(path: string, heading: string): Promise<string>;
   /**
    * Whether a note exists at `path` — the non-throwing probe that turns the
    * create-or-update dance into a plain branch instead of a `try`/`catch` on
@@ -47,10 +79,12 @@ export type NotesApi = {
   /**
    * Mutate a note's body, leaving any frontmatter block verbatim: `append` and
    * `prepend` add text at either end (both create the note when it is absent),
-   * `setBody` replaces the body wholesale, and `editByMatch` replaces a single
-   * unique substring.
+   * `setBody` replaces the body wholesale, `editByMatch` replaces a single
+   * unique substring, and `setSection` replaces the body under one heading.
    * @throws {@link MdVaultError} `NO_MATCH` / `AMBIGUOUS_MATCH` for
-   * `editByMatch`, or `REFUSE_CREATE` when `setBody` targets a missing note.
+   * `editByMatch` and `setSection`, `REFUSE_CREATE` when `setBody` targets a
+   * missing note, or `VALIDATION_ERROR` when a `setSection` body would
+   * restructure the document outside its own section.
    */
   updateNote(path: string, op: UpdateOp): Promise<void>;
   /**

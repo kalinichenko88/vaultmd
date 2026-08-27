@@ -152,6 +152,11 @@ The only public entry point is `createVault`. Everything below hangs off the
 // Read a note; pass { withLinks: true } to include outbound + backlinks.
 readNote(path, opts?: { withLinks?: boolean }): Promise<ReadNoteResult>
 
+// Read the body under one heading — subsections in, edge blank lines out.
+// A section running into an unterminated code fence has no defined end and is
+// refused (VALIDATION_ERROR) rather than handed back as "the rest of the file".
+readSection(path, heading: string): Promise<string>
+
 // Is there a note here? Non-throwing probe, so create-or-update is a plain branch.
 exists(path): Promise<boolean>
 
@@ -165,6 +170,7 @@ updateNote(path, op:
   | { prepend: string }     // at the top of the BODY, after any frontmatter
   | { setBody: string }     // replace the body, keep the frontmatter
   | { editByMatch: { old: string; new: string } }  // exact, unambiguous
+  | { setSection: { heading: string; body: string } }  // one section's body
 ): Promise<void>
 
 // Edit frontmatter via a mutator callback. Returns 'edited' | 'unchanged' | 'unverifiable'.
@@ -334,6 +340,7 @@ import {
   serializeFrontmatter,    // flat map → fenced YAML block
   isFlatFrontmatter,       // the write gate: is this map safe to emit?
   deriveTags,
+  extractHeadings,         // scan ATX headings and their section spans
   extractLinks,            // pull wikilinks / relative links from text
   storedLinksFor,
 } from 'vaultmd';

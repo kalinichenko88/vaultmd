@@ -20,8 +20,8 @@ describe('applySchema', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  test('SCHEMA_VERSION is 2', () => {
-    expect(SCHEMA_VERSION).toBe(2);
+  test('SCHEMA_VERSION is 3', () => {
+    expect(SCHEMA_VERSION).toBe(3);
   });
 
   test('creates every base table including the FTS5 virtual table', () => {

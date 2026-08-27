@@ -10,6 +10,12 @@ import {
 } from '@/frontmatter/index.ts';
 import { exclusiveCreate, statSig } from '@/fs-atomic/index.ts';
 import {
+  createFenceTracker,
+  extractHeadings,
+  type Heading,
+  hasUnclosedFence,
+} from '@/headings/index.ts';
+import {
   type CommitEvent,
   type CrossLock,
   withFileDelete,
@@ -59,6 +65,21 @@ export function createNotes(deps: NotesDeps): NotesApi {
     }
 
     return result;
+  }
+
+  async function readSection(path: string, heading: string): Promise<string> {
+    const read = await vaultIo.readVaultFile(path);
+    if (!read) {
+      throw new MdVaultError('NOT_FOUND', `note not found: ${path}`);
+    }
+    // Match against the body only, so a `#` comment inside a CLOSED frontmatter
+    // block cannot be addressed. An unterminated `---` is not frontmatter at
+    // all — parseFrontmatter returns the whole file as body — and stays
+    // addressable, exactly as it does for setBody/append/prepend.
+    const { body } = parseFrontmatter(read.content);
+    const target = locateSection(body, heading, vaultIo.toVaultRelative(path));
+
+    return body.slice(target.bodyStart, target.end);
   }
 
   async function exists(path: string): Promise<boolean> {
@@ -111,6 +132,171 @@ export function createNotes(deps: NotesDeps): NotesApi {
     }
 
     return res.content;
+  }
+
+  function locateSection(
+    body: string,
+    heading: string,
+    display: string,
+  ): Heading {
+    const hits = extractHeadings(body).filter((h) => h.text === heading);
+    if (hits.length === 0) {
+      throw new MdVaultError(
+        'NO_MATCH',
+        `no heading "${heading}" in ${display}`,
+      );
+    }
+    if (hits.length > 1) {
+      throw new MdVaultError(
+        'AMBIGUOUS_MATCH',
+        `ambiguous heading "${heading}" (${hits.length} matches) in ${display}`,
+      );
+    }
+    // A section whose span reaches an unterminated fence has no defined end:
+    // per CommonMark the fence runs to EOF, so the "section" is the rest of the
+    // file — every later heading included. Reading it would hand back content
+    // the author never meant as this section, and replacing it would delete
+    // that content outright. Refusing both keeps the read → write round trip
+    // honest: every section this API returns can be written straight back.
+    if (hasUnclosedFence(body.slice(0, hits[0].end))) {
+      throw new MdVaultError(
+        'VALIDATION_ERROR',
+        `section "${heading}" runs into an unterminated code fence in ${display}; close the fence or use transformNote`,
+      );
+    }
+
+    return hits[0];
+  }
+
+  /** The heading texts that appear more than once — i.e. are unaddressable. */
+  function duplicateHeadings(md: string): Set<string> {
+    const texts = extractHeadings(md).map((h) => h.text);
+
+    return new Set(texts.filter((t, i) => texts.indexOf(t) !== i));
+  }
+
+  /**
+   * The text a setext underline (`===` / `---`) would turn into a heading, or
+   * `null`. `extractHeadings` is ATX-only, so the level guard cannot see these.
+   */
+  function setextHeading(md: string): string | null {
+    const tracker = createFenceTracker();
+    const rule = /^ {0,3}(?:=+|-+)[ \t]*$/;
+    let previous = '';
+    for (const raw of md.split('\n')) {
+      const line = raw.replace(/\r$/, '');
+      if (tracker.inFence(line)) {
+        previous = '';
+        continue;
+      }
+      const underlines =
+        previous.trim() !== '' &&
+        !/^ {0,3}#{1,6}(?:[ \t]|$)/.test(previous) &&
+        !rule.test(previous) &&
+        rule.test(line);
+      if (underlines) {
+        return previous.trim();
+      }
+      previous = line;
+    }
+
+    return null;
+  }
+
+  function assertPayloadFits(
+    payload: string,
+    level: number,
+    display: string,
+  ): void {
+    // extractHeadings is fence-aware, so a heading hidden inside a CLOSED fence
+    // is not a heading here — and stays hidden once written.
+    const inner = extractHeadings(payload).find((h) => h.level <= level);
+    if (inner) {
+      throw new MdVaultError(
+        'VALIDATION_ERROR',
+        `setSection body has a level-${inner.level} heading "${inner.text}", which would end the target section in ${display}`,
+      );
+    }
+    const setext = setextHeading(payload);
+    if (setext !== null) {
+      throw new MdVaultError(
+        'VALIDATION_ERROR',
+        `setSection body has a setext heading "${setext}", which would end the target section in ${display}`,
+      );
+    }
+    // Unconditional: an unclosed fence runs to EOF, so it swallows whatever
+    // follows the section — and when nothing follows yet, it swallows whatever
+    // a later append adds, and makes this very section unaddressable.
+    if (hasUnclosedFence(payload)) {
+      throw new MdVaultError(
+        'VALIDATION_ERROR',
+        `setSection body leaves a code fence unclosed in ${display}`,
+      );
+    }
+  }
+
+  /** The `setSection` rewrite, over a frontmatter-stripped body. */
+  function replaceSection(
+    body: string,
+    op: { heading: string; body: string },
+    display: string,
+  ): string {
+    const target = locateSection(body, op.heading, display);
+    // A whitespace-only payload is the EMPTY payload: it is non-empty as a
+    // string but blank as a line, so writing it would leave a section the next
+    // call reads as empty and inserts BEFORE — growing the file on every write,
+    // while readSection keeps answering ''.
+    const next = op.body.trim() === '' ? '' : op.body;
+    assertPayloadFits(next, target.level, display);
+    // Emptying a section merges the blank run under the heading with the one
+    // before the next heading; keeping both would widen the gap on every clear.
+    const lineBreak = body.indexOf('\n', target.start);
+    const afterHeading = lineBreak === -1 ? body.length : lineBreak + 1;
+    const head = body.slice(0, next === '' ? afterHeading : target.bodyStart);
+    const tail = body.slice(target.end);
+    // Blank lines at either edge are boundary material, not payload text: the
+    // span is LINE-shaped, so they are normalised as LINES (a horizontal-
+    // whitespace-only match, agreeing with extractHeadings' `.trim()` blank
+    // rule) rather than as lone `\n` characters — otherwise a payload with a
+    // blank edge line migrates outside the span and grows the file on every
+    // repeat of an identical call.
+    const lead = next.replace(/^(?:[^\S\r\n]*\r?\n)+/, '');
+    // Trailing blank lines collapse onto the newline that already terminates
+    // the last non-blank line — CRLF stays CRLF, LF stays LF.
+    const trimmed = lead.replace(
+      /(\r?\n)(?:[^\S\r\n]*\r?\n)*[^\S\r\n]*$/,
+      '$1',
+    );
+    // Match the terminator the replaced span itself carried, so a file keeps
+    // its trailing newline — or its absence — wherever the section sits. An
+    // EMPTY span carries no terminator of its own, so the question is what
+    // follows: anything at all has to start on its own line, and at the end of
+    // the file the file's own ending decides.
+    const spanTerminated = tail !== '' || body.endsWith('\n');
+    const text =
+      lead === ''
+        ? ''
+        : spanTerminated && !trimmed.endsWith('\n')
+          ? `${trimmed}\n`
+          : trimmed;
+    // A heading that is the file's last line has no newline of its own.
+    const sep = text !== '' && !head.endsWith('\n') ? '\n' : '';
+    const result = `${head}${sep}${text}${tail}`;
+    // The level and setext guards stop the payload ENDING the target section;
+    // this stops it colliding with a heading that already exists, which would
+    // leave the caller locked out of its own section with AMBIGUOUS_MATCH.
+    const before = duplicateHeadings(body);
+    const collision = [...duplicateHeadings(result)].find(
+      (text) => !before.has(text),
+    );
+    if (collision !== undefined) {
+      throw new MdVaultError(
+        'VALIDATION_ERROR',
+        `setSection body would make the heading "${collision}" ambiguous in ${display}`,
+      );
+    }
+
+    return result;
   }
 
   async function createNote(
@@ -207,6 +393,19 @@ export function createNotes(deps: NotesDeps): NotesApi {
       }
       if ('setBody' in op) {
         return `${prefix}${fenceNl}${op.setBody}`;
+      }
+      if ('setSection' in op) {
+        // No fenceNl guard needed here: a frontmatter block with no trailing
+        // newline parses to an empty body, an empty body has no headings, and
+        // that is NO_MATCH below before anything is written.
+        if (body === null) {
+          throw new MdVaultError(
+            'NO_MATCH',
+            `no section in missing file: ${display}`,
+          );
+        }
+
+        return `${prefix}${replaceSection(body, op.setSection, display)}`;
       }
       const { old, new: replacement } = op.editByMatch;
       if (body === null) {
@@ -307,6 +506,7 @@ export function createNotes(deps: NotesDeps): NotesApi {
 
   return {
     readNote,
+    readSection,
     exists,
     createNote,
     updateNote,

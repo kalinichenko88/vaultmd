@@ -13,6 +13,8 @@ export {
   serializeFrontmatter,
 } from '@/frontmatter/index.ts';
 export type { Sig } from '@/fs-atomic/index.ts';
+export type { Heading } from '@/headings/index.ts';
+export { extractHeadings } from '@/headings/index.ts';
 export type {
   ExtractedLinks,
   LinkResolution,

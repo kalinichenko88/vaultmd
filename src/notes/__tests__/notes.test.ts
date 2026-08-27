@@ -1,10 +1,17 @@
 import type { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { MdVaultError } from '@/errors.ts';
+import { type MdVaultCode, MdVaultError } from '@/errors.ts';
 import type { CommitEvent } from '@/locked-file/index.ts';
 import {
   applySchema,
@@ -25,6 +32,9 @@ let io: VaultIo;
 let cfg: IndexConfig;
 let query: ReturnType<typeof createQuery>;
 let notes: ReturnType<typeof createNotes>;
+
+const read = (name: string): Promise<string> =>
+  readFile(join(vaultDir, name), 'utf8');
 
 beforeEach(async () => {
   base = await mkdtemp(join(tmpdir(), 'vaultmd-notes-'));
@@ -708,5 +718,461 @@ describe('createNote — nested frontmatter', () => {
 
     expect(caught).toBeInstanceOf(MdVaultError);
     expect((caught as MdVaultError).code).toBe('FRONTMATTER_INVALID');
+  });
+});
+
+describe('readSection', () => {
+  test('returns the section body, subsections included, edges trimmed', async () => {
+    await writeFile(
+      join(vaultDir, 'note.md'),
+      '# Day\n\n## Notes\n\nfirst\n\n### Sub\nmore\n\n## Links\n- x\n',
+    );
+    expect(await notes.readSection('note.md', 'Notes')).toBe(
+      'first\n\n### Sub\nmore\n',
+    );
+  });
+
+  test('an empty section reads as the empty string', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## Notes\n\n## Links\n');
+    expect(await notes.readSection('note.md', 'Notes')).toBe('');
+  });
+
+  test('missing file → NOT_FOUND', async () => {
+    let err: unknown;
+    try {
+      await notes.readSection('ghost.md', 'Notes');
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(MdVaultError);
+    expect((err as MdVaultError).code).toBe('NOT_FOUND');
+  });
+
+  test('no such heading → NO_MATCH', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## Notes\nbody\n');
+    let err: unknown;
+    try {
+      await notes.readSection('note.md', 'Nope');
+    } catch (e) {
+      err = e;
+    }
+    expect((err as MdVaultError).code).toBe('NO_MATCH');
+  });
+
+  test('two headings with the same text → AMBIGUOUS_MATCH', async () => {
+    await writeFile(
+      join(vaultDir, 'note.md'),
+      '# Daily\n## Notes\na\n# Weekly\n## Notes\nb\n',
+    );
+    let err: unknown;
+    try {
+      await notes.readSection('note.md', 'Notes');
+    } catch (e) {
+      err = e;
+    }
+    expect((err as MdVaultError).code).toBe('AMBIGUOUS_MATCH');
+  });
+
+  test('a hash comment inside closed frontmatter is not a heading', async () => {
+    await writeFile(
+      join(vaultDir, 'note.md'),
+      '---\n# just a yaml comment\ntitle: T\n---\n## Notes\nbody\n',
+    );
+    let err: unknown;
+    try {
+      await notes.readSection('note.md', 'just a yaml comment');
+    } catch (e) {
+      err = e;
+    }
+    expect((err as MdVaultError).code).toBe('NO_MATCH');
+    expect(await notes.readSection('note.md', 'Notes')).toBe('body\n');
+  });
+
+  test('an unterminated --- is not frontmatter, so its headings are addressable', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '---\n# Notes\nsecret: yes\n');
+    expect(await notes.readSection('note.md', 'Notes')).toBe('secret: yes\n');
+  });
+});
+
+describe('updateNote setSection', () => {
+  test('replaces the body and leaves the heading and spacing alone', async () => {
+    await writeFile(
+      join(vaultDir, 'note.md'),
+      '## Notes\n\nold\n\n## Links\n- x\n',
+    );
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: 'new' },
+    });
+    expect(await read('note.md')).toBe('## Notes\n\nnew\n\n## Links\n- x\n');
+  });
+
+  test('invents no blank lines in a tight file', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## Notes\nold\n## Links\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: 'new' },
+    });
+    expect(await read('note.md')).toBe('## Notes\nnew\n## Links\n');
+  });
+
+  test('leaves the frontmatter block verbatim', async () => {
+    await writeFile(
+      join(vaultDir, 'note.md'),
+      '---\ntitle: T\n---\n## Notes\nold\n',
+    );
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: 'new\n' },
+    });
+    expect(await read('note.md')).toBe('---\ntitle: T\n---\n## Notes\nnew\n');
+  });
+
+  test('an empty body empties the section and keeps the separator', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## Notes\nold\n\n## Links\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: '' },
+    });
+    expect(await read('note.md')).toBe('## Notes\n\n## Links\n');
+  });
+
+  test('a heading as the last line without a newline gains one', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## Notes');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: 'x' },
+    });
+    expect(await read('note.md')).toBe('## Notes\nx');
+  });
+
+  test('writing into an empty section does not weld onto the next heading', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '# A\n# B\nz\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'A', body: 'x' },
+    });
+    expect(await read('note.md')).toBe('# A\nx\n# B\nz\n');
+  });
+
+  test('writing into an empty section keeps the separator blank line', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '# A\n\n# B\nz\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'A', body: 'again' },
+    });
+    expect(await read('note.md')).toBe('# A\nagain\n\n# B\nz\n');
+  });
+
+  test('an empty last section keeps the file trailing newline', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '---\ntitle: T\n---\n# A\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'A', body: 'x' },
+    });
+    expect(await read('note.md')).toBe('---\ntitle: T\n---\n# A\nx\n');
+  });
+
+  test('writing into a CRLF file inserts an LF-terminated line', async () => {
+    await writeFile(
+      join(vaultDir, 'note.md'),
+      '## Notes\r\nold\r\n## Links\r\n',
+    );
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: 'new' },
+    });
+    expect(await read('note.md')).toBe('## Notes\r\nnew\n## Links\r\n');
+  });
+
+  test('a missing file → NO_MATCH, and nothing is created', async () => {
+    let err: unknown;
+    try {
+      await notes.updateNote('ghost.md', {
+        setSection: { heading: 'Notes', body: 'x' },
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect((err as MdVaultError).code).toBe('NO_MATCH');
+    expect(await notes.exists('ghost.md')).toBe(false);
+  });
+});
+
+describe('setSection payload guards', () => {
+  async function rejects(body: string, code: MdVaultCode): Promise<void> {
+    const before = await read('note.md');
+    let err: unknown;
+    try {
+      await notes.updateNote('note.md', {
+        setSection: { heading: 'Notes', body },
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect((err as MdVaultError).code).toBe(code);
+    expect(await read('note.md')).toBe(before);
+  }
+
+  beforeEach(async () => {
+    await writeFile(
+      join(vaultDir, 'note.md'),
+      '## Notes\nold\n## Links\n- x\n',
+    );
+  });
+
+  test('a same-level heading is rejected and nothing is written', async () => {
+    await rejects('a\n## Other\nb', 'VALIDATION_ERROR');
+  });
+
+  test('a shallower heading is rejected', async () => {
+    await rejects('# Top', 'VALIDATION_ERROR');
+  });
+
+  test('a deeper heading is accepted', async () => {
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: '### Sub\ntext' },
+    });
+    expect(await read('note.md')).toBe(
+      '## Notes\n### Sub\ntext\n## Links\n- x\n',
+    );
+  });
+
+  test('a heading hidden by a closed fence is accepted', async () => {
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: '```\n## Other\n```' },
+    });
+    expect(await read('note.md')).toBe(
+      '## Notes\n```\n## Other\n```\n## Links\n- x\n',
+    );
+    // The later heading is still addressable, which is the point of the guard.
+    expect(await notes.readSection('note.md', 'Links')).toBe('- x\n');
+  });
+
+  test('an unclosed fence is rejected when a heading follows', async () => {
+    await rejects('```ts\ncode', 'VALIDATION_ERROR');
+  });
+
+  test('an unclosed fence is rejected at EOF too, where it would swallow later appends', async () => {
+    const original = '## Notes\nold\n';
+    await writeFile(join(vaultDir, 'eof.md'), original);
+    let err: unknown;
+    try {
+      await notes.updateNote('eof.md', {
+        setSection: { heading: 'Notes', body: '```ts\ncode' },
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect((err as MdVaultError).code).toBe('VALIDATION_ERROR');
+    expect(await read('eof.md')).toBe(original);
+  });
+
+  test('a setext underline in the payload is rejected', async () => {
+    await rejects('See below\n---\nmore text', 'VALIDATION_ERROR');
+  });
+
+  test('a payload heading colliding with an existing one is rejected', async () => {
+    await rejects('### Notes\nx', 'VALIDATION_ERROR');
+    await rejects('### Links\nx', 'VALIDATION_ERROR');
+  });
+
+  test('a deeper heading with a fresh name is still accepted', async () => {
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: '### Fresh\nx' },
+    });
+    expect(await read('note.md')).toBe(
+      '## Notes\n### Fresh\nx\n## Links\n- x\n',
+    );
+  });
+});
+
+describe('setSection stability', () => {
+  test('a whitespace-only payload blanks the section and does not grow it', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## Notes\n## Links\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: ' ' },
+    });
+    const once = await read('note.md');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: ' ' },
+    });
+    expect(await read('note.md')).toBe(once);
+    expect(once).toBe('## Notes\n## Links\n');
+    expect(await notes.readSection('note.md', 'Notes')).toBe('');
+  });
+
+  test('a payload with trailing blank lines is stable across repeats', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## Notes\nold\n\n## Links\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: 'x\n\n' },
+    });
+    const once = await read('note.md');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: 'x\n\n' },
+    });
+    expect(await read('note.md')).toBe(once);
+  });
+
+  test('read then write is byte-identical and fires no commit', async () => {
+    const original = '## Notes\n\nfirst\n\n### Sub\nmore\n\n## Links\n- x\n';
+    await writeFile(join(vaultDir, 'note.md'), original);
+    const events: CommitEvent[] = [];
+    const watched = createNotes({
+      db,
+      vaultIo: io,
+      cfg,
+      query,
+      cross: false,
+      onCommit: (e) => {
+        events.push(e);
+      },
+    });
+    const before = await stat(join(vaultDir, 'note.md'));
+    const section = await watched.readSection('note.md', 'Notes');
+    await watched.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: section },
+    });
+    const after = await stat(join(vaultDir, 'note.md'));
+    expect(await read('note.md')).toBe(original);
+    expect(after.mtimeMs).toBe(before.mtimeMs);
+    expect(events).toEqual([]);
+  });
+
+  test('read then write is byte-identical on a CRLF file with a spaced section and a subsection', async () => {
+    const original =
+      '## Notes\r\n\r\nfirst\r\n\r\n### Sub\r\nmore\r\n\r\n## Links\r\n- x\r\n';
+    await writeFile(join(vaultDir, 'note.md'), original);
+    const before = await stat(join(vaultDir, 'note.md'));
+    const section = await notes.readSection('note.md', 'Notes');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: section },
+    });
+    const after = await stat(join(vaultDir, 'note.md'));
+    expect(await read('note.md')).toBe(original);
+    expect(after.mtimeMs).toBe(before.mtimeMs);
+  });
+
+  test('a section running into an unterminated fence is not addressable at all', async () => {
+    // Per CommonMark the fence swallows `## Links`, so the section has no
+    // defined end. Reading it would hand back content the author never meant
+    // as this section, and writing it would delete that content outright.
+    const original = '## Notes\n```\ncode\n## Links\n';
+    await writeFile(join(vaultDir, 'note.md'), original);
+    let readErr: unknown;
+    try {
+      await notes.readSection('note.md', 'Notes');
+    } catch (e) {
+      readErr = e;
+    }
+    expect((readErr as MdVaultError).code).toBe('VALIDATION_ERROR');
+    let writeErr: unknown;
+    try {
+      await notes.updateNote('note.md', {
+        setSection: { heading: 'Notes', body: '- fresh\n' },
+      });
+    } catch (e) {
+      writeErr = e;
+    }
+    expect((writeErr as MdVaultError).code).toBe('VALIDATION_ERROR');
+    expect(await read('note.md')).toBe(original);
+  });
+
+  test('later sections survive a write against a note with a stray fence', async () => {
+    const original =
+      '# Daily\n\n## Notes\n\n```sh\ngit status\n\n## Tasks\n\n- [ ] ship it\n';
+    await writeFile(join(vaultDir, 'stray.md'), original);
+    let err: unknown;
+    try {
+      await notes.updateNote('stray.md', {
+        setSection: { heading: 'Notes', body: '- fresh\n' },
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect((err as MdVaultError).code).toBe('VALIDATION_ERROR');
+    expect(await read('stray.md')).toBe(original);
+  });
+
+  test('the trailing newline survives a write to the last section', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '# Daily\n\n## Notes\n- old\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: '- new' },
+    });
+    expect(await read('note.md')).toBe('# Daily\n\n## Notes\n- new\n');
+  });
+
+  test('a file with no trailing newline still does not gain one', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## Notes\n- old');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: '- new' },
+    });
+    expect(await read('note.md')).toBe('## Notes\n- new');
+  });
+
+  test('emptying a section does not widen the gap before the next heading', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## A\n\nold\n\n## B\n\nx\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'A', body: '' },
+    });
+    expect(await read('note.md')).toBe('## A\n\n## B\n\nx\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'A', body: '' },
+    });
+    expect(await read('note.md')).toBe('## A\n\n## B\n\nx\n');
+  });
+
+  test('the index follows the write, old text out and new text in', async () => {
+    await writeFile(
+      join(vaultDir, 'note.md'),
+      '## Notes\nzygomorphic\n## Links\n',
+    );
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: 'quixotically' },
+    });
+    expect(query.searchText('quixotically').map((h) => h.path)).toEqual([
+      'note.md',
+    ]);
+    expect(query.searchText('zygomorphic')).toEqual([]);
+  });
+
+  test('a leading-blank payload is stripped as a line and does not grow the file on repeat', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## Notes\nold\n## Links\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: '\n\nx' },
+    });
+    const once = await read('note.md');
+    expect(once).toBe('## Notes\nx\n## Links\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: '\n\nx' },
+    });
+    expect(await read('note.md')).toBe(once);
+  });
+
+  test('a CRLF trailing-blank payload does not grow the file on repeat', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## Notes\nold\n## Links\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: 'x\r\n\r\n' },
+    });
+    const once = await read('note.md');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: 'x\r\n\r\n' },
+    });
+    expect(await read('note.md')).toBe(once);
+  });
+
+  test('a whitespace-then-newline trailing-blank payload does not grow the file on repeat', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## Notes\nold\n## Links\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: 'x\n \n' },
+    });
+    const once = await read('note.md');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: 'x\n \n' },
+    });
+    expect(await read('note.md')).toBe(once);
+  });
+
+  test('a leading-blank payload on a section that runs to EOF does not grow the file on repeat', async () => {
+    await writeFile(join(vaultDir, 'note.md'), '## Notes\nold\n');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: '\n\nx' },
+    });
+    const once = await read('note.md');
+    await notes.updateNote('note.md', {
+      setSection: { heading: 'Notes', body: '\n\nx' },
+    });
+    expect(await read('note.md')).toBe(once);
   });
 });

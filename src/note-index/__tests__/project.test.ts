@@ -53,6 +53,34 @@ describe('deriveTitle', () => {
       'Deep Note',
     );
   });
+
+  test('ignores an H1 inside a fenced code block', () => {
+    const body = '```\n# not a title, a shell comment\n```\n# real\n';
+    expect(deriveTitle({}, body, 'n.md')).toBe('real');
+  });
+
+  test('a whitespace-only H1 falls back to the filename', () => {
+    expect(deriveTitle({}, '#   \n', 'n.md')).toBe('n');
+  });
+
+  test('strips a closing hash sequence', () => {
+    expect(deriveTitle({}, '# Title ##\n', 'n.md')).toBe('Title');
+  });
+
+  test('accepts up to three spaces of indent', () => {
+    expect(deriveTitle({}, '  # Indented\n', 'n.md')).toBe('Indented');
+    expect(deriveTitle({}, '    # Four\n', 'n.md')).toBe('n');
+  });
+
+  test('unchanged shapes stay unchanged', () => {
+    expect(deriveTitle({}, '# Title\n', 'n.md')).toBe('Title');
+    expect(deriveTitle({}, '#\tTabbed\n', 'n.md')).toBe('Tabbed');
+    expect(deriveTitle({}, '#\n', 'n.md')).toBe('n');
+    expect(deriveTitle({}, '## Only H2\n', 'n.md')).toBe('n');
+    expect(deriveTitle({ title: 'From FM' }, '# Body\n', 'n.md')).toBe(
+      'From FM',
+    );
+  });
 });
 
 describe('projectRow', () => {
