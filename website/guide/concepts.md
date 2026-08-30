@@ -71,8 +71,11 @@ reads, writes, `stat` and enumeration alike. A path with a dot-segment is
 refused, and it is checked twice: on the requested path *and* on the
 symlink-resolved target, so `.git`, `.env`, `.obsidian` and the index's own
 `.db` sidecars stay unreachable even behind a link that never leaves the vault.
-An alias like `notes.md` → `.obsidian/secret.md` throws `ALLOWLIST_VIOLATION`;
-a symlink to a *visible* note resolves normally.
+An alias like `notes.md` → `.obsidian/secret.md` throws `ALLOWLIST_VIOLATION`,
+and `listFolders` skips `notes` → `.obsidian` too; a symlink to a *visible*
+note resolves normally. Since nothing hidden is reachable, a hidden prefix in
+`prefixes` is rejected outright by `createVaultIo` rather than silently
+matching nothing.
 
 Everything else on the IO surface is `.md`-only — a non-markdown path throws
 `NOT_MARKDOWN`. The one exception is

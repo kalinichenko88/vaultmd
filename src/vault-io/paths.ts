@@ -31,6 +31,14 @@ export function canonicalizeRelative(rel: string): string {
   return out.join('/');
 }
 
+// A path is hidden if any segment starts with a dot — the rule the enumeration
+// walk applies to folders, here to whole paths. Splits on either separator so a
+// `relative()` result works untouched. An empty path is the vault root itself,
+// which is never hidden.
+export function isHidden(path: string): boolean {
+  return path.split(/[/\\]/).some((seg) => seg.startsWith('.'));
+}
+
 export function canonPrefix(p: string): string {
   // Prefixes are canonicalized like paths: NFC, '/'-separated, no trailing '/'.
   const nfc = p.normalize('NFC').replaceAll('\\', '/');
@@ -43,6 +51,14 @@ export function canonPrefix(p: string): string {
       throw new MdVaultError(
         'ALLOWLIST_VIOLATION',
         `vault prefix may not contain '..': ${p}`,
+      );
+    }
+    // Hidden state is unreachable through the chokepoint, so a hidden prefix is
+    // unsatisfiable: fail here rather than dead-end every later call.
+    if (seg.startsWith('.')) {
+      throw new MdVaultError(
+        'ALLOWLIST_VIOLATION',
+        `vault prefix may not be hidden: ${p}`,
       );
     }
     out.push(seg);

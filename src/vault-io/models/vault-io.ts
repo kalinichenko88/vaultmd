@@ -30,7 +30,8 @@ export type VaultIo = {
    */
   toKey(rel: string): string;
   /**
-   * Test whether `rel` falls within the given access allowlist.
+   * Test whether `rel` falls within the given access allowlist. A hidden
+   * (dot-segment) path is never permitted, whatever the allowlist says.
    * @param rel Vault-relative path to test.
    * @param access `'read'` or `'write'` allowlist to check against.
    * @returns `true` if the path is permitted; `false` otherwise.

@@ -49,4 +49,11 @@ describe('canonPrefix', () => {
   test('rejects .. with ALLOWLIST_VIOLATION', () => {
     expect(code(() => canonPrefix('../x'))).toBe('ALLOWLIST_VIOLATION');
   });
+
+  test('rejects a hidden prefix, which nothing could ever satisfy', () => {
+    expect(code(() => canonPrefix('.obsidian'))).toBe('ALLOWLIST_VIOLATION');
+    expect(code(() => canonPrefix('Public/.drafts'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+  });
 });

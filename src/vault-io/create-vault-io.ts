@@ -22,7 +22,7 @@ import type { Access } from './models/access.ts';
 import type { VaultIo } from './models/vault-io.ts';
 import type { VaultIoConfig } from './models/vault-io-config.ts';
 import type { VaultPrefixes } from './models/vault-prefixes.ts';
-import { canonicalizeRelative, canonPrefix } from './paths.ts';
+import { canonicalizeRelative, canonPrefix, isHidden } from './paths.ts';
 import { realTargetRelativeToRoot } from './realpath-guard.ts';
 
 /**
@@ -110,7 +110,10 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
       return false;
     }
 
-    return matches(x, canonPrefixes[access]);
+    // The hidden rule is part of the boundary, not just of the resolve path:
+    // `query` filters read scope on `can` alone, so a stale row an older index
+    // built for a hidden note must not read as in-scope.
+    return !isHidden(x) && matches(x, canonPrefixes[access]);
   }
 
   function resolveVaultPath(rel: string, access: Access = 'read'): string {
@@ -226,12 +229,10 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
   };
 }
 
-// A path is hidden if any segment starts with a dot — the rule the enumeration
-// walk applies to folders, here applied to whole paths on both sides of a
-// symlink. Splits on either separator so a `relative()` result works untouched.
-// An empty path is the vault root itself, which is never hidden.
+// The throwing form of `isHidden`, applied to whole paths on both sides of a
+// symlink. `rel` is only used for the error message.
 function refuseHidden(path: string, rel: string): void {
-  if (path.split(/[/\\]/).some((seg) => seg.startsWith('.'))) {
+  if (isHidden(path)) {
     throw new MdVaultError(
       'ALLOWLIST_VIOLATION',
       `vault path is hidden: ${rel}`,

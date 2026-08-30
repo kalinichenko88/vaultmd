@@ -691,6 +691,30 @@ describe('hidden state on the markdown surfaces', () => {
     expect((await io.readVaultFile('alias.md'))?.content).toBe('# real');
   });
 
+  test('can() answers false for a hidden path, whatever the allowlist', () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    // Stale rows an older index built before the guard must not read as
+    // in-scope: `query` filters on `can` alone.
+    expect(io.can('.secret.md', 'read')).toBe(false);
+    expect(io.can('.obsidian/cfg.md', 'read')).toBe(false);
+    expect(io.can('.secret.md', 'write')).toBe(false);
+    expect(io.can('notes/keep.md', 'read')).toBe(true);
+  });
+
+  test('listFolders skips a dot-folder aliased by an in-vault symlink', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, '.obsidian/deep'), { recursive: true });
+    await mkdir(join(vault, 'real'), { recursive: true });
+    await symlink(join(vault, '.obsidian'), join(vault, 'notes'));
+    expect(await io.listFolders()).toEqual(['real']);
+  });
+
   test('enumeration skips a hidden .md at the vault root', async () => {
     const io = createVaultIo({
       root: vault,
