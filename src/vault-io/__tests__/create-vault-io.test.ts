@@ -491,3 +491,132 @@ describe('enumeration cycle guard', () => {
     expect(await io.listMarkdown()).toEqual(['a/b/x.md']);
   });
 });
+
+describe('readBinary', () => {
+  test('reads a non-markdown file as bytes; missing or a directory -> null', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, 'assets'), { recursive: true });
+    const png = Uint8Array.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    await writeFile(join(vault, 'assets/logo.png'), png);
+    expect(await io.readBinary('assets/logo.png')).toEqual(png);
+    expect(await io.readBinary('assets/missing.png')).toBeNull();
+    expect(await io.readBinary('assets')).toBeNull(); // a directory is not a file
+  });
+
+  test('readVaultFile still rejects the same non-markdown path', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await writeFile(join(vault, 'logo.png'), 'x');
+    expect(await asyncCode(() => io.readVaultFile('logo.png'))).toBe(
+      'NOT_MARKDOWN',
+    );
+  });
+
+  test('enforces the read allowlist, not the write one', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: ['Public'], write: [''] },
+    });
+    await mkdir(join(vault, 'Private'), { recursive: true });
+    await writeFile(join(vault, 'Private/x.png'), 'x');
+    expect(await asyncCode(() => io.readBinary('Private/x.png'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+  });
+
+  test('rejects absolute paths and ..-escapes', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    expect(await asyncCode(() => io.readBinary('/etc/passwd'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+    expect(await asyncCode(() => io.readBinary('../outside.png'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+  });
+
+  test('rejects a symlink that escapes the vault root', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'vaultmd-out-'));
+    await writeFile(join(outside, 'secret.png'), 'secret');
+    await symlink(join(outside, 'secret.png'), join(vault, 'leak.png'));
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    expect(await asyncCode(() => io.readBinary('leak.png'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+    await rm(outside, { recursive: true, force: true });
+  });
+
+  test('rejects hidden state reached through an in-vault symlink', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, 'assets'), { recursive: true });
+    await mkdir(join(vault, '.obsidian'), { recursive: true });
+    await writeFile(join(vault, '.env'), 'SECRET=1');
+    await writeFile(join(vault, '.obsidian/w.json'), '{}');
+    // Both links stay inside the root, so the symlink guard passes them; only
+    // the resolved target shows the dot-segment.
+    await symlink(join(vault, '.env'), join(vault, 'assets/leak.png'));
+    await symlink(join(vault, '.obsidian'), join(vault, 'assets/cfg'));
+    expect(await asyncCode(() => io.readBinary('assets/leak.png'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+    expect(await asyncCode(() => io.readBinary('assets/cfg/w.json'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+  });
+
+  test('a dangling symlink reads as absent, not as an error', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await symlink(join(vault, 'gone.png'), join(vault, 'dangling.png'));
+    expect(await io.readBinary('dangling.png')).toBeNull();
+  });
+
+  test('an in-vault symlink to a visible file still resolves', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, 'assets'), { recursive: true });
+    await writeFile(join(vault, 'assets/real.png'), 'png');
+    await symlink(join(vault, 'assets/real.png'), join(vault, 'alias.png'));
+    expect(await io.readBinary('alias.png')).toEqual(
+      new TextEncoder().encode('png'),
+    );
+  });
+
+  test('rejects dot-segment paths so hidden state stays out of reach', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, '.obsidian'), { recursive: true });
+    await writeFile(join(vault, '.obsidian/workspace.json'), '{}');
+    await writeFile(join(vault, '.env'), 'SECRET=1');
+    expect(
+      await asyncCode(() => io.readBinary('.obsidian/workspace.json')),
+    ).toBe('ALLOWLIST_VIOLATION');
+    expect(await asyncCode(() => io.readBinary('.env'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+    expect(await asyncCode(() => io.readBinary('./assets/a.png'))).not.toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+  });
+});

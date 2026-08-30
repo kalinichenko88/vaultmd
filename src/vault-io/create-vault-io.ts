@@ -1,4 +1,6 @@
-import { join, resolve as resolvePath } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { join, relative, resolve as resolvePath } from 'node:path';
 
 import { MdVaultError } from '@/errors.ts';
 import {
@@ -57,13 +59,15 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
 
   // Run the .md/allowlist/symlink guards on an ALREADY-canonical path and return
   // the absolute fs path. `rel` is only used for error messages. The single
-  // security gate shared by resolveVaultPath and resolveWriteTarget.
+  // security gate shared by resolveVaultPath, resolveWriteTarget and readBinary
+  // — only the last opts out of the extension check, never out of the rest.
   function resolveCanonical(
     canonical: string,
     access: Access,
     rel: string,
+    requireMarkdown = true,
   ): string {
-    if (!canonical.endsWith('.md')) {
+    if (requireMarkdown && !canonical.endsWith('.md')) {
       throw new MdVaultError('NOT_MARKDOWN', `not a markdown path: ${rel}`);
     }
     if (!matches(canonical, canonPrefixes[access])) {
@@ -132,6 +136,42 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
     return { content: result.content, sig: result.sig };
   }
 
+  async function readBinary(rel: string): Promise<Uint8Array | null> {
+    // Lifting the .md requirement widens what the read allowlist reaches, so
+    // hidden state stays out: `.git`, `.env`, `.obsidian`, and the index's own
+    // `.db` sidecars — the same dot-segments the enumeration walk skips.
+    const canonical = canonicalizeRelative(rel);
+    refuseHidden(canonical, rel);
+    const full = resolveCanonical(canonical, 'read', rel, false);
+    // The requested path is not the whole story: a symlink that never leaves
+    // the vault — so the containment guard passes it — can still aim at hidden
+    // state (`assets/logo.png` -> `.env`). Only the resolved target shows it.
+    // realpathSync doubles as the existence check; it throws for a missing file
+    // and for a dangling link, both of which read as absent.
+    try {
+      refuseHidden(relative(realpathSync(root), realpathSync(full)), rel);
+    } catch (err) {
+      if (err instanceof MdVaultError) {
+        throw err;
+      }
+
+      return null;
+    }
+    try {
+      const buf = await readFile(full);
+
+      return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      // Unlinked under us, or a directory: absent as far as a byte read goes.
+      if (code === 'ENOENT' || code === 'EISDIR') {
+        return null;
+      }
+
+      throw err;
+    }
+  }
+
   async function writeVaultFile(rel: string, content: string): Promise<Sig> {
     return atomicWrite(resolveVaultPath(rel, 'write'), content);
   }
@@ -180,6 +220,7 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
     resolveVaultPath,
     resolveWriteTarget,
     readVaultFile,
+    readBinary,
     writeVaultFile,
     rewriteIfUnchanged,
     unlinkIfUnchanged,
@@ -187,4 +228,16 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
     listMarkdown,
     listFolders,
   };
+}
+
+// A path is hidden if any segment starts with a dot — the rule the enumeration
+// walk applies to folders, here applied to whole paths on both sides of a
+// symlink. Splits on either separator so a `relative()` result works untouched.
+function refuseHidden(path: string, rel: string): void {
+  if (path.split(/[/\\]/).some((seg) => seg.startsWith('.'))) {
+    throw new MdVaultError(
+      'ALLOWLIST_VIOLATION',
+      `vault path is hidden: ${rel}`,
+    );
+  }
 }

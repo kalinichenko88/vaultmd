@@ -44,6 +44,9 @@ still evolve before `1.0`; see [CHANGELOG.md](./CHANGELOG.md) for what changed.
   guard concurrent writers.
 - **Scoped access** — per-instance read/write path allowlists make it safe to
   hand different parts of the vault to different consumers.
+- **Attachment reads** — `vault.io.readBinary()` returns the raw bytes of any
+  vault file (images, PDFs, audio) under the same allowlist and symlink guards.
+  Read-only, and attachments are not indexed.
 - **TypeScript-first** — full types, a small frozen public surface, and lower
   level primitives exported for advanced use.
 
