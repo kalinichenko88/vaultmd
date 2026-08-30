@@ -1,5 +1,97 @@
 # Changelog
 
+## 0.11.0 — 2026-08-30
+
+Notes become addressable by heading: read or replace one section of a note
+without touching the rest. Attachments become readable as bytes. And the
+`vault-io` chokepoint now refuses hidden state (`.env`, `.git`, `.obsidian`) on
+*every* path through it, not just one. **The index schema bumps 2 → 3, so the
+first boot on an existing index rebuilds it** (automatic, and only for an
+instance that owns the whole index). Public API grows 51 → 53 names. Bun floor
+unchanged at ≥ 1.3.14.
+
+### Security
+
+- **Hidden state was reachable through most of `vault-io`.** The dot-segment
+  guard lived at one call site, so `readVaultFile('.obsidian/secret.md')`,
+  `stat()`, `writeVaultFile('.obsidian/pwned.md')`, and a symlink aliasing a
+  visible `.md` name onto `.env` all went through. The check — on the requested
+  path *and* on the symlink-resolved target — now lives in `resolveCanonical`,
+  the gate every path-taking member already shares, so it covers `readVaultFile`,
+  `writeVaultFile`, `rewriteIfUnchanged`, `unlinkIfUnchanged`, `stat`,
+  `readBinary`, and the enumeration walk at once. `listFolders` judged a
+  directory by its link name, so `ln -s .obsidian notes` leaked the hidden tree's
+  shape; it now resolves first. `can()` — the only scope filter `query` has —
+  answers the hidden rule too, so a `.secret.md` indexed by an older version is
+  no longer queryable. A hidden prefix is rejected by `canonPrefix`, where the
+  configuration is made rather than on every use.
+
+### Breaking
+
+- **Index rebuild on upgrade.** `SCHEMA_VERSION` is now `3`: titles are derived
+  by the shared heading scanner, which resolves fenced code correctly, so
+  existing rows can disagree with disk. A scoped instance that does *not* own the
+  whole index throws `INDEX_UNAVAILABLE` rather than rebuilding a shared index
+  out from under another scope — boot an owning instance once to repair it.
+- **Links inside a mismatched code fence are no longer extracted.** A fence
+  opened with ``` and closed with ~~~ (or vice versa) stays open per CommonMark;
+  links in that region were previously indexed and now are not, so a backlink
+  that only ever existed inside such a block disappears.
+- **A root-level dotfile (`.secret.md`) is no longer listed or readable.**
+  Dot-*folders* were already skipped by the walk; dot-*files* were not.
+
+### Heading and section addressing
+
+- **`readSection(path, heading)`** returns one section's body — everything under
+  an ATX heading up to the next heading of the same or shallower level.
+- **`setSection`**, a new `updateNote` op, replaces that same span. Guarded:
+  the payload cannot smuggle in a heading that collides with one already in the
+  note, cannot open an unclosed fence, and cannot end in a setext underline —
+  each of which would leave the caller locked out of their own section with
+  `AMBIGUOUS_MATCH`. A section whose span has no defined end (it runs into an
+  unterminated fence, i.e. the rest of the file) is refused with
+  `VALIDATION_ERROR` rather than silently replaced.
+- **`extractHeadings(body)` and the `Heading` type are now public**, so you can
+  scan a note's headings and section spans without a round-trip through `notes`.
+- Round-trips are byte-identical: `setSection(h, readSection(h))` rewrites
+  nothing and does not move the file's mtime — CRLF files and trailing newlines
+  included.
+
+### Attachment reads
+
+- **`vault.io.readBinary(rel)`** returns the raw bytes of any vault file —
+  images, PDFs, audio — as a `Uint8Array`, or `null` if it is absent. It lifts
+  the `.md` requirement and nothing else: canonicalization, the read allowlist,
+  `..`-escape rejection, symlink containment, and the hidden-path rule all still
+  run. A directory reads as absent rather than throwing. Read-only and
+  unindexed by design — an attachment has no frontmatter, no links, and no body
+  to search.
+
+### Fixes
+
+- **A list closed by `---` is a valid note again.** `notes` treated every
+  non-blank preceding line as a paragraph, so any `---`/`===` after one read as
+  a setext underline and the note was refused outright. CommonMark only makes it
+  a heading after a *paragraph* — after a list item, a block quote, or a
+  thematic break, the same line is an ordinary horizontal rule. The other
+  direction closed too: `===` and `--` are too short to be thematic breaks, so
+  they *are* paragraphs that a following `---` really does underline.
+- **No more YAML warning on stderr for an unrendered template placeholder.** A
+  `created: {{DATE:...}}` left behind by Obsidian/Templater parses as a mapping
+  used as a map key, and `yaml` printed advice on every parse that the consuming
+  app could not act on. The shape was already reported through
+  `FrontmatterValidity: 'nested'`. Warnings are suppressed; errors still throw,
+  so a genuinely invalid block still earns `'present-but-invalid'`.
+
+### Docs
+
+- The site's navigation is reworked around four journeys — Getting started,
+  Concepts, Recipes, API — with the guide and generated API sidebars linking
+  both ways, plus a sharper homepage and cross-links from every guide page to
+  the API pages for the types it names.
+- Corrected when the index actually rebuilds: ordinary drift is picked up by
+  incremental reconcile, not a rebuild.
+
 ## 0.10.0 — 2026-08-02
 
 A note whose frontmatter nests is no longer second-class: it is read, indexed,
