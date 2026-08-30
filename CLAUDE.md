@@ -114,7 +114,8 @@ code** — only the API-freeze test (`src/__tests__/index.test.ts`) imports it.
   containment live here. Treat its pure helpers (`paths.ts`, `allowlist.ts`,
   `realpath-guard.ts`) as security-critical. The `.md` requirement is a contract
   check on `resolveCanonical`, not the boundary; `readBinary` is its only
-  opt-out, and refuses dot-segment paths on top.
+  opt-out. The dot-segment (hidden-state) rule *is* the boundary, and lives in
+  `resolveCanonical` for every caller — requested path and resolved target.
 - **Index db location.** The index `.db` and its `-wal`/`-shm` sidecars must live
   in a data dir, **not** the synced vault, and stay gitignored (`*.db*` already
   is).
