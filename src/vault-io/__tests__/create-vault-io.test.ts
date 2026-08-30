@@ -620,3 +620,108 @@ describe('readBinary', () => {
     );
   });
 });
+
+describe('hidden state on the markdown surfaces', () => {
+  test('rejects a hidden .md named directly', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, '.obsidian'), { recursive: true });
+    await writeFile(join(vault, '.obsidian/secret.md'), '# hidden');
+    expect(await asyncCode(() => io.readVaultFile('.obsidian/secret.md'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+    expect(await asyncCode(() => io.stat('.obsidian/secret.md'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+    expect(
+      await asyncCode(() => io.writeVaultFile('.obsidian/pwned.md', 'x')),
+    ).toBe('ALLOWLIST_VIOLATION');
+    expect(syncCode(() => io.resolveWriteTarget('.trash/gone.md'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+  });
+
+  test('rejects a hidden .md reached through an in-vault symlink', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, '.obsidian'), { recursive: true });
+    await writeFile(join(vault, '.obsidian/secret.md'), '# hidden');
+    await symlink(join(vault, '.obsidian/secret.md'), join(vault, 'notes.md'));
+    expect(await asyncCode(() => io.readVaultFile('notes.md'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+  });
+
+  test('the .md name on a link is no ticket to a non-markdown target', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await writeFile(join(vault, '.env'), 'SECRET=1');
+    await symlink(join(vault, '.env'), join(vault, 'aliased-env.md'));
+    expect(await asyncCode(() => io.readVaultFile('aliased-env.md'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+  });
+
+  test('a write into a directory symlinked at hidden state is refused', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, '.obsidian'), { recursive: true });
+    await symlink(join(vault, '.obsidian'), join(vault, 'notes'));
+    expect(
+      await asyncCode(() => io.writeVaultFile('notes/pwned.md', 'x')),
+    ).toBe('ALLOWLIST_VIOLATION');
+  });
+
+  test('an in-vault symlink to a visible note still resolves', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, 'notes'), { recursive: true });
+    await writeFile(join(vault, 'notes/real.md'), '# real');
+    await symlink(join(vault, 'notes/real.md'), join(vault, 'alias.md'));
+    expect((await io.readVaultFile('alias.md'))?.content).toBe('# real');
+  });
+
+  test('can() answers false for a hidden path, whatever the allowlist', () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    // Stale rows an older index built before the guard must not read as
+    // in-scope: `query` filters on `can` alone.
+    expect(io.can('.secret.md', 'read')).toBe(false);
+    expect(io.can('.obsidian/cfg.md', 'read')).toBe(false);
+    expect(io.can('.secret.md', 'write')).toBe(false);
+    expect(io.can('notes/keep.md', 'read')).toBe(true);
+  });
+
+  test('listFolders skips a dot-folder aliased by an in-vault symlink', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, '.obsidian/deep'), { recursive: true });
+    await mkdir(join(vault, 'real'), { recursive: true });
+    await symlink(join(vault, '.obsidian'), join(vault, 'notes'));
+    expect(await io.listFolders()).toEqual(['real']);
+  });
+
+  test('enumeration skips a hidden .md at the vault root', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await writeFile(join(vault, 'keep.md'), 'k');
+    await writeFile(join(vault, '.secret.md'), 's');
+    expect(await io.listMarkdown()).toEqual(['keep.md']);
+  });
+});

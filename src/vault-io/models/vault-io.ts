@@ -6,6 +6,12 @@ import type { Access } from './access.ts';
  * The IO chokepoint for a vault: canonicalization, allowlist enforcement, and
  * atomic file operations, all scoped to the vault root and prefix allowlists.
  * Obtain an instance via {@link createVaultIo} or from {@link Vault.io}.
+ *
+ * Every path-taking member shares one gate. Beyond the allowlist and
+ * `..`-escape rejection, hidden state is unreachable: a path with a
+ * dot-segment is refused — on **both** the requested path and the symlink-
+ * resolved target — so `.git`, `.env`, `.obsidian` and the index's own `.db`
+ * sidecars stay out of reach even behind a link that never leaves the vault.
  */
 export type VaultIo = {
   /**
@@ -24,7 +30,8 @@ export type VaultIo = {
    */
   toKey(rel: string): string;
   /**
-   * Test whether `rel` falls within the given access allowlist.
+   * Test whether `rel` falls within the given access allowlist. A hidden
+   * (dot-segment) path is never permitted, whatever the allowlist says.
    * @param rel Vault-relative path to test.
    * @param access `'read'` or `'write'` allowlist to check against.
    * @returns `true` if the path is permitted; `false` otherwise.
@@ -75,11 +82,9 @@ export type VaultIo = {
   /**
    * Read any vault file as raw bytes, `.md` or not — the read path for
    * attachments (images, PDFs, audio). Enforced by the same chokepoint as
-   * {@link readVaultFile}: canonicalization, the **read** allowlist, and
-   * symlink containment; only the `.md` requirement is lifted. Paths with a
-   * dot-segment are refused — on **both** the requested path and the symlink-
-   * resolved target — so `.git`, `.env`, `.obsidian` and the index's own `.db`
-   * sidecars stay unreachable even behind a link that never leaves the vault.
+   * {@link readVaultFile}: canonicalization, the **read** allowlist, symlink
+   * containment, and the hidden-state guard. Only the `.md` requirement is
+   * lifted.
    *
    * Attachments are not indexed and there is no matching write path — this is
    * read-only access to bytes already on disk.

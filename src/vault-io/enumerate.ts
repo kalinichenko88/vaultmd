@@ -1,6 +1,8 @@
 import { type Dirent, realpathSync } from 'node:fs';
 import { readdir, stat as statEntry } from 'node:fs/promises';
-import { join, sep } from 'node:path';
+import { join, relative, sep } from 'node:path';
+
+import { isHidden } from './paths.ts';
 
 type EnumerateDeps = {
   can(rel: string, access: 'read' | 'write'): boolean;
@@ -58,7 +60,8 @@ async function walk(
       if (
         childReal === null ||
         !isUnder(childReal, realRoot) ||
-        isUnder(realDir, childReal)
+        isUnder(realDir, childReal) ||
+        isHidden(relative(realRoot, childReal))
       ) {
         continue;
       }

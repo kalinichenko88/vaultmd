@@ -1,6 +1,5 @@
-import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { join, relative, resolve as resolvePath } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 
 import { MdVaultError } from '@/errors.ts';
 import {
@@ -23,8 +22,8 @@ import type { Access } from './models/access.ts';
 import type { VaultIo } from './models/vault-io.ts';
 import type { VaultIoConfig } from './models/vault-io-config.ts';
 import type { VaultPrefixes } from './models/vault-prefixes.ts';
-import { canonicalizeRelative, canonPrefix } from './paths.ts';
-import { realTargetWithinRoot } from './realpath-guard.ts';
+import { canonicalizeRelative, canonPrefix, isHidden } from './paths.ts';
+import { realTargetRelativeToRoot } from './realpath-guard.ts';
 
 /**
  * Create a {@link VaultIo} instance scoped to `config.root` and the supplied
@@ -57,10 +56,11 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
     return caseSensitive ? canonical : canonical.toLowerCase();
   }
 
-  // Run the .md/allowlist/symlink guards on an ALREADY-canonical path and return
-  // the absolute fs path. `rel` is only used for error messages. The single
-  // security gate shared by resolveVaultPath, resolveWriteTarget and readBinary
-  // — only the last opts out of the extension check, never out of the rest.
+  // Run the .md/hidden/allowlist/symlink guards on an ALREADY-canonical path
+  // and return the absolute fs path. `rel` is only used for error messages. The
+  // single security gate shared by resolveVaultPath, resolveWriteTarget and
+  // readBinary — only the last opts out of the extension check, never out of
+  // the rest.
   function resolveCanonical(
     canonical: string,
     access: Access,
@@ -70,6 +70,7 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
     if (requireMarkdown && !canonical.endsWith('.md')) {
       throw new MdVaultError('NOT_MARKDOWN', `not a markdown path: ${rel}`);
     }
+    refuseHidden(canonical, rel);
     if (!matches(canonical, canonPrefixes[access])) {
       throw new MdVaultError(
         'ALLOWLIST_VIOLATION',
@@ -77,12 +78,18 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
       );
     }
     const full = join(root, canonical);
-    if (!realTargetWithinRoot(full, root)) {
+    // The requested path is not the whole story: a symlink that never leaves
+    // the vault — so the containment guard passes it — can still aim at hidden
+    // state (`notes.md` -> `.obsidian/secret.md`, `assets/logo.png` -> `.env`).
+    // Only the resolved target shows it.
+    const realRel = realTargetRelativeToRoot(full, root);
+    if (realRel === null) {
       throw new MdVaultError(
         'ALLOWLIST_VIOLATION',
         `vault path escapes root (symlink): ${rel}`,
       );
     }
+    refuseHidden(realRel, rel);
 
     return full;
   }
@@ -103,7 +110,10 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
       return false;
     }
 
-    return matches(x, canonPrefixes[access]);
+    // The hidden rule is part of the boundary, not just of the resolve path:
+    // `query` filters read scope on `can` alone, so a stale row an older index
+    // built for a hidden note must not read as in-scope.
+    return !isHidden(x) && matches(x, canonPrefixes[access]);
   }
 
   function resolveVaultPath(rel: string, access: Access = 'read'): string {
@@ -137,26 +147,15 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
   }
 
   async function readBinary(rel: string): Promise<Uint8Array | null> {
-    // Lifting the .md requirement widens what the read allowlist reaches, so
-    // hidden state stays out: `.git`, `.env`, `.obsidian`, and the index's own
-    // `.db` sidecars — the same dot-segments the enumeration walk skips.
-    const canonical = canonicalizeRelative(rel);
-    refuseHidden(canonical, rel);
-    const full = resolveCanonical(canonical, 'read', rel, false);
-    // The requested path is not the whole story: a symlink that never leaves
-    // the vault — so the containment guard passes it — can still aim at hidden
-    // state (`assets/logo.png` -> `.env`). Only the resolved target shows it.
-    // realpathSync doubles as the existence check; it throws for a missing file
-    // and for a dangling link, both of which read as absent.
-    try {
-      refuseHidden(relative(realpathSync(root), realpathSync(full)), rel);
-    } catch (err) {
-      if (err instanceof MdVaultError) {
-        throw err;
-      }
-
-      return null;
-    }
+    // Lifting the .md requirement widens what the read allowlist reaches; the
+    // rest of the gate — including the hidden-state guard on both the requested
+    // path and the resolved target — still applies.
+    const full = resolveCanonical(
+      canonicalizeRelative(rel),
+      'read',
+      rel,
+      false,
+    );
     try {
       const buf = await readFile(full);
 
@@ -230,11 +229,10 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
   };
 }
 
-// A path is hidden if any segment starts with a dot — the rule the enumeration
-// walk applies to folders, here applied to whole paths on both sides of a
-// symlink. Splits on either separator so a `relative()` result works untouched.
+// The throwing form of `isHidden`, applied to whole paths on both sides of a
+// symlink. `rel` is only used for the error message.
 function refuseHidden(path: string, rel: string): void {
-  if (path.split(/[/\\]/).some((seg) => seg.startsWith('.'))) {
+  if (isHidden(path)) {
     throw new MdVaultError(
       'ALLOWLIST_VIOLATION',
       `vault path is hidden: ${rel}`,
