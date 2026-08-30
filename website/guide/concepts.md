@@ -66,6 +66,16 @@ The scope covers enumeration too — `vault.io.listMarkdown` and
 and report only what this instance may read, minus dot-folders and anything the
 `ignore` globs match.
 
+Everything else on the IO surface is `.md`-only — a non-markdown path throws
+`NOT_MARKDOWN`. The one exception is
+[`vault.io.readBinary`](/api/type-aliases/VaultIo), which returns the raw bytes
+of any vault file so attachments (images, PDFs, audio) are reachable. It lifts
+the extension requirement and nothing else: the read allowlist, `..`-escape
+rejection and symlink containment all still apply, and a path with a
+dot-segment is refused outright, so `.git`, `.env`, `.obsidian` and the index's
+own `.db` sidecars stay unreachable. Attachments carry no frontmatter, links or
+body, so they get no index row — and there is no matching write path.
+
 ## Lazy reconcile
 
 Reads stay synchronous. The first read — and the first after each

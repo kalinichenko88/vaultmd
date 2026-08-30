@@ -73,6 +73,28 @@ export type VaultIo = {
     sig: Sig;
   } | null>;
   /**
+   * Read any vault file as raw bytes, `.md` or not — the read path for
+   * attachments (images, PDFs, audio). Enforced by the same chokepoint as
+   * {@link readVaultFile}: canonicalization, the **read** allowlist, and
+   * symlink containment; only the `.md` requirement is lifted. Paths with a
+   * dot-segment are refused, so `.git`, `.env`, `.obsidian` and the index's own
+   * `.db` sidecars stay unreachable.
+   *
+   * Attachments are not indexed and there is no matching write path — this is
+   * read-only access to bytes already on disk.
+   *
+   * @param rel Vault-relative path, any extension.
+   * @returns `{ bytes, sig }` if the file exists, or `null` if absent.
+   * @throws {@link MdVaultError} `ALLOWLIST_VIOLATION` if `rel` is outside the
+   * read allowlist, escapes the root, or names a hidden (dot-segment) path.
+   */
+  readBinary(rel: string): Promise<{
+    /** The raw file bytes. */
+    bytes: Uint8Array;
+    /** The mtime+size signature used for conflict detection. */
+    sig: Sig;
+  } | null>;
+  /**
    * Atomically write `content` to a vault file, creating it if necessary.
    * @param rel Vault-relative `.md` path.
    * @param content New UTF-8 content.

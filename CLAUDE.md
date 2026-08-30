@@ -112,7 +112,11 @@ code** — only the API-freeze test (`src/__tests__/index.test.ts`) imports it.
 - **vault-io is the security chokepoint.** All path canonicalization (NFC,
   reject absolute/`..`-escape), allowlist matching, and realpath/symlink
   containment live here. Treat its pure helpers (`paths.ts`, `allowlist.ts`,
-  `realpath-guard.ts`) as security-critical.
+  `realpath-guard.ts`) as security-critical. Every path goes through the one
+  `resolveCanonical` gate; the `.md` requirement is a *contract* check on that
+  gate, not the security boundary, and `readBinary` is the sole caller that
+  opts out of it (attachments) — it never opts out of the rest, and it refuses
+  dot-segment paths on top.
 - **Index db location.** The index `.db` and its `-wal`/`-shm` sidecars must live
   in a data dir, **not** the synced vault, and stay gitignored (`*.db*` already
   is).

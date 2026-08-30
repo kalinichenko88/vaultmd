@@ -6,6 +6,7 @@ import {
   atomicWriteIfUnchanged,
   unlinkIfUnchanged as fsUnlinkIfUnchanged,
   readConsistent,
+  readConsistentBytes,
   type Sig,
   statSig,
 } from '@/fs-atomic/index.ts';
@@ -57,13 +58,15 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
 
   // Run the .md/allowlist/symlink guards on an ALREADY-canonical path and return
   // the absolute fs path. `rel` is only used for error messages. The single
-  // security gate shared by resolveVaultPath and resolveWriteTarget.
+  // security gate shared by resolveVaultPath, resolveWriteTarget and readBinary
+  // — only the last opts out of the extension check, never out of the rest.
   function resolveCanonical(
     canonical: string,
     access: Access,
     rel: string,
+    requireMarkdown = true,
   ): string {
-    if (!canonical.endsWith('.md')) {
+    if (requireMarkdown && !canonical.endsWith('.md')) {
       throw new MdVaultError('NOT_MARKDOWN', `not a markdown path: ${rel}`);
     }
     if (!matches(canonical, canonPrefixes[access])) {
@@ -132,6 +135,29 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
     return { content: result.content, sig: result.sig };
   }
 
+  async function readBinary(
+    rel: string,
+  ): Promise<{ bytes: Uint8Array; sig: Sig } | null> {
+    const canonical = canonicalizeRelative(rel);
+    // Lifting the .md requirement widens what the read allowlist reaches, so
+    // hidden state stays out: `.git`, `.env`, `.obsidian`, and the index's own
+    // `.db` sidecars — the same dot-segments the enumeration walk skips.
+    if (canonical.split('/').some((seg) => seg.startsWith('.'))) {
+      throw new MdVaultError(
+        'ALLOWLIST_VIOLATION',
+        `vault path is hidden: ${rel}`,
+      );
+    }
+    const result = await readConsistentBytes(
+      resolveCanonical(canonical, 'read', rel, false),
+    );
+    if (result.content === null) {
+      return null;
+    }
+
+    return { bytes: result.content, sig: result.sig };
+  }
+
   async function writeVaultFile(rel: string, content: string): Promise<Sig> {
     return atomicWrite(resolveVaultPath(rel, 'write'), content);
   }
@@ -180,6 +206,7 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
     resolveVaultPath,
     resolveWriteTarget,
     readVaultFile,
+    readBinary,
     writeVaultFile,
     rewriteIfUnchanged,
     unlinkIfUnchanged,

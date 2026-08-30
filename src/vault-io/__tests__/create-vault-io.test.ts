@@ -491,3 +491,102 @@ describe('enumeration cycle guard', () => {
     expect(await io.listMarkdown()).toEqual(['a/b/x.md']);
   });
 });
+
+describe('readBinary', () => {
+  test('reads a non-markdown file as bytes with a matching sig; missing -> null', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, 'assets'), { recursive: true });
+    const png = Uint8Array.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    await writeFile(join(vault, 'assets/logo.png'), png);
+    const read = await io.readBinary('assets/logo.png');
+    expect(read?.bytes).toEqual(png);
+    expect(read?.sig.size).toBe(
+      (await stat(join(vault, 'assets/logo.png'))).size,
+    );
+    expect(await io.readBinary('assets/missing.png')).toBeNull();
+  });
+
+  test('readVaultFile still rejects the same non-markdown path', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await writeFile(join(vault, 'logo.png'), 'x');
+    expect(await asyncCode(() => io.readVaultFile('logo.png'))).toBe(
+      'NOT_MARKDOWN',
+    );
+  });
+
+  test('enforces the read allowlist, not the write one', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: ['Public'], write: [''] },
+    });
+    await mkdir(join(vault, 'Private'), { recursive: true });
+    await writeFile(join(vault, 'Private/x.png'), 'x');
+    expect(await asyncCode(() => io.readBinary('Private/x.png'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+  });
+
+  test('rejects absolute paths and ..-escapes', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    expect(await asyncCode(() => io.readBinary('/etc/passwd'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+    expect(await asyncCode(() => io.readBinary('../outside.png'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+  });
+
+  test('rejects a symlink that escapes the vault root', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'vaultmd-out-'));
+    await writeFile(join(outside, 'secret.png'), 'secret');
+    await symlink(join(outside, 'secret.png'), join(vault, 'leak.png'));
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    expect(await asyncCode(() => io.readBinary('leak.png'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+    await rm(outside, { recursive: true, force: true });
+  });
+
+  test('rejects dot-segment paths so hidden state stays out of reach', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, '.obsidian'), { recursive: true });
+    await writeFile(join(vault, '.obsidian/workspace.json'), '{}');
+    await writeFile(join(vault, '.env'), 'SECRET=1');
+    expect(
+      await asyncCode(() => io.readBinary('.obsidian/workspace.json')),
+    ).toBe('ALLOWLIST_VIOLATION');
+    expect(await asyncCode(() => io.readBinary('.env'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+    expect(await asyncCode(() => io.readBinary('./assets/a.png'))).not.toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+  });
+
+  test('reads a markdown file too — the extension is not the gate here', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await writeFile(join(vault, 'a.md'), '# hi');
+    const read = await io.readBinary('a.md');
+    expect(new TextDecoder().decode(read?.bytes)).toBe('# hi');
+  });
+});
