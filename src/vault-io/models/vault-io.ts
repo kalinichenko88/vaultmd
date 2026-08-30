@@ -77,14 +77,16 @@ export type VaultIo = {
    * attachments (images, PDFs, audio). Enforced by the same chokepoint as
    * {@link readVaultFile}: canonicalization, the **read** allowlist, and
    * symlink containment; only the `.md` requirement is lifted. Paths with a
-   * dot-segment are refused, so `.git`, `.env`, `.obsidian` and the index's own
-   * `.db` sidecars stay unreachable.
+   * dot-segment are refused — on **both** the requested path and the symlink-
+   * resolved target — so `.git`, `.env`, `.obsidian` and the index's own `.db`
+   * sidecars stay unreachable even behind a link that never leaves the vault.
    *
    * Attachments are not indexed and there is no matching write path — this is
    * read-only access to bytes already on disk.
    *
    * @param rel Vault-relative path, any extension.
-   * @returns The file's bytes, or `null` if it is absent or is a directory.
+   * @returns The file's bytes, or `null` if the path is absent, dangling, or a
+   * directory.
    * @throws {@link MdVaultError} `ALLOWLIST_VIOLATION` if `rel` is outside the
    * read allowlist, escapes the root, or names a hidden (dot-segment) path.
    */

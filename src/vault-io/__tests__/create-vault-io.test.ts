@@ -558,6 +558,49 @@ describe('readBinary', () => {
     await rm(outside, { recursive: true, force: true });
   });
 
+  test('rejects hidden state reached through an in-vault symlink', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, 'assets'), { recursive: true });
+    await mkdir(join(vault, '.obsidian'), { recursive: true });
+    await writeFile(join(vault, '.env'), 'SECRET=1');
+    await writeFile(join(vault, '.obsidian/w.json'), '{}');
+    // Both links stay inside the root, so the symlink guard passes them; only
+    // the resolved target shows the dot-segment.
+    await symlink(join(vault, '.env'), join(vault, 'assets/leak.png'));
+    await symlink(join(vault, '.obsidian'), join(vault, 'assets/cfg'));
+    expect(await asyncCode(() => io.readBinary('assets/leak.png'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+    expect(await asyncCode(() => io.readBinary('assets/cfg/w.json'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+  });
+
+  test('a dangling symlink reads as absent, not as an error', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await symlink(join(vault, 'gone.png'), join(vault, 'dangling.png'));
+    expect(await io.readBinary('dangling.png')).toBeNull();
+  });
+
+  test('an in-vault symlink to a visible file still resolves', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, 'assets'), { recursive: true });
+    await writeFile(join(vault, 'assets/real.png'), 'png');
+    await symlink(join(vault, 'assets/real.png'), join(vault, 'alias.png'));
+    expect(await io.readBinary('alias.png')).toEqual(
+      new TextEncoder().encode('png'),
+    );
+  });
+
   test('rejects dot-segment paths so hidden state stays out of reach', async () => {
     const io = createVaultIo({
       root: vault,
