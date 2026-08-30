@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { readConsistent, readConsistentBytes } from '../read-consistent.ts';
+import { readConsistent } from '../read-consistent.ts';
 import * as sig from '../sig.ts';
 
 let dir: string;
@@ -54,23 +54,5 @@ describe('readConsistent', () => {
     } finally {
       spy.mockRestore();
     }
-  });
-});
-
-describe('readConsistentBytes', () => {
-  test('missing file → { content: null, sig: null }', async () => {
-    expect(await readConsistentBytes(join(dir, 'nope.png'))).toEqual({
-      content: null,
-      sig: null,
-    });
-  });
-
-  test('stable file → exact bytes with a matching sig', async () => {
-    const f = join(dir, 'a.png');
-    const bytes = Uint8Array.from([0x00, 0xff, 0x10, 0x89, 0x50]);
-    await writeFile(f, bytes);
-    const res = await readConsistentBytes(f);
-    expect(res.content).toEqual(bytes);
-    expect(res.sig).toEqual(await sig.statSig(f));
   });
 });

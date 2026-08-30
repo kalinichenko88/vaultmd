@@ -84,16 +84,11 @@ export type VaultIo = {
    * read-only access to bytes already on disk.
    *
    * @param rel Vault-relative path, any extension.
-   * @returns `{ bytes, sig }` if the file exists, or `null` if absent.
+   * @returns The file's bytes, or `null` if it is absent or is a directory.
    * @throws {@link MdVaultError} `ALLOWLIST_VIOLATION` if `rel` is outside the
    * read allowlist, escapes the root, or names a hidden (dot-segment) path.
    */
-  readBinary(rel: string): Promise<{
-    /** The raw file bytes. */
-    bytes: Uint8Array;
-    /** The mtime+size signature used for conflict detection. */
-    sig: Sig;
-  } | null>;
+  readBinary(rel: string): Promise<Uint8Array | null>;
   /**
    * Atomically write `content` to a vault file, creating it if necessary.
    * @param rel Vault-relative `.md` path.

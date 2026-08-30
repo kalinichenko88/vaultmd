@@ -6,7 +6,6 @@ import {
   atomicWriteIfUnchanged,
   unlinkIfUnchanged as fsUnlinkIfUnchanged,
   readConsistent,
-  readConsistentBytes,
   type Sig,
   statSig,
 } from '@/fs-atomic/index.ts';
@@ -135,9 +134,7 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
     return { content: result.content, sig: result.sig };
   }
 
-  async function readBinary(
-    rel: string,
-  ): Promise<{ bytes: Uint8Array; sig: Sig } | null> {
+  async function readBinary(rel: string): Promise<Uint8Array | null> {
     const canonical = canonicalizeRelative(rel);
     // Lifting the .md requirement widens what the read allowlist reaches, so
     // hidden state stays out: `.git`, `.env`, `.obsidian`, and the index's own
@@ -148,14 +145,11 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
         `vault path is hidden: ${rel}`,
       );
     }
-    const result = await readConsistentBytes(
-      resolveCanonical(canonical, 'read', rel, false),
-    );
-    if (result.content === null) {
-      return null;
-    }
+    // exists() is false for a directory too, so a folder path reads as absent
+    // rather than throwing EISDIR.
+    const file = Bun.file(resolveCanonical(canonical, 'read', rel, false));
 
-    return { bytes: result.content, sig: result.sig };
+    return (await file.exists()) ? file.bytes() : null;
   }
 
   async function writeVaultFile(rel: string, content: string): Promise<Sig> {

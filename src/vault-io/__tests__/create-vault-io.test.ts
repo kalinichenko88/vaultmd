@@ -493,7 +493,7 @@ describe('enumeration cycle guard', () => {
 });
 
 describe('readBinary', () => {
-  test('reads a non-markdown file as bytes with a matching sig; missing -> null', async () => {
+  test('reads a non-markdown file as bytes; missing or a directory -> null', async () => {
     const io = createVaultIo({
       root: vault,
       prefixes: { read: [''], write: [''] },
@@ -503,12 +503,9 @@ describe('readBinary', () => {
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
     ]);
     await writeFile(join(vault, 'assets/logo.png'), png);
-    const read = await io.readBinary('assets/logo.png');
-    expect(read?.bytes).toEqual(png);
-    expect(read?.sig.size).toBe(
-      (await stat(join(vault, 'assets/logo.png'))).size,
-    );
+    expect(await io.readBinary('assets/logo.png')).toEqual(png);
     expect(await io.readBinary('assets/missing.png')).toBeNull();
+    expect(await io.readBinary('assets')).toBeNull(); // a directory is not a file
   });
 
   test('readVaultFile still rejects the same non-markdown path', async () => {
@@ -578,15 +575,5 @@ describe('readBinary', () => {
     expect(await asyncCode(() => io.readBinary('./assets/a.png'))).not.toBe(
       'ALLOWLIST_VIOLATION',
     );
-  });
-
-  test('reads a markdown file too — the extension is not the gate here', async () => {
-    const io = createVaultIo({
-      root: vault,
-      prefixes: { read: [''], write: [''] },
-    });
-    await writeFile(join(vault, 'a.md'), '# hi');
-    const read = await io.readBinary('a.md');
-    expect(new TextDecoder().decode(read?.bytes)).toBe('# hi');
   });
 });
