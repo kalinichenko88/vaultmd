@@ -142,10 +142,12 @@ describe('exclusiveCreate + unlinkIfUnchanged', () => {
 describe('the tmp file of a write', () => {
   const writers: {
     name: string;
+    before: string | null;
     prepare: (file: string) => Promise<() => Promise<Sig>>;
   }[] = [
     {
       name: 'atomicWrite',
+      before: 'old',
       prepare: async (file) => {
         await atomicWrite(file, 'old');
 
@@ -156,6 +158,7 @@ describe('the tmp file of a write', () => {
     },
     {
       name: 'atomicWriteIfUnchanged',
+      before: 'old',
       prepare: async (file) => {
         const sig = await atomicWrite(file, 'old');
 
@@ -166,10 +169,47 @@ describe('the tmp file of a write', () => {
     },
     {
       name: 'exclusiveCreate',
+      before: null,
       prepare: async (file) => {
         return () => {
           return exclusiveCreate(file, 'new content');
         };
+      },
+    },
+  ];
+
+  const faults = [
+    {
+      fault: 'the write fails midway',
+      code: 'ENOSPC',
+      inject: () => {
+        spyOn(fsp, 'writeFile').mockImplementation(
+          async (target, data, options) => {
+            await realWriteFile(target, String(data).slice(0, 3), options);
+            throw errno('ENOSPC');
+          },
+        );
+      },
+    },
+    {
+      fault: 'the sync fails and then the close fails',
+      code: 'EIO',
+      inject: () => {
+        spyOn(fsp, 'open').mockImplementation(async (...args) => {
+          const handle = await realOpen(...args);
+          const realClose = handle.close.bind(handle);
+          for (const method of ['sync', 'datasync'] as const) {
+            spyOn(handle, method).mockImplementation(async () => {
+              throw errno('EIO');
+            });
+          }
+          spyOn(handle, 'close').mockImplementation(async () => {
+            await realClose();
+            throw errno('EBADF');
+          });
+
+          return handle;
+        });
       },
     },
   ];
@@ -187,16 +227,19 @@ describe('the tmp file of a write', () => {
 
   test.each(writers)(
     '$name syncs the tmp before it places it',
-    async ({ prepare }) => {
+    async ({ before, prepare }) => {
       const file = path.join(dir, 'note.md');
       const write = await prepare(file);
-      const targetAtSync: (string | null)[] = [];
+      const atSync: { tmp: string; target: string | null }[] = [];
       spyOn(fsp, 'open').mockImplementation(async (...args) => {
         const handle = await realOpen(...args);
         for (const method of ['sync', 'datasync'] as const) {
           const real = handle[method].bind(handle);
           spyOn(handle, method).mockImplementation(async () => {
-            targetAtSync.push(await readFile(file, 'utf8').catch(() => null));
+            atSync.push({
+              tmp: await readFile(String(args[0]), 'utf8'),
+              target: await readFile(file, 'utf8').catch(() => null),
+            });
 
             return real();
           });
@@ -207,34 +250,34 @@ describe('the tmp file of a write', () => {
 
       await write();
 
-      expect(targetAtSync).toHaveLength(1);
-      expect(targetAtSync[0]).not.toBe('new content');
+      expect(atSync).toEqual([{ tmp: 'new content', target: before }]);
       expect(await readFile(file, 'utf8')).toBe('new content');
     },
   );
 
-  test.each(writers)(
-    '$name leaves no tmp and no change when the write fails midway',
-    async ({ prepare }) => {
+  test.each(
+    writers.flatMap((writer) => {
+      return faults.map((fault) => {
+        return { ...writer, ...fault };
+      });
+    }),
+  )(
+    '$name leaves no tmp and no change when $fault',
+    async ({ prepare, inject, code }) => {
       const file = path.join(dir, 'note.md');
       const write = await prepare(file);
       const before = await snapshot(dir);
-      spyOn(fsp, 'writeFile').mockImplementation(
-        async (target, data, options) => {
-          await realWriteFile(target, String(data).slice(0, 3), options);
-          throw Object.assign(new Error('ENOSPC: no space left on device'), {
-            code: 'ENOSPC',
-          });
-        },
-      );
+      inject();
 
-      await expect(write()).rejects.toThrow(
-        expect.objectContaining({ code: 'ENOSPC' }),
-      );
+      await expect(write()).rejects.toThrow(expect.objectContaining({ code }));
       expect(await snapshot(dir)).toEqual(before);
     },
   );
 });
+
+function errno(code: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(code), { code });
+}
 
 async function snapshot(dir: string): Promise<Record<string, string>> {
   const names = await readdir(dir);
