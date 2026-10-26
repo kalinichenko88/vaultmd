@@ -92,6 +92,8 @@ describe('exclusiveCreate + unlinkIfUnchanged', () => {
 
     expect(await readFile(file, 'utf8')).toBe('fresh');
     expect(await statSig(file)).toEqual(sig);
+    // After link() the tmp is a second name for the note; it must go too.
+    expect(await readdir(path.dirname(file))).toEqual(['new.md']);
   });
 
   test('exclusiveCreate throws ALREADY_EXISTS and does not clobber the target', async () => {
@@ -195,6 +197,12 @@ describe('the tmp file of a write', () => {
       failClose: 'EBADF',
     },
     {
+      fault: 'the write fails and then the close fails',
+      code: 'ENOSPC',
+      failWrite: 'ENOSPC',
+      failClose: 'EBADF',
+    },
+    {
       fault: 'the close fails after a good sync',
       code: 'EIO',
       failClose: 'EIO',
@@ -249,7 +257,7 @@ describe('the tmp file of a write', () => {
       });
     }),
   )(
-    '$name leaves no tmp and no change when $fault',
+    '$name closes the tmp once and leaves no tmp and no change when $fault',
     async ({ prepare, code, failWrite, failSync, failClose }) => {
       const file = path.join(dir, 'note.md');
       const write = await prepare(file);
