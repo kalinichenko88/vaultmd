@@ -1,5 +1,14 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from 'bun:test';
+import * as fsp from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 
@@ -11,7 +20,10 @@ import {
   exclusiveCreate,
   unlinkIfUnchanged,
 } from '../atomic-write.ts';
+import type { Sig } from '../models/sig.ts';
 import { statSig } from '../sig.ts';
+
+const { open: realOpen, writeFile: realWriteFile } = fsp;
 
 describe('statSig + atomicWrite', () => {
   let dir: string;
@@ -126,3 +138,111 @@ describe('exclusiveCreate + unlinkIfUnchanged', () => {
     expect(await statSig(file)).toBeNull();
   });
 });
+
+describe('the tmp file of a write', () => {
+  const writers: {
+    name: string;
+    prepare: (file: string) => Promise<() => Promise<Sig>>;
+  }[] = [
+    {
+      name: 'atomicWrite',
+      prepare: async (file) => {
+        await atomicWrite(file, 'old');
+
+        return () => {
+          return atomicWrite(file, 'new content');
+        };
+      },
+    },
+    {
+      name: 'atomicWriteIfUnchanged',
+      prepare: async (file) => {
+        const sig = await atomicWrite(file, 'old');
+
+        return () => {
+          return atomicWriteIfUnchanged(file, 'new content', sig);
+        };
+      },
+    },
+    {
+      name: 'exclusiveCreate',
+      prepare: async (file) => {
+        return () => {
+          return exclusiveCreate(file, 'new content');
+        };
+      },
+    },
+  ];
+
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'vaultmd-'));
+  });
+
+  afterEach(async () => {
+    mock.restore();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test.each(writers)(
+    '$name syncs the tmp before it places it',
+    async ({ prepare }) => {
+      const file = path.join(dir, 'note.md');
+      const write = await prepare(file);
+      const targetAtSync: (string | null)[] = [];
+      spyOn(fsp, 'open').mockImplementation(async (...args) => {
+        const handle = await realOpen(...args);
+        for (const method of ['sync', 'datasync'] as const) {
+          const real = handle[method].bind(handle);
+          spyOn(handle, method).mockImplementation(async () => {
+            targetAtSync.push(await readFile(file, 'utf8').catch(() => null));
+
+            return real();
+          });
+        }
+
+        return handle;
+      });
+
+      await write();
+
+      expect(targetAtSync).toHaveLength(1);
+      expect(targetAtSync[0]).not.toBe('new content');
+      expect(await readFile(file, 'utf8')).toBe('new content');
+    },
+  );
+
+  test.each(writers)(
+    '$name leaves no tmp and no change when the write fails midway',
+    async ({ prepare }) => {
+      const file = path.join(dir, 'note.md');
+      const write = await prepare(file);
+      const before = await snapshot(dir);
+      spyOn(fsp, 'writeFile').mockImplementation(
+        async (target, data, options) => {
+          await realWriteFile(target, String(data).slice(0, 3), options);
+          throw Object.assign(new Error('ENOSPC: no space left on device'), {
+            code: 'ENOSPC',
+          });
+        },
+      );
+
+      await expect(write()).rejects.toThrow(
+        expect.objectContaining({ code: 'ENOSPC' }),
+      );
+      expect(await snapshot(dir)).toEqual(before);
+    },
+  );
+});
+
+async function snapshot(dir: string): Promise<Record<string, string>> {
+  const names = await readdir(dir);
+  const entries = await Promise.all(
+    names.map(async (name) => {
+      return [name, await readFile(path.join(dir, name), 'utf8')] as const;
+    }),
+  );
+
+  return Object.fromEntries(entries);
+}
