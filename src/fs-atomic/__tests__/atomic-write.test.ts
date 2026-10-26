@@ -71,6 +71,7 @@ describe('statSig + atomicWrite', () => {
     expect(caught).toBeInstanceOf(MdVaultError);
     expect((caught as MdVaultError).code).toBe('MTIME_CONFLICT');
     expect(await readFile(file, 'utf8')).toBe('one'); // original untouched
+    expect(await readdir(dir)).toEqual(['note.md']); // no tmp left
   });
 });
 
@@ -107,6 +108,7 @@ describe('exclusiveCreate + unlinkIfUnchanged', () => {
     expect(caught).toBeInstanceOf(MdVaultError);
     expect((caught as MdVaultError).code).toBe('ALREADY_EXISTS');
     expect(await readFile(file, 'utf8')).toBe('orig');
+    expect(await readdir(dir)).toEqual(['dupe.md']); // no tmp left
   });
 
   test('unlinkIfUnchanged returns false (no-op) for a missing file', async () => {
@@ -178,39 +180,24 @@ describe('the tmp file of a write', () => {
     },
   ];
 
-  const faults = [
-    {
-      fault: 'the write fails midway',
-      code: 'ENOSPC',
-      inject: () => {
-        spyOn(fsp, 'writeFile').mockImplementation(
-          async (target, data, options) => {
-            await realWriteFile(target, String(data).slice(0, 3), options);
-            throw errno('ENOSPC');
-          },
-        );
-      },
-    },
+  const faults: {
+    fault: string;
+    code: string;
+    failWrite?: string;
+    failSync?: string;
+    failClose?: string;
+  }[] = [
+    { fault: 'the write fails midway', code: 'ENOSPC', failWrite: 'ENOSPC' },
     {
       fault: 'the sync fails and then the close fails',
       code: 'EIO',
-      inject: () => {
-        spyOn(fsp, 'open').mockImplementation(async (...args) => {
-          const handle = await realOpen(...args);
-          const realClose = handle.close.bind(handle);
-          for (const method of ['sync', 'datasync'] as const) {
-            spyOn(handle, method).mockImplementation(async () => {
-              throw errno('EIO');
-            });
-          }
-          spyOn(handle, 'close').mockImplementation(async () => {
-            await realClose();
-            throw errno('EBADF');
-          });
-
-          return handle;
-        });
-      },
+      failSync: 'EIO',
+      failClose: 'EBADF',
+    },
+    {
+      fault: 'the close fails after a good sync',
+      code: 'EIO',
+      failClose: 'EIO',
     },
   ];
 
@@ -263,14 +250,43 @@ describe('the tmp file of a write', () => {
     }),
   )(
     '$name leaves no tmp and no change when $fault',
-    async ({ prepare, inject, code }) => {
+    async ({ prepare, code, failWrite, failSync, failClose }) => {
       const file = path.join(dir, 'note.md');
       const write = await prepare(file);
       const before = await snapshot(dir);
-      inject();
+      let closes = 0;
+      if (failWrite) {
+        spyOn(fsp, 'writeFile').mockImplementation(
+          async (target, data, options) => {
+            await realWriteFile(target, String(data).slice(0, 3), options);
+            throw errno(failWrite);
+          },
+        );
+      }
+      spyOn(fsp, 'open').mockImplementation(async (...args) => {
+        const handle = await realOpen(...args);
+        const realClose = handle.close.bind(handle);
+        if (failSync) {
+          for (const method of ['sync', 'datasync'] as const) {
+            spyOn(handle, method).mockImplementation(async () => {
+              throw errno(failSync);
+            });
+          }
+        }
+        spyOn(handle, 'close').mockImplementation(async () => {
+          closes++;
+          await realClose();
+          if (failClose) {
+            throw errno(failClose);
+          }
+        });
+
+        return handle;
+      });
 
       await expect(write()).rejects.toThrow(expect.objectContaining({ code }));
       expect(await snapshot(dir)).toEqual(before);
+      expect(closes).toBe(1);
     },
   );
 });
