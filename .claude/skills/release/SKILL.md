@@ -64,7 +64,7 @@ git fetch --tags origin             # so the "last tag" below is accurate
 ```sh
 bun -e "console.log(require('./package.json').version)"   # current version
 git describe --tags --abbrev=0 2>/dev/null                # last release tag (may be absent)
-npm view vaultmd version                                  # last version on npm (404 before the first release)
+npm view vaultmd version --prefer-online                  # last version on npm (404 before the first release)
 ```
 
 **A tag that never reached npm.** When `npm view` prints a version and the last
@@ -260,7 +260,7 @@ gh run watch --exit-status $(gh run list --workflow=release.yml --limit=1 --json
 **On success** — confirm the version is live, then flip the draft to published:
 
 ```sh
-npm view vaultmd version              # should print <version>
+npm view vaultmd version --prefer-online   # should print <version>; the registry can lag a minute, so retry
 gh release edit v<version> --draft=false      # publish the GitHub Release
 ```
 
@@ -279,7 +279,7 @@ the failing log. Common causes:
   it does not match the GitHub repository.
 
 The tag is already pushed, so never retag the same version. First check whether
-the version reached npm: `npm view vaultmd@<version> version`. If it prints
+the version reached npm: `npm view vaultmd@<version> version --prefer-online`. If it prints
 `<version>`, the publish went through: go on with **On success**. If it exits 1
 with `npm error 404 No match found for version <version>`, choose by where the
 cause is:
