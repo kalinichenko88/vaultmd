@@ -7,15 +7,18 @@ unchanged at ≥ 1.3.14.
 
 ### Fixes
 
-- **A crash during a write can no longer leave a note empty or short.**
-  `fs-atomic` wrote the tmp file and renamed (or hard-linked) it into place
-  without a sync, so the new name could reach the disk before the data did. The
-  tmp is now written through a file handle and `datasync`ed before it takes the
-  target's name, and a writeback error now fails the write instead of being
-  lost. This covers all three writers — plain writes, compare-and-swap rewrites,
-  and exclusive creates — so `createNote`, `updateNote`, `editFrontmatter`,
-  `moveNote`, and `vault.io.writeVaultFile` / `rewriteIfUnchanged` all gain it. On macOS the sync stops at the drive cache
-  (no `F_FULLFSYNC`).
+- **A system crash or power loss right after a write no longer leaves the note
+  empty or short.** `fs-atomic` wrote the tmp file and renamed (or hard-linked)
+  it into place without a sync, so the new name could reach the disk before the
+  data did. A crash of the process alone was never a risk. The tmp is now
+  written through a file handle and `datasync`ed before it takes the target's
+  name, and a writeback error now fails the write instead of being lost. This
+  covers all three writers — plain writes, compare-and-swap rewrites, and
+  exclusive creates — so `createNote`, `updateNote`, `editFrontmatter`,
+  `moveNote`, and `vault.io.writeVaultFile` / `rewriteIfUnchanged` all gain it.
+  Two gaps stay open (#43): the parent directory is not synced, so the rename
+  itself can be lost, and on macOS the sync stops at the drive cache (no
+  `F_FULLFSYNC`).
 - **A failed write no longer leaves a `.tmp` file behind.** The tmp is removed
   on every path, including a write or sync failure before the rename. When the
   close also fails, the original write or sync error is the one you see.
