@@ -67,23 +67,34 @@ git describe --tags --abbrev=0 2>/dev/null                # last release tag (ma
 npm view vaultmd version --prefer-online                  # last version on npm (404 before the first release)
 ```
 
-**A tag that never reached npm.** When `npm view` prints a version and the last
-tag is not `v` + that version, that tag's publish has not reached npm. Find its
-run with `gh run list --workflow=release.yml --limit=5`, and choose by its state:
+Call the last tag `<tag>`. Before anything else, check that the previous release
+is finished. A session can end while its CI runs, and leave it half done.
+
+**A tag that reached npm with its release still a draft.** When `npm view` prints
+the version of `<tag>`, check its GitHub Release:
+`gh release view <tag> --json isDraft -q .isDraft`. If it prints `true`, finish
+that release at Step 8, **On success**, with `<version>` as the version of `<tag>`.
+
+**A tag that never reached npm.** When `npm view` prints a version and `<tag>` is
+not `v` + that version, the publish of `<tag>` has not reached npm. Find its run
+with `gh run list --workflow=release.yml --limit=5`, and choose by its state:
 
 - **Still running, or succeeded:** the publish is not done yet, or the registry
   lags. Do not start a new release: finish that one at Step 8, with `<version>` as
-  the tag's version.
-- **Failed:** read why with `gh run view <run-id> --log-failed`. A rerun runs the
-  files of the tagged commit again, so judge the cause from those files
-  (`git show <tag>:.github/workflows/release.yml`, `git show <tag>:package.json`),
-  not from `HEAD`.
-  - A cause outside the repository: a rerun of that run fixes it, not a new
-    version. Go to Step 8, **On failure**, with `<version>` as the tag's version.
-  - A cause in those files: this run is a **re-cut**. Delete the draft of the
-    failed version if it is still there (`gh release delete <tag>`). Use
-    `v<npm version>` as the last tag below, so the range also holds the commits of
-    the failed version, which ship in this one.
+  the version of `<tag>`.
+- **Failed or cancelled:** read why with `gh run view <run-id> --log-failed`. A
+  rerun runs the files of the tagged commit again, so judge the cause from those
+  files (`git show <tag>:.github/workflows/release.yml`,
+  `git show <tag>:package.json`), not from `HEAD`.
+  - A cause outside the repository, a cancelled run, or a transient error (the
+    network, a registry outage): a rerun of that run fixes it, not a new version.
+    Go to Step 8, **On failure**, with `<version>` as the version of `<tag>`.
+  - A cause in those files: when `HEAD` still has it, stop, and fix it first in a
+    new commit, as Step 8 **In the repository** says. When `HEAD` has the fix, this
+    run is a **re-cut**. Delete the draft of the failed version if it is still
+    there (`gh release delete <tag>`). Use `v<npm version>` as the last tag below,
+    so the range also holds the commits of the failed version, which ship in this
+    one.
 
 When a release finished at Step 8 this way, start again at Step 1 for the commits
 after its tag.
@@ -275,6 +286,9 @@ gh run watch --exit-status $(gh run list --workflow=release.yml --limit=1 --json
 npm view vaultmd version --prefer-online   # should print <version>; the registry can lag a minute, so retry
 gh release edit v<version> --draft=false      # publish the GitHub Release
 ```
+
+If `v<version>` has no draft, because the session that pushed the tag ended
+before Step 7, create it first with the Step 7 command and notes.
 
 Report the published version plus the npm and GitHub Release URLs.
 
