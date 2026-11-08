@@ -13,8 +13,8 @@ imports use `@/` tsconfig-path aliases; **`tsup` bundles `src/index.ts` →
 are resolved in the shipped artifact. `exports` points at `./dist/index.js`. The
 package publishes to npm via a **tag-driven** GitHub Actions workflow (push a
 `v*` tag → `npm publish` through npm trusted publishing (OIDC), no token); the
-local `release` skill drives the version/CHANGELOG/README/tag flow. It stays **Bun-only at runtime** (the bundle
-imports `bun:sqlite`).
+local `release` skill drives the version/CHANGELOG/README/tag flow. It stays
+**Bun-only at runtime** (the bundle imports `bun:sqlite`).
 
 ## Commands
 
