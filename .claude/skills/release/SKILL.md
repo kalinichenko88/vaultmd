@@ -68,13 +68,25 @@ npm view vaultmd version --prefer-online                  # last version on npm 
 ```
 
 **A tag that never reached npm.** When `npm view` prints a version and the last
-tag is not `v` + that version, the publish of the last tag failed. Read why:
-`gh run list --workflow=release.yml --limit=5`, then
-`gh run view <run-id> --log-failed`. A cause outside the repository is fixed by a
-rerun of that run, not by a new version: stop here and go to Step 8,
-**On failure**. A cause in the repository makes this run a **re-cut**: use
-`v<npm version>` as the last tag below, so the range also holds the commits of the
-failed version, which ship in this one.
+tag is not `v` + that version, that tag's publish has not reached npm. Find its
+run with `gh run list --workflow=release.yml --limit=5`, and choose by its state:
+
+- **Still running, or succeeded:** the publish is not done yet, or the registry
+  lags. Do not start a new release: finish that one at Step 8, with `<version>` as
+  the tag's version.
+- **Failed:** read why with `gh run view <run-id> --log-failed`. A rerun runs the
+  files of the tagged commit again, so judge the cause from those files
+  (`git show <tag>:.github/workflows/release.yml`, `git show <tag>:package.json`),
+  not from `HEAD`.
+  - A cause outside the repository: a rerun of that run fixes it, not a new
+    version. Go to Step 8, **On failure**, with `<version>` as the tag's version.
+  - A cause in those files: this run is a **re-cut**. Delete the draft of the
+    failed version if it is still there (`gh release delete <tag>`). Use
+    `v<npm version>` as the last tag below, so the range also holds the commits of
+    the failed version, which ship in this one.
+
+When a release finished at Step 8 this way, start again at Step 1 for the commits
+after its tag.
 
 Then collect the commits since the last tag. If there is **no** prior tag, use the
 whole history (`git log --oneline`) — this is the first release.
@@ -270,27 +282,32 @@ Report the published version plus the npm and GitHub Release URLs.
 the failing log. Common causes:
 
 - `E404 Not Found - PUT https://registry.npmjs.org/vaultmd` or `ENEEDAUTH`: npm
-  could not authenticate through trusted publishing. Check the workflow first: it
-  needs `permissions: id-token: write` and npm 11.5.1 or later (Node 24 ships it).
-  A gap there is in the repository. Otherwise the trusted publisher on npmjs.com
-  does not match the run (owner, repository, workflow file name, environment), or
-  it does not allow `npm publish`.
+  could not authenticate through trusted publishing. Check the workflow of the
+  tagged commit first (`git show v<version>:.github/workflows/release.yml`): it
+  needs `permissions: id-token: write` and npm 11.5.1 or later. The setup-node step
+  of the log names the Node version; recent Node 24 releases ship npm 11.5.1 or
+  later, but 24.0 shipped 11.3. A gap there is in the repository, even when a later
+  commit fixed it, because a rerun runs the tagged commit. Otherwise the trusted
+  publisher on npmjs.com does not match the run (owner, repository, workflow file
+  name, environment), or it does not allow `npm publish`.
 - A provenance error: the `repository` field is missing from `package.json`, or
   it does not match the GitHub repository.
 
 The tag is already pushed, so never retag the same version. First check whether
-the version reached npm: `npm view vaultmd@<version> version --prefer-online`. If it prints
-`<version>`, the publish went through: go on with **On success**. If it exits 1
-with `npm error 404 No match found for version <version>`, choose by where the
-cause is:
+the version reached npm: `npm view vaultmd@<version> version --prefer-online`.
+If it prints `<version>`, the publish went through: go on with **On success**. If
+it exits 1 with `npm error 404 No match found for version <version>`, choose by
+where the cause is:
 
-- **Outside the repository** (the npm settings, a GitHub setting): fix the cause,
-  then rerun the failed run with `gh run rerun <run-id>`, where `<run-id>` is what
+- **Outside the repository** (the npm settings, a GitHub setting): only the user
+  can change them. Ask the user to fix the cause and confirm, then rerun the failed
+  run with `gh run rerun <run-id>`, where `<run-id>` is what
   `gh run list --workflow=release.yml --limit=1 --json databaseId -q '.[0].databaseId'`
   prints. The rerun runs the tagged commit and publishes the same tag. Watch it with
   `gh run watch --exit-status <run-id>`, and when it succeeds, go on with
   **On success**.
-- **In the repository** (the workflow, `package.json`): fix it in a new commit.
+- **In the repository** (the workflow or `package.json` of the tagged commit): fix
+  it in a new commit.
   Delete the draft of the failed version with `gh release delete v<version>`: that
   version is not on npm. The tag stays. Then release again from the top: Step 1
   finds the failed tag and runs a **re-cut**, which ships the failed version's
