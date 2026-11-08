@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.11.1 — 2026-11-09
+
+A durability fix for every write. No API change, no index rebuild. Bun floor
+unchanged at ≥ 1.3.14.
+
+### Fixes
+
+- **A crash during a write can no longer leave a note empty or short.**
+  `fs-atomic` wrote the tmp file and renamed (or hard-linked) it into place
+  without a sync, so the new name could reach the disk before the data did. The
+  tmp is now written through a file handle and `datasync`ed before it takes the
+  target's name, and a writeback error now fails the write instead of being
+  lost. This covers all three writers — plain writes, compare-and-swap rewrites,
+  and exclusive creates — so `createNote`, `updateNote`, `editFrontmatter`,
+  `moveNote`, and `vault.io.writeVaultFile` / `rewriteIfUnchanged` all gain it. On macOS the sync stops at the drive cache
+  (no `F_FULLFSYNC`).
+- **A failed write no longer leaves a `.tmp` file behind.** The tmp is removed
+  on every path, including a write or sync failure before the rename. When the
+  close also fails, the original write or sync error is the one you see.
+
+### Dependencies
+
+- `yaml` floor raised to `^2.9.1`.
+
 ## 0.11.0 — 2026-08-30
 
 Notes become addressable by heading: read or replace one section of a note
