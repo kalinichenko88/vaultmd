@@ -89,12 +89,12 @@ with `gh run list --workflow=release.yml --limit=5`, and choose by its state:
   - A cause outside the repository, a cancelled run, or a transient error (the
     network, a registry outage): a rerun of that run fixes it, not a new version.
     Go to Step 8, **On failure**, with `<version>` as the version of `<tag>`.
-  - A cause in those files: when `HEAD` still has it, stop, and fix it first in a
-    new commit, as Step 8 **In the repository** says. When `HEAD` has the fix, this
-    run is a **re-cut**. Delete the draft of the failed version if it is still
-    there (`gh release delete <tag>`). Use `v<npm version>` as the last tag below,
-    so the range also holds the commits of the failed version, which ship in this
-    one.
+  - A cause in those files: when `HEAD` still has it, pause the release. Tell the
+    user, commit the fix on `main`, push it, and start again at Step 1. When `HEAD`
+    has the fix, this run is a **re-cut**. Delete the draft of the failed version
+    if it is still there (`gh release delete <tag> --yes`). Then `<last-tag>` below
+    is `v<npm version>`, not `<tag>`, so the range also holds the commits of the
+    failed version, which ship in this one.
 
 When a release finished at Step 8 this way, start again at Step 1 for the commits
 after its tag.
@@ -288,7 +288,7 @@ gh release edit v<version> --draft=false      # publish the GitHub Release
 ```
 
 If `v<version>` has no draft, because the session that pushed the tag ended
-before Step 7, create it first with the Step 7 command and notes.
+before `gh release create`, create it first with the Step 7 command and notes.
 
 Report the published version plus the npm and GitHub Release URLs.
 
@@ -314,15 +314,15 @@ it exits 1 with `npm error 404 No match found for version <version>`, choose by
 where the cause is:
 
 - **Outside the repository** (the npm settings, a GitHub setting): only the user
-  can change them. Ask the user to fix the cause and confirm, then rerun the failed
-  run with `gh run rerun <run-id>`, where `<run-id>` is what
+  can change them. Ask the user to fix the cause and confirm. A cancelled run or a
+  transient error (the network, a registry outage) needs no fix. Then rerun the
+  failed run with `gh run rerun <run-id>`, where `<run-id>` is what
   `gh run list --workflow=release.yml --limit=1 --json databaseId -q '.[0].databaseId'`
   prints. The rerun runs the tagged commit and publishes the same tag. Watch it with
   `gh run watch --exit-status <run-id>`, and when it succeeds, go on with
   **On success**.
 - **In the repository** (the workflow or `package.json` of the tagged commit): fix
-  it in a new commit.
-  Delete the draft of the failed version with `gh release delete v<version>`: that
-  version is not on npm. The tag stays. Then release again from the top: Step 1
+  it in a new commit. Delete the draft of the failed version with
+  `gh release delete v<version> --yes`: that version is not on npm. The tag stays. Then release again from the top: Step 1
   finds the failed tag and runs a **re-cut**, which ships the failed version's
   changes in the next version.
