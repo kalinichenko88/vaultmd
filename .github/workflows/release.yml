@@ -5,7 +5,7 @@ on:
 
 permissions:
   contents: read
-  id-token: write # npm provenance
+  id-token: write # npm trusted publishing (OIDC); it also makes the provenance statement
 
 jobs:
   publish:
@@ -33,6 +33,4 @@ jobs:
       - run: bun run check
       - run: bun test
       - run: bun run smoke # build + pack/install/import/typecheck before publishing
-      - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: npm publish --access public
