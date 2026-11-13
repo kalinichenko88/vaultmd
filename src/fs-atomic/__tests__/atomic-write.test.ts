@@ -271,6 +271,47 @@ describe('the file a write replaces (#46)', () => {
     expect(await readFile(file, 'utf8')).toBe('old');
   });
 
+  test.skipIf(otherGroup === undefined)(
+    'a chgrp made while atomicWriteIfUnchanged writes is a conflict, not undone',
+    async () => {
+      const { file, sig } = await note(0o640);
+      spyOn(fsp, 'writeFile').mockImplementationOnce(async (...args) => {
+        await chown(file, (await stat(file)).uid, otherGroup as number);
+
+        return realWriteFile(...args);
+      });
+
+      const error = await atomicWriteIfUnchanged(file, 'new', sig).catch(
+        (e: unknown) => {
+          return e;
+        },
+      );
+
+      expect((error as MdVaultError).code).toBe('MTIME_CONFLICT');
+      expect((await stat(file)).gid).toBe(otherGroup as number);
+    },
+  );
+
+  test('a note absent when atomicWriteIfUnchanged starts is a conflict at once', async () => {
+    const { file, sig } = await note(0o600);
+    const away = path.join(dir, 'away.md');
+    await fsp.rename(file, away);
+    // A sync tool brings it back, same Sig, while the write would run.
+    spyOn(fsp, 'writeFile').mockImplementationOnce(async (...args) => {
+      await fsp.rename(away, file);
+
+      return realWriteFile(...args);
+    });
+
+    const error = await atomicWriteIfUnchanged(file, 'new', sig).catch(
+      (e: unknown) => {
+        return e;
+      },
+    );
+
+    expect((error as MdVaultError).code).toBe('MTIME_CONFLICT');
+  });
+
   test('a write onto a symlink is refused, and the link and its target stay', async () => {
     const real = path.join(dir, 'real.md');
     const alias = path.join(dir, 'alias.md');

@@ -35,22 +35,33 @@ export async function atomicWriteIfUnchanged(
   content: string,
   expected: Sig,
 ): Promise<Sig> {
+  // `expected` is the Sig of a file that was there: with none now, the tmp
+  // would get no ownership to carry, so it is a conflict before any write.
   const like = await fileAt(fullPath);
+  if (!like) {
+    throw new MdVaultError(
+      'MTIME_CONFLICT',
+      `file gone before write: ${fullPath}`,
+    );
+  }
 
   // A chmod or chown during the write changes no Sig, and the tmp carries the
   // ownership from before it: a conflict, so the caller retries on the new
-  // ownership instead of the rename undoing it. Never reopen the tmp by name
+  // ownership instead of the rename undoing it. One that lands after this
+  // check and before the rename is still undone. Never reopen the tmp by name
   // to take it over: a link planted at that name would get the chmod.
   return placeTemp(fullPath, content, like, async (tmp) => {
     const current = await fileAt(fullPath);
-    if (
-      !current ||
-      !sigsEqual(makeSig(current), expected) ||
-      (like !== null && !sameOwnership(current, like))
-    ) {
+    if (!current || !sigsEqual(makeSig(current), expected)) {
       throw new MdVaultError(
         'MTIME_CONFLICT',
         `file changed under write: ${fullPath}`,
+      );
+    }
+    if (!sameOwnership(current, like)) {
+      throw new MdVaultError(
+        'MTIME_CONFLICT',
+        `mode or owner changed under write: ${fullPath}`,
       );
     }
     await rename(tmp, fullPath);
@@ -130,10 +141,10 @@ async function fileAt(fullPath: string): Promise<Stats | null> {
 // target's name, then always remove the tmp: after a rename it is already
 // gone, after a link it is a second name, after a failure it is junk.
 // ponytail: `like` is read before the write. atomicWriteIfUnchanged turns a
-// chmod or chown made during the write into a conflict; atomicWrite and a
-// move's exclusiveCreate have no check point, so the new file gets the
-// ownership from before. Upgrade path: the tmp's own handle at the place
-// step, never a reopen by name.
+// chmod or chown made during the write into a conflict; atomicWrite has no
+// check point, and a move checks only its source's Sig, so there the new file
+// gets the ownership from before. Upgrade path: the tmp's own handle at the
+// place step, never a reopen by name.
 async function placeTemp(
   fullPath: string,
   content: string,

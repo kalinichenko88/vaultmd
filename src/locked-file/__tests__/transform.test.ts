@@ -1,10 +1,21 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { writeFileSync } from 'node:fs';
 import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from 'bun:test';
+import { writeFileSync } from 'node:fs';
+import * as fsp from 'node:fs/promises';
+import {
+  chmod,
   lstat,
   mkdtemp,
   readFile,
   rm,
+  stat,
   symlink,
   writeFile,
 } from 'node:fs/promises';
@@ -161,6 +172,25 @@ describe('withFileTransform', () => {
     expect((err as MdVaultError).code).toBe('ALLOWLIST_VIOLATION');
     expect((await lstat(file)).isSymbolicLink()).toBe(true);
     expect(await readFile(real, 'utf8')).toBe('old\n');
+  });
+
+  test('a chmod made during the write is kept: the update retries on it (#46)', async () => {
+    await writeFile(file, 'old');
+    await chmod(file, 0o644);
+    const realWriteFile = fsp.writeFile;
+    spyOn(fsp, 'writeFile').mockImplementationOnce(async (...args) => {
+      await chmod(file, 0o600); // the person narrows the note mid-write
+
+      return realWriteFile(...args);
+    });
+    try {
+      const res = await withFileTransform(file, KEY, REL, (c) => `${c}+new`);
+      expect(res.outcome).toBe('updated');
+    } finally {
+      mock.restore();
+    }
+    expect(await readFile(file, 'utf8')).toBe('old+new');
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
   });
 });
 

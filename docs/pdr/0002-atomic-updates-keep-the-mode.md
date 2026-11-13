@@ -12,8 +12,9 @@ its owner and group where the OS lets the writer set them, before the new text
 is written into it. When the group cannot be kept, its permission bits are
 dropped, so they do not pass to the new file's group. A move gives the new note
 the mode and owner of the old one the same way. A chmod or chown of the note
-during an update is a conflict, and the update is tried again on the new mode;
-a blind `writeVaultFile` and a move take the mode from before the write. A tmp
+during an update's write is a conflict, and the update is tried again on the
+new mode; one in the last moment between the final check and the rename, a
+blind `writeVaultFile` and a move keep the mode from before the write. A tmp
 is never reopened by its name. Extended attributes (macOS Finder tags, for
 example) and hard links stay with the old file: after an update the note has
 no extended attributes, and a hard link to it keeps the old text.
