@@ -1,5 +1,15 @@
 import type { Database } from 'bun:sqlite';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from 'bun:test';
+import { writeFileSync } from 'node:fs';
+import * as fsp from 'node:fs/promises';
 import {
   mkdir,
   mkdtemp,
@@ -194,6 +204,25 @@ describe('updateNote', () => {
       'hello world',
     );
     expect(query.searchText('hello').map((h) => h.path)).toContain('fresh.md');
+  });
+
+  test('append to a missing file keeps a file that another writer creates during the write (#45)', async () => {
+    const realWriteFile = fsp.writeFile;
+    spyOn(fsp, 'writeFile').mockImplementationOnce(async (...args) => {
+      // A sync client creates the note while our tmp is written.
+      writeFileSync(join(vaultDir, 'fresh.md'), 'EXTERNAL\n');
+
+      return realWriteFile(...args);
+    });
+    try {
+      await notes.updateNote('fresh.md', { append: 'hello world' });
+    } finally {
+      mock.restore();
+    }
+    expect(await read('fresh.md')).toBe('EXTERNAL\nhello world');
+    expect(query.searchText('EXTERNAL').map((h) => h.path)).toContain(
+      'fresh.md',
+    );
   });
 
   test('append newline rule: one newline before text iff existing lacks a trailing newline', async () => {

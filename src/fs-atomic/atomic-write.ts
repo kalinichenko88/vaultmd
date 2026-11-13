@@ -84,6 +84,9 @@ export async function exclusiveCreate(
       await link(tmp, fullPath); // O_EXCL via hardlink: fails EEXIST if target present
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+        // A link there, dangling or not, is refused as every write refuses
+        // it (docs/pdr/0001), not reported as a file that is there.
+        await fileAt(fullPath);
         throw new MdVaultError(
           'ALREADY_EXISTS',
           `already exists: ${fullPath}`,
