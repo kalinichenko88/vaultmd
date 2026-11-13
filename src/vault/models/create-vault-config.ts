@@ -40,12 +40,13 @@ export type CreateVaultConfig = VaultIoConfig & {
    * When `true` (default), serialise writes via a cross-process advisory lock
    * stored next to the index file. Set to `false` for single-process scenarios
    * to avoid the lock-file overhead. A writer refreshes its lock while it
-   * holds it. A lock written under this host name with a pid that no process
-   * here has now is taken over at once. Any other lock is taken over once
-   * nobody has refreshed it for 30 seconds and the waiting write has seen it
-   * stay so for 3 more; that write waits for those 3 seconds even past
-   * `sqliteBusyTimeoutMs`. Until a dead writer's lock is taken over, writes
-   * to that note fail with `MTIME_CONFLICT`.
+   * holds it. A lock is taken over once nobody has refreshed it for 30
+   * seconds and the waiting write has seen it stay so for 3 more; that write
+   * waits for those 3 seconds even past `sqliteBusyTimeoutMs`. Until a dead
+   * writer's lock is taken over, writes to that note fail with
+   * `MTIME_CONFLICT`. The lock's pid and host name are not checked: they do
+   * not tell a live writer in another PID namespace (as another container
+   * with the same host name) from a dead one.
    */
   crossProcessWriterLock?: boolean;
   /**

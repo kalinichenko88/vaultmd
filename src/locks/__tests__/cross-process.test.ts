@@ -7,7 +7,7 @@ import {
   spyOn,
   test,
 } from 'bun:test';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as fsp from 'node:fs/promises';
 import {
   mkdtemp,
@@ -67,34 +67,15 @@ describe('withCrossProcessLock', () => {
     expect(await statSig(lockPath(nested, 'x.md'))).toBeNull(); // released in finally
   });
 
-  test('reclaims a lockfile held by a dead same-host pid at once', async () => {
-    const key = 'note.md';
-    await writeFile(
-      lockPath(dir, key),
-      JSON.stringify({
-        pid: 999999999,
-        host: hostname(),
-        createdAt: Date.now(),
-      }),
-    );
-
-    let ran = false;
-    const result = await withCrossProcessLock(dir, key, 1000, async () => {
-      ran = true;
-
-      return 42;
-    });
-
-    expect(ran).toBe(true);
-    expect(result).toBe(42);
-    expect(await statSig(lockPath(dir, key))).toBeNull();
-    expect(await statSig(`${lockPath(dir, key)}.reclaim`)).toBeNull();
-  });
-
   test.each([
     [
       'a live pid',
       JSON.stringify({ pid: process.pid, host: hostname(), createdAt: 1 }),
+    ],
+    [
+      // A holder in another PID namespace under the same host name (#62).
+      'a pid that no process here has',
+      JSON.stringify({ pid: 999999999, host: hostname(), id: randomUUID() }),
     ],
     [
       'another host name',
@@ -270,46 +251,51 @@ describe('withCrossProcessLock', () => {
 
   test('lets one waiter in when two find one stale lock', async () => {
     const key = 'note.md';
-    await writeFile(
-      lockPath(dir, key),
-      JSON.stringify({ pid: 999999999, host: hostname() }),
-    );
-    // Both waiters read the dead holder's file; the second acts on what it
-    // read only once the first is inside the lock.
-    const real = fsp.readFile;
-    let reads = 0;
-    let secondRead!: () => void;
-    const bothRead = new Promise<void>((resolve) => {
-      secondRead = resolve;
+    await writeFile(lockPath(dir, key), '{"pid":12');
+    await pastStaleBound(lockPath(dir, key));
+    // Both waiters find the lockfile stale; the second acts on that only once
+    // the first is inside the lock.
+    const real = fsp.writeFile;
+    let guards = 0;
+    let secondGuard!: () => void;
+    const bothStale = new Promise<void>((resolve) => {
+      secondGuard = resolve;
     });
     let entered!: () => void;
     const oneInside = new Promise<void>((resolve) => {
       entered = resolve;
     });
-    spyOn(fsp, 'readFile').mockImplementation((async (file, options) => {
-      const content = await real(file, options);
-      reads += 1;
-      const read = reads;
-      if (read === 1) {
-        await bothRead;
-      }
-      if (read === 2) {
-        secondRead();
-        await oneInside;
+    spyOn(fsp, 'writeFile').mockImplementation((async (file, data, opts) => {
+      if (String(file).endsWith('.reclaim')) {
+        guards += 1;
+        const guard = guards;
+        if (guard === 1) {
+          await bothStale;
+        }
+        if (guard === 2) {
+          secondGuard();
+          await oneInside;
+        }
       }
 
-      return content;
+      return real(file, data, opts);
     }) as typeof real);
     let active = 0;
     let peak = 0;
     const waiter = () => {
-      return withCrossProcessLock(dir, key, 2000, async () => {
-        active += 1;
-        peak = Math.max(peak, active);
-        entered();
-        await Bun.sleep(100);
-        active -= 1;
-      });
+      return withCrossProcessLock(
+        dir,
+        key,
+        2000,
+        async () => {
+          active += 1;
+          peak = Math.max(peak, active);
+          entered();
+          await Bun.sleep(100);
+          active -= 1;
+        },
+        STALE,
+      );
     };
 
     await Promise.all([waiter(), waiter()]);

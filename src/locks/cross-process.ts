@@ -26,6 +26,8 @@ export async function withCrossProcessLock<T>(
     `${createHash('sha256').update(key).digest('hex')}.lock`,
   );
   // `id` tells this holder's lockfile from the next one on the same key.
+  // `pid` and `host` are for a person who reads a stuck lockfile: no code
+  // reads them.
   const payload = JSON.stringify({
     pid: process.pid,
     host: hostname(),
@@ -85,9 +87,9 @@ export async function withCrossProcessLock<T>(
   }
 }
 
-// A lockfile that nobody refreshed for this long is stale, whatever it holds:
-// the name of a host that is gone, a pid that a new process got, or a payload
-// that a crash cut off.
+// A lockfile that nobody refreshed for this long is stale. Only the age tells:
+// a pid says nothing to a waiter in another PID namespace, even under the same
+// host name (#62, PDR 0003), so a dead holder's lock waits out the bound.
 // ponytail: a live holder loses the lock when its event loop blocks for about
 // STALE_MS, or for longer than the 3 s watch just after the machine wakes or
 // the clock steps; a heartbeat off the main thread would close both, if they
@@ -185,42 +187,19 @@ async function staleness(
   if (!info) {
     return 'gone';
   }
-  const old = isOld(info.mtimeMs, staleMs);
-  if (old) {
-    if (watch.mtimeMs !== info.mtimeMs) {
-      watch.mtimeMs = info.mtimeMs;
-      watch.since = performance.now();
-    } else if (performance.now() - watch.since >= watch.lengthMs) {
-      return 'stale';
-    }
+  if (!isOld(info.mtimeMs, staleMs)) {
+    return 'live';
   }
-  if (await holderIsDead(lockfile)) {
+  if (watch.mtimeMs !== info.mtimeMs) {
+    watch.mtimeMs = info.mtimeMs;
+    watch.since = performance.now();
+  } else if (performance.now() - watch.since >= watch.lengthMs) {
     return 'stale';
   }
 
-  return old ? 'watching' : 'live';
+  return 'watching';
 }
 
 function isOld(mtimeMs: number, staleMs: number): boolean {
   return Date.now() - mtimeMs > staleMs;
-}
-
-// A same-host pid tells at once that the holder is dead.
-async function holderIsDead(lockfile: string): Promise<boolean> {
-  let holder: { pid?: unknown; host?: unknown };
-  try {
-    holder = { ...JSON.parse(await readFile(lockfile, 'utf8')) };
-  } catch {
-    return false; // gone, or not written in full yet
-  }
-  if (holder.host !== hostname() || typeof holder.pid !== 'number') {
-    return false;
-  }
-  try {
-    process.kill(holder.pid, 0);
-
-    return false; // alive, or the pid is reused: the age tells later
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'ESRCH'; // EPERM: alive
-  }
 }
