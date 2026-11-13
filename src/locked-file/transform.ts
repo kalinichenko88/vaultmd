@@ -17,7 +17,9 @@ import type { TransformResult } from './models/transform-result.ts';
  * receives the current file content (or `null` if the file is absent) and
  * must return the desired new content, or `null` to leave the file untouched.
  * A create never replaces a file that appeared after the read: the transform
- * runs again on that file's text, and the result is an update.
+ * runs again on that file's text. When other writers still change or create
+ * the file after `maxRetries` retries, it throws `MTIME_CONFLICT` or
+ * `ALREADY_EXISTS`.
  * The write is atomic and keeps the file's mode and, where the OS allows, its
  * group and owner, as `VaultIo.writeVaultFile` says; it fails with
  * `UNSAFE_MODE` when the OS gives the new file a mode that gives the group or

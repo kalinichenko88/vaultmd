@@ -591,6 +591,41 @@ describe('exclusiveCreate + unlinkIfUnchanged', () => {
     expect(await readdir(dir)).toEqual(['dupe.md']); // no tmp left
   });
 
+  test('exclusiveCreate onto a symlink, dangling or not, is refused, and the link stays', async () => {
+    const real = path.join(dir, 'real.md');
+    await atomicWrite(real, 'old\n');
+    for (const target of [real, path.join(dir, 'gone.md')]) {
+      const alias = path.join(dir, 'alias.md');
+      await symlink(target, alias);
+      const error = await exclusiveCreate(alias, 'new').catch((e: unknown) => {
+        return e;
+      });
+      expect((error as MdVaultError).code).toBe('ALLOWLIST_VIOLATION');
+      expect((await lstat(alias)).isSymbolicLink()).toBe(true);
+      await rm(alias);
+    }
+    expect(await readFile(real, 'utf8')).toBe('old\n');
+  });
+
+  test('a link() that took effect but failed with EEXIST, as on NFS, is a create (#45)', async () => {
+    const file = path.join(dir, 'nfs.md');
+    const realLink = fsp.link;
+    spyOn(fsp, 'link').mockImplementationOnce(async (from, to) => {
+      await realLink(from, to); // the server made the link; its reply was lost
+      throw Object.assign(new Error('EEXIST: file already exists, link'), {
+        code: 'EEXIST',
+      });
+    });
+    try {
+      const sig = await exclusiveCreate(file, 'fresh');
+      expect(await statSig(file)).toEqual(sig);
+    } finally {
+      mock.restore();
+    }
+    expect(await readFile(file, 'utf8')).toBe('fresh');
+    expect(await readdir(dir)).toEqual(['nfs.md']);
+  });
+
   test('unlinkIfUnchanged returns false (no-op) for a missing file', async () => {
     const ghost = path.join(dir, 'ghost.md');
     expect(await unlinkIfUnchanged(ghost, { mtimeMs: 1, size: 1 })).toBe(false);

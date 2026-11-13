@@ -84,8 +84,10 @@ export type NotesApi = {
    * @throws {@link MdVaultError} `NO_MATCH` / `AMBIGUOUS_MATCH` for
    * `editByMatch` and `setSection`, `REFUSE_CREATE` when `setBody` targets a
    * missing note, `VALIDATION_ERROR` when a `setSection` body would
-   * restructure the document outside its own section, or `UNSAFE_MODE` if the
-   * OS gives the new file a mode that gives the group or the others more
+   * restructure the document outside its own section, `MTIME_CONFLICT` (or
+   * `ALREADY_EXISTS`, when `append` or `prepend` creates the note) if other
+   * writers keep changing the note through every retry, or `UNSAFE_MODE` if
+   * the OS gives the new file a mode that gives the group or the others more
    * access than the note's mode did.
    */
   updateNote(path: string, op: UpdateOp): Promise<void>;
