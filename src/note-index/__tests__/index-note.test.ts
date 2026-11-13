@@ -8,6 +8,7 @@ import { createVaultIo, type VaultIo } from '@/vault-io/index.ts';
 
 import { dropNote, indexNote } from '../index-note.ts';
 import type { IndexConfig } from '../models/index-config.ts';
+import { openIndexDb } from '../open.ts';
 import { applySchema } from '../schema.ts';
 
 let dir: string;
@@ -18,10 +19,13 @@ const cfg: IndexConfig = {
   caseSensitive: true,
   ignore: [],
 };
+const busyTimeoutMs = 200;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'vaultmd-'));
-  db = new Database(join(dir, 'index.db'));
+  db = openIndexDb(join(dir, 'index.db'), {
+    sqliteBusyTimeoutMs: busyTimeoutMs,
+  });
   applySchema(db);
   io = createVaultIo({
     root: dir,
@@ -152,7 +156,6 @@ describe('dropNote', () => {
 describe('a write that meets another connection holding the write lock', () => {
   // #58: a deferred transaction that reads first gets SQLITE_BUSY at once in WAL,
   // without the busy handler; the write must wait busy_timeout like any writer.
-  const busyTimeoutMs = 200;
   const writes: [string, () => void][] = [
     [
       'indexNote',
@@ -169,13 +172,11 @@ describe('a write that meets another connection holding the write lock', () => {
   ];
 
   test.each(writes)('%s waits busy_timeout before it fails', (_name, write) => {
-    db.run('PRAGMA journal_mode = WAL'); // as openIndexDb opens it
-    db.run(`PRAGMA busy_timeout = ${busyTimeoutMs}`);
     const other = new Database(join(dir, 'index.db'));
     other.run('BEGIN IMMEDIATE');
     const start = performance.now();
     try {
-      expect(write).toThrow('database is locked');
+      expect(write).toThrow(expect.objectContaining({ code: 'SQLITE_BUSY' }));
     } finally {
       other.run('ROLLBACK');
       other.close();

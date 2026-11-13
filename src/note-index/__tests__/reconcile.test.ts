@@ -283,7 +283,9 @@ describe('note-index reconcile', () => {
     other.run('BEGIN IMMEDIATE');
     const start = performance.now();
     try {
-      await expect(reconciler.rebuild()).rejects.toThrow('database is locked');
+      await expect(reconciler.rebuild()).rejects.toThrow(
+        expect.objectContaining({ code: 'SQLITE_BUSY' }),
+      );
     } finally {
       other.run('ROLLBACK');
       other.close();
