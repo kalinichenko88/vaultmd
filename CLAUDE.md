@@ -129,11 +129,13 @@ code** — only the API-freeze test (`src/__tests__/index.test.ts`) imports it.
   Do not add "follow the link to its target" back.
 - **Updates stay atomic — a product decision, do not undo it**
   ([PDR 0002](docs/pdr/0002-atomic-updates-keep-the-mode.md)). `fs-atomic`
-  writes a synced tmp and renames it over the note. The tmp is created for its
-  owner only and takes the note's group and owner (where the OS allows; a
-  group it cannot keep gets the others bits) and mode (a refused mode is no
-  error while the tmp is no wider) before any byte is written; a move copies
-  them from its source. Never trade this for a write in place.
+  writes a synced tmp and renames it over the note. The tmp is created no
+  wider than the note for any user (its group class gets only the bits the
+  note's group and others share) and takes the note's group and owner (where
+  the OS allows; a group it cannot keep keeps those shared bits) and mode (a
+  refused chmod is no error while the tmp is no wider) before any byte is
+  written; a move copies them from its source. Never trade this for a write in
+  place.
 - **Index db location.** The index `.db` and its `-wal`/`-shm` sidecars must live
   in a data dir, **not** the synced vault, and stay gitignored (`*.db*` already
   is).

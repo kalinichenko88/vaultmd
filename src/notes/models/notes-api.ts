@@ -125,7 +125,8 @@ export type NotesApi = {
   /**
    * Move a note to a new vault-relative path, byte-for-byte: the content and
    * its frontmatter are carried over untouched, and so are the file's mode and,
-   * where the OS allows, its group and owner; the index row follows to the new
+   * where the OS allows, its group and owner (as on an update: the mode can end
+   * up narrower, never wider); the index row follows to the new
    * path. Both ends are allowlist-,
    * hidden- and symlink-checked; the destination is never clobbered. Runs under BOTH per-file locks, so a
    * concurrent write to either end serializes against it.
