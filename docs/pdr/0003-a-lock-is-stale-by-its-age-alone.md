@@ -10,7 +10,10 @@ A cross-process writer lock is taken over only when nobody has refreshed it
 for 30 seconds and the waiting write has seen it stay so for 3 more. vaultmd
 does not check the pid or the host name in the lockfile to take a lock over
 sooner. After a writer dies inside its lock, writes to that note fail with
-`MTIME_CONFLICT` for about 33 seconds. The lockfile has no `pid` or `host`
+`MTIME_CONFLICT` for about 33 seconds. When the clock was stepped back after
+the writer died, they fail until the clock is 30 seconds past the lock's last
+refresh, as a live writer's lock with an mtime in the future is not taken
+over. The lockfile has no `pid` or `host`
 key, so a process of an older version, which reads them, does not take a
 live lock over by its pid.
 

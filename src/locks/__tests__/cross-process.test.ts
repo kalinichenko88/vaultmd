@@ -383,6 +383,8 @@ describe('withCrossProcessLock', () => {
     expect(
       await withCrossProcessLock(dir, key, 1000, async () => 'ok', STALE),
     ).toBe('ok');
+    expect(await statSig(path.join(dir, 'gone'))).toBeNull(); // not written through the link
+    expect(await statSig(lockPath(dir, key))).toBeNull();
   }, 3000);
 
   test('throws the error of a lockfile it cannot stat', async () => {
@@ -522,5 +524,6 @@ describe('withCrossProcessLock', () => {
     await expect(
       withCrossProcessLock(dir, key, 1000, async () => 'never', STALE),
     ).rejects.toThrow('not permitted');
+    expect(await statSig(`${lockPath(dir, key)}.reclaim`)).toBeNull();
   }, 3000);
 });

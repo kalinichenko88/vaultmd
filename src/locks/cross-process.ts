@@ -101,8 +101,9 @@ export async function withCrossProcessLock<T>(
 // STALE_MS, or for longer than the 3 s watch just after the machine wakes or
 // the clock steps; a heartbeat off the main thread would close both, if they
 // ever matter. A dead holder's lockfile whose mtime is in the future, after
-// the clock was stepped back, waits until the clock passes it: taking it
-// sooner would take a live holder's lock whose heartbeat waits on SQLite.
+// the clock was stepped back, waits until the clock passes its mtime by
+// STALE_MS, plus the watch: taking it sooner would take a live holder's lock
+// whose heartbeat waits on SQLite.
 export const STALE_MS = 30_000;
 
 // The age is read on the wall clock, which jumps forward when the machine
