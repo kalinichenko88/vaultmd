@@ -23,7 +23,7 @@ import type { VaultIo } from './models/vault-io.ts';
 import type { VaultIoConfig } from './models/vault-io-config.ts';
 import type { VaultPrefixes } from './models/vault-prefixes.ts';
 import { canonicalizeRelative, canonPrefix, isHidden } from './paths.ts';
-import { realTargetRelativeToRoot } from './realpath-guard.ts';
+import { passesSymlink } from './symlink-guard.ts';
 
 /**
  * Create a {@link VaultIo} instance scoped to `config.root` and the supplied
@@ -70,28 +70,28 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
     if (requireMarkdown && !canonical.endsWith('.md')) {
       throw new MdVaultError('NOT_MARKDOWN', `not a markdown path: ${rel}`);
     }
-    refuseHidden(canonical, rel);
+    if (isHidden(canonical)) {
+      throw new MdVaultError(
+        'ALLOWLIST_VIOLATION',
+        `vault path is hidden: ${rel}`,
+      );
+    }
     if (!matches(canonical, canonPrefixes[access])) {
       throw new MdVaultError(
         'ALLOWLIST_VIOLATION',
         `path outside ${access} allowlist: ${rel}`,
       );
     }
-    const full = join(root, canonical);
-    // The requested path is not the whole story: a symlink that never leaves
-    // the vault — so the containment guard passes it — can still aim at hidden
-    // state (`notes.md` -> `.obsidian/secret.md`, `assets/logo.png` -> `.env`).
-    // Only the resolved target shows it.
-    const realRel = realTargetRelativeToRoot(full, root);
-    if (realRel === null) {
+    // With no link on the path, the file is where the path says: inside the
+    // root, and visible, as the two checks above found.
+    if (passesSymlink(root, canonical)) {
       throw new MdVaultError(
         'ALLOWLIST_VIOLATION',
-        `vault path escapes root (symlink): ${rel}`,
+        `vault path passes a symlink: ${rel}`,
       );
     }
-    refuseHidden(realRel, rel);
 
-    return full;
+    return join(root, canonical);
   }
 
   function toVaultRelative(rel: string): string {
@@ -148,8 +148,8 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
 
   async function readBinary(rel: string): Promise<Uint8Array | null> {
     // Lifting the .md requirement widens what the read allowlist reaches; the
-    // rest of the gate — including the hidden-state guard on both the requested
-    // path and the resolved target — still applies.
+    // rest of the gate — the hidden-state guard and the symlink refusal
+    // included — still applies.
     const full = resolveCanonical(
       canonicalizeRelative(rel),
       'read',
@@ -227,15 +227,4 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
     listMarkdown,
     listFolders,
   };
-}
-
-// The throwing form of `isHidden`, applied to whole paths on both sides of a
-// symlink. `rel` is only used for the error message.
-function refuseHidden(path: string, rel: string): void {
-  if (isHidden(path)) {
-    throw new MdVaultError(
-      'ALLOWLIST_VIOLATION',
-      `vault path is hidden: ${rel}`,
-    );
-  }
 }

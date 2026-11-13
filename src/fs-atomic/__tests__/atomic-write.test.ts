@@ -7,8 +7,17 @@ import {
   spyOn,
   test,
 } from 'bun:test';
+import { statSync } from 'node:fs';
 import * as fsp from 'node:fs/promises';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import {
+  chmod,
+  chown,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 
@@ -73,6 +82,65 @@ describe('statSig + atomicWrite', () => {
     expect(await readFile(file, 'utf8')).toBe('one'); // original untouched
     expect(await readdir(dir)).toEqual(['note.md']); // no tmp left
   });
+});
+
+describe('the file a write replaces (#46)', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'vaultmd-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // A group the tmp would not get by default: not the new dir's (BSD, macOS)
+  // and not the process's (Linux). Without one, the group case cannot fail.
+  const otherGroup = (process.getgroups?.() ?? []).find((gid) => {
+    return gid !== statSync(tmpdir()).gid && gid !== process.getegid?.();
+  });
+
+  const replacers = [
+    {
+      name: 'atomicWrite',
+      replace: (file: string, _sig: Sig) => {
+        return atomicWrite(file, 'new');
+      },
+    },
+    {
+      name: 'atomicWriteIfUnchanged',
+      replace: (file: string, sig: Sig) => {
+        return atomicWriteIfUnchanged(file, 'new', sig);
+      },
+    },
+  ];
+
+  for (const { name, replace } of replacers) {
+    test(`${name} keeps the mode of the file it replaces`, async () => {
+      const file = path.join(dir, 'note.md');
+      await atomicWrite(file, 'old');
+      await chmod(file, 0o600);
+
+      await replace(file, (await statSig(file)) as Sig);
+
+      expect(await readFile(file, 'utf8')).toBe('new');
+      expect((await stat(file)).mode & 0o7777).toBe(0o600);
+    });
+
+    test.skipIf(otherGroup === undefined)(
+      `${name} keeps the group of the file it replaces`,
+      async () => {
+        const file = path.join(dir, 'note.md');
+        await atomicWrite(file, 'old');
+        await chown(file, (await stat(file)).uid, otherGroup as number);
+
+        await replace(file, (await statSig(file)) as Sig);
+
+        expect((await stat(file)).gid).toBe(otherGroup as number);
+      },
+    );
+  }
 });
 
 describe('exclusiveCreate + unlinkIfUnchanged', () => {

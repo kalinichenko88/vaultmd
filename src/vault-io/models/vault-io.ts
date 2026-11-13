@@ -8,10 +8,11 @@ import type { Access } from './access.ts';
  * Obtain an instance via {@link createVaultIo} or from {@link Vault.io}.
  *
  * Every path-taking member shares one gate. Beyond the allowlist and
- * `..`-escape rejection, hidden state is unreachable: a path with a
- * dot-segment is refused — on **both** the requested path and the symlink-
- * resolved target — so `.git`, `.env`, `.obsidian` and the index's own `.db`
- * sidecars stay out of reach even behind a link that never leaves the vault.
+ * `..`-escape rejection, two rules hold. A path with a dot-segment is refused,
+ * so `.git`, `.env`, `.obsidian` and the index's own `.db` sidecars stay out
+ * of reach. A path with a symlink on any segment under the root is refused
+ * too, dangling or not: one file has one path, and it is where the path says.
+ * The root itself may be a symlink.
  */
 export type VaultIo = {
   /**
@@ -44,12 +45,13 @@ export type VaultIo = {
    * @param access Allowlist tier to enforce (default `'read'`).
    * @returns The absolute filesystem path.
    * @throws {@link MdVaultError} `NOT_MARKDOWN` if `rel` is not a `.md` path.
-   * @throws {@link MdVaultError} `ALLOWLIST_VIOLATION` if `rel` is outside the allowlist.
+   * @throws {@link MdVaultError} `ALLOWLIST_VIOLATION` if `rel` is outside the
+   * allowlist, is hidden, or passes a symlink.
    */
   resolveVaultPath(rel: string, access?: Access): string;
   /**
    * Resolve everything a write-path mutator needs in a single canonicalization
-   * pass: the absolute filesystem path (write-allowlist + symlink enforced),
+   * pass: the absolute filesystem path (write allowlist + symlink refusal),
    * the case-folded index/lock key, and the canonical vault-relative path.
    * Equivalent to calling {@link resolveVaultPath} (`'write'`), {@link toKey},
    * and {@link toVaultRelative} together, but canonicalizes `rel` only once.
@@ -57,7 +59,7 @@ export type VaultIo = {
    * @returns `{ full, key, relative }` for the write target.
    * @throws {@link MdVaultError} `NOT_MARKDOWN` if `rel` is not a `.md` path.
    * @throws {@link MdVaultError} `ALLOWLIST_VIOLATION` if `rel` is outside the
-   * write allowlist or escapes the root via a symlink.
+   * write allowlist, is hidden, or passes a symlink.
    */
   resolveWriteTarget(rel: string): {
     /** Absolute filesystem path of the write target. */
@@ -72,6 +74,8 @@ export type VaultIo = {
    * signature for optimistic-concurrency checks.
    * @param rel Vault-relative `.md` path.
    * @returns `{ content, sig }` if the file exists, or `null` if absent.
+   * @throws {@link MdVaultError} `ALLOWLIST_VIOLATION` if `rel` is outside the
+   * read allowlist, is hidden, or passes a symlink.
    */
   readVaultFile(rel: string): Promise<{
     /** The UTF-8 file content. */
@@ -82,22 +86,23 @@ export type VaultIo = {
   /**
    * Read any vault file as raw bytes, `.md` or not — the read path for
    * attachments (images, PDFs, audio). Enforced by the same chokepoint as
-   * {@link readVaultFile}: canonicalization, the **read** allowlist, symlink
-   * containment, and the hidden-state guard. Only the `.md` requirement is
-   * lifted.
+   * {@link readVaultFile}: canonicalization, the **read** allowlist, the symlink
+   * refusal, and the hidden-state guard. Only the `.md` requirement is lifted.
    *
    * Attachments are not indexed and there is no matching write path — this is
    * read-only access to bytes already on disk.
    *
    * @param rel Vault-relative path, any extension.
-   * @returns The file's bytes, or `null` if the path is absent, dangling, or a
-   * directory.
+   * @returns The file's bytes, or `null` if the path is absent or a directory.
    * @throws {@link MdVaultError} `ALLOWLIST_VIOLATION` if `rel` is outside the
-   * read allowlist, escapes the root, or names a hidden (dot-segment) path.
+   * read allowlist, names a hidden (dot-segment) path, or passes a symlink
+   * (a dangling one too).
    */
   readBinary(rel: string): Promise<Uint8Array | null>;
   /**
-   * Atomically write `content` to a vault file, creating it if necessary.
+   * Atomically write `content` to a vault file, creating it if necessary. A
+   * file it replaces keeps its mode, and its owner and group where the OS lets
+   * the writer set them; extended attributes and hard links do not carry over.
    * @param rel Vault-relative `.md` path.
    * @param content New UTF-8 content.
    * @returns The {@link Sig} of the written file.
@@ -105,7 +110,8 @@ export type VaultIo = {
   writeVaultFile(rel: string, content: string): Promise<Sig>;
   /**
    * Atomically overwrite a file only if its current signature matches
-   * `expected`. Throws {@link MdVaultError} `MTIME_CONFLICT` on mismatch.
+   * `expected`. Throws {@link MdVaultError} `MTIME_CONFLICT` on mismatch. The
+   * file keeps its mode and owner as {@link writeVaultFile} says.
    * @param rel Vault-relative `.md` path.
    * @param content New UTF-8 content.
    * @param expected Signature the file must currently have.
@@ -126,20 +132,24 @@ export type VaultIo = {
    * Stat a vault file, returning its filesystem signature.
    * @param rel Vault-relative `.md` path.
    * @returns The {@link Sig} of the file, or `null` if absent.
+   * @throws {@link MdVaultError} `ALLOWLIST_VIOLATION` if `rel` is outside the
+   * read allowlist, is hidden, or passes a symlink.
    */
   stat(rel: string): Promise<Sig | null>;
   /**
    * Enumerate all `.md` files under `dir` (default: vault root) that pass
-   * the read allowlist and are not matched by the `ignore` patterns.
+   * the read allowlist and are not matched by the `ignore` patterns. Symlinks
+   * are skipped, never followed.
    * @param dir Optional vault-relative subdirectory to constrain the listing.
    * @returns Sorted vault-relative paths of enumerated `.md` files.
    */
   listMarkdown(dir?: string): Promise<string[]>;
   /**
    * Enumerate the folders under `dir` (default: vault root) that pass the read
-   * allowlist, skipping dot-folders, `ignore` matches, and directories whose
-   * real target escapes the vault root — the same walk {@link listMarkdown}
-   * uses. Empty folders **are** listed: a directory exists on disk whether or
+   * allowlist, skipping dot-folders, `ignore` matches, and symlinks, which the
+   * walk never follows — the same walk {@link listMarkdown} uses. A `dir` that
+   * passes a symlink lists nothing. Empty folders **are** listed: a directory
+   * exists on disk whether or
    * not it holds markdown. The root is never included, and a folder whose own
    * parent is outside the read scope still appears, so treat a missing parent
    * as implied when building a tree from the returned paths.

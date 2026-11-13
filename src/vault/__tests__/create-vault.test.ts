@@ -1,6 +1,14 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -346,5 +354,26 @@ describe('createVault', () => {
     expect(hit.frontmatter).toEqual({});
     expect(hit.tags).toEqual([]);
     expect(hit.title).toBe('N');
+  });
+});
+
+describe('symlinks inside the vault (#46)', () => {
+  test('an update through a symlinked note is refused and changes no file', async () => {
+    await writeVaultMd('real.md', 'old\n');
+    await mkdir(join(vaultDir, 'notes'));
+    await symlink(join(vaultDir, 'real.md'), join(vaultDir, 'notes/alias.md'));
+    const vault = await makeVault();
+
+    const error = await vault.notes
+      .updateNote('notes/alias.md', { append: 'new' })
+      .catch((e: unknown) => {
+        return e;
+      });
+
+    expect(error).toBeInstanceOf(MdVaultError);
+    expect((error as MdVaultError).code).toBe('ALLOWLIST_VIOLATION');
+    const alias = await lstat(join(vaultDir, 'notes/alias.md'));
+    expect(alias.isSymbolicLink()).toBe(true);
+    expect(await readFile(join(vaultDir, 'real.md'), 'utf8')).toBe('old\n');
   });
 });

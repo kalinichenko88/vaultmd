@@ -1,8 +1,8 @@
-import { type Dirent, realpathSync } from 'node:fs';
-import { readdir, stat as statEntry } from 'node:fs/promises';
-import { join, relative, sep } from 'node:path';
+import type { Dirent } from 'node:fs';
+import { readdir } from 'node:fs/promises';
+import { join } from 'node:path';
 
-import { isHidden } from './paths.ts';
+import { passesSymlink } from './symlink-guard.ts';
 
 type EnumerateDeps = {
   can(rel: string, access: 'read' | 'write'): boolean;
@@ -14,9 +14,7 @@ type EnumerateDeps = {
 type Walked = { files: string[]; folders: string[] };
 
 async function walk(
-  realRoot: string,
   absDir: string,
-  realDir: string, // fully-resolved location of absDir
   relDir: string,
   out: Walked,
   deps: EnumerateDeps,
@@ -28,50 +26,27 @@ async function walk(
     return; // missing / unreadable dir
   }
   for (const ent of entries) {
+    // A symlink is skipped, never followed: one file has one path. With no
+    // link to follow, the walk can neither leave the root nor loop.
+    if (ent.isSymbolicLink()) {
+      continue;
+    }
     const name = ent.name;
     const childRel = relDir === '' ? name : `${relDir}/${name}`;
-    const childAbs = join(absDir, name);
-    let isDir = ent.isDirectory();
-    let isFile = ent.isFile();
-    if (ent.isSymbolicLink()) {
-      try {
-        const st = await statEntry(childAbs);
-        isDir = st.isDirectory();
-        isFile = st.isFile();
-      } catch {
-        continue; // dangling symlink
-      }
-    }
-    if (isDir) {
+    if (ent.isDirectory()) {
       if (name.startsWith('.')) {
         continue;
       }
       if (deps.isIgnored(childRel)) {
         continue;
       }
-      // A real subdirectory of an in-root directory is trivially in-root, so
-      // only a symlink can leave the vault — or aim back at ground we are
-      // standing on and loop: `ln -s .. vault/notes/loop` otherwise
-      // re-enumerates the whole vault at every level. Two *sibling* links to
-      // one target are not a cycle, so the result never depends on readdir order.
-      const childReal = ent.isSymbolicLink()
-        ? realTarget(childAbs)
-        : join(realDir, name);
-      if (
-        childReal === null ||
-        !isUnder(childReal, realRoot) ||
-        isUnder(realDir, childReal) ||
-        isHidden(relative(realRoot, childReal))
-      ) {
-        continue;
-      }
       if (deps.can(childRel, 'read')) {
         out.folders.push(deps.toVaultRelative(childRel));
       }
-      await walk(realRoot, childAbs, childReal, childRel, out, deps);
+      await walk(join(absDir, name), childRel, out, deps);
       continue;
     }
-    if (isFile && name.endsWith('.md')) {
+    if (ent.isFile() && name.endsWith('.md')) {
       if (deps.isIgnored(childRel)) {
         continue;
       }
@@ -108,31 +83,10 @@ async function enumerate(
 ): Promise<Walked> {
   const out: Walked = { files: [], folders: [] };
   const startRel = dir === undefined ? '' : deps.toVaultRelative(dir);
-  const startAbs = startRel === '' ? root : join(root, startRel);
-  const realRoot = realTarget(root);
-  const startReal = realTarget(startAbs);
-  if (
-    realRoot === null ||
-    startReal === null ||
-    !isUnder(startReal, realRoot)
-  ) {
+  if (passesSymlink(root, startRel)) {
     return out;
   }
-  await walk(realRoot, startAbs, startReal, startRel, out, deps);
+  await walk(join(root, startRel), startRel, out, deps);
 
   return out;
-}
-
-// `p` is `ancestor` itself or something beneath it. The trailing separators
-// keep `/vault/notes` from reading as a child of `/vault/note`.
-function isUnder(p: string, ancestor: string): boolean {
-  return (p + sep).startsWith(ancestor + sep);
-}
-
-function realTarget(abs: string): string | null {
-  try {
-    return realpathSync(abs);
-  } catch {
-    return null;
-  }
 }

@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -222,7 +231,7 @@ describe('resolveVaultPath', () => {
     await rm(outside, { recursive: true, force: true });
   });
 
-  test('rejects symlinked-parent escape on create via nearest-existing-ancestor realpath', async () => {
+  test('rejects a create under a symlinked folder that leads out of the vault', async () => {
     const outside = await mkdtemp(join(tmpdir(), 'vaultmd-out-'));
     await symlink(outside, join(vault, 'link')); // link/ -> outside the vault
     const io = createVaultIo({
@@ -235,17 +244,76 @@ describe('resolveVaultPath', () => {
     await rm(outside, { recursive: true, force: true });
   });
 
-  test('an in-vault symlink that stays inside the root resolves fine', async () => {
+  test('a path through an in-vault symlink is refused: one file, one path', async () => {
     await mkdir(join(vault, 'real'));
     await writeFile(join(vault, 'real', 'a.md'), '# a');
     await symlink(join(vault, 'real'), join(vault, 'alias'));
+    await symlink(join(vault, 'real', 'a.md'), join(vault, 'b.md'));
     const io = createVaultIo({
       root: vault,
       prefixes: { read: [''], write: [''] },
     });
-    expect(io.resolveVaultPath('alias/a.md', 'read')).toBe(
-      join(vault, 'alias/a.md'),
+    for (const access of ['read', 'write'] as const) {
+      expect(syncCode(() => io.resolveVaultPath('alias/a.md', access))).toBe(
+        'ALLOWLIST_VIOLATION',
+      );
+      expect(syncCode(() => io.resolveVaultPath('alias/new.md', access))).toBe(
+        'ALLOWLIST_VIOLATION',
+      );
+      expect(syncCode(() => io.resolveVaultPath('b.md', access))).toBe(
+        'ALLOWLIST_VIOLATION',
+      );
+    }
+    expect(io.resolveVaultPath('real/a.md', 'read')).toBe(
+      join(vault, 'real/a.md'),
     );
+  });
+
+  test('a write through a symlinked note is refused and keeps the link', async () => {
+    await writeFile(join(vault, 'real.md'), 'old\n');
+    await symlink(join(vault, 'real.md'), join(vault, 'alias.md'));
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    const sig = await io.stat('real.md');
+    if (!sig) {
+      throw new Error('real.md was not written');
+    }
+    expect(await asyncCode(() => io.writeVaultFile('alias.md', 'x'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+    expect(
+      await asyncCode(() => io.rewriteIfUnchanged('alias.md', 'x', sig)),
+    ).toBe('ALLOWLIST_VIOLATION');
+    expect((await lstat(join(vault, 'alias.md'))).isSymbolicLink()).toBe(true);
+    expect(await readFile(join(vault, 'real.md'), 'utf8')).toBe('old\n');
+  });
+
+  test('a dangling symlink is refused too, so a write cannot follow it out', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'vaultmd-out-'));
+    await rm(outside, { recursive: true, force: true }); // the target is gone
+    await symlink(join(outside, 'x.md'), join(vault, 'dangling.md'));
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    expect(syncCode(() => io.resolveVaultPath('dangling.md', 'write'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
+  });
+
+  test('the root itself may be a symlink', async () => {
+    await mkdir(join(vault, 'real-root', 'notes'), { recursive: true });
+    await writeFile(join(vault, 'real-root', 'notes', 'a.md'), '# a');
+    await symlink(join(vault, 'real-root'), join(vault, 'root-link'));
+    const io = createVaultIo({
+      root: join(vault, 'root-link'),
+      prefixes: { read: [''], write: [''] },
+    });
+    expect((await io.readVaultFile('notes/a.md'))?.content).toBe('# a');
+    await io.writeVaultFile('notes/b.md', '# b');
+    expect(await io.listMarkdown()).toEqual(['notes/a.md', 'notes/b.md']);
   });
 });
 
@@ -420,7 +488,7 @@ describe('listFolders', () => {
     expect(await io.listFolders('nope')).toEqual([]);
   });
 
-  test('skips dotfolders, ignore globs, out-of-read-scope and escaping symlinked dirs', async () => {
+  test('skips dotfolders, ignore globs, out-of-read-scope and symlinked dirs', async () => {
     const outside = await mkdtemp(join(tmpdir(), 'vaultmd-out-'));
     const io = createVaultIo({
       root: vault,
@@ -449,7 +517,7 @@ describe('listFolders', () => {
   });
 });
 
-describe('enumeration cycle guard', () => {
+describe('enumeration skips symlinks', () => {
   test('a dir symlink onto the directory holding it is not descended into', async () => {
     const io = createVaultIo({
       root: vault,
@@ -462,7 +530,7 @@ describe('enumeration cycle guard', () => {
     expect(await io.listMarkdown()).toEqual(['notes/a.md']);
   });
 
-  test('sibling links to one target are not a cycle — both walked, readdir order irrelevant', async () => {
+  test('in-vault links to a folder or a note are skipped: one file, one path', async () => {
     const io = createVaultIo({
       root: vault,
       prefixes: { read: [''], write: [''] },
@@ -470,16 +538,24 @@ describe('enumeration cycle guard', () => {
     await mkdir(join(vault, 'real'));
     await writeFile(join(vault, 'real', 'a.md'), '# a');
     await symlink(join(vault, 'real'), join(vault, 'alias'));
-    await symlink(join(vault, 'real'), join(vault, 'alias2'));
-    expect(await io.listFolders()).toEqual(['alias', 'alias2', 'real']);
-    expect(await io.listMarkdown()).toEqual([
-      'alias/a.md',
-      'alias2/a.md',
-      'real/a.md',
-    ]);
+    await symlink(join(vault, 'real', 'a.md'), join(vault, 'b.md'));
+    expect(await io.listFolders()).toEqual(['real']);
+    expect(await io.listMarkdown()).toEqual(['real/a.md']);
   });
 
-  test('breaks a cycle that re-enters a mid-tree ancestor, not just the root', async () => {
+  test('listing a folder that is a symlink finds nothing', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, 'real', 'sub'), { recursive: true });
+    await writeFile(join(vault, 'real', 'a.md'), '# a');
+    await symlink(join(vault, 'real'), join(vault, 'alias'));
+    expect(await io.listMarkdown('alias')).toEqual([]);
+    expect(await io.listFolders('alias')).toEqual([]);
+  });
+
+  test('a link back to a mid-tree ancestor is skipped, so the walk cannot loop', async () => {
     const io = createVaultIo({
       root: vault,
       prefixes: { read: [''], write: [''] },
@@ -567,8 +643,8 @@ describe('readBinary', () => {
     await mkdir(join(vault, '.obsidian'), { recursive: true });
     await writeFile(join(vault, '.env'), 'SECRET=1');
     await writeFile(join(vault, '.obsidian/w.json'), '{}');
-    // Both links stay inside the root, so the symlink guard passes them; only
-    // the resolved target shows the dot-segment.
+    // Both links stay inside the root and have visible names: the guard
+    // refuses them as links, before their hidden targets matter.
     await symlink(join(vault, '.env'), join(vault, 'assets/leak.png'));
     await symlink(join(vault, '.obsidian'), join(vault, 'assets/cfg'));
     expect(await asyncCode(() => io.readBinary('assets/leak.png'))).toBe(
@@ -579,16 +655,18 @@ describe('readBinary', () => {
     );
   });
 
-  test('a dangling symlink reads as absent, not as an error', async () => {
+  test('a dangling symlink is refused like any other link', async () => {
     const io = createVaultIo({
       root: vault,
       prefixes: { read: [''], write: [''] },
     });
     await symlink(join(vault, 'gone.png'), join(vault, 'dangling.png'));
-    expect(await io.readBinary('dangling.png')).toBeNull();
+    expect(await asyncCode(() => io.readBinary('dangling.png'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
   });
 
-  test('an in-vault symlink to a visible file still resolves', async () => {
+  test('an in-vault symlink to a visible file is refused', async () => {
     const io = createVaultIo({
       root: vault,
       prefixes: { read: [''], write: [''] },
@@ -596,8 +674,8 @@ describe('readBinary', () => {
     await mkdir(join(vault, 'assets'), { recursive: true });
     await writeFile(join(vault, 'assets/real.png'), 'png');
     await symlink(join(vault, 'assets/real.png'), join(vault, 'alias.png'));
-    expect(await io.readBinary('alias.png')).toEqual(
-      new TextEncoder().encode('png'),
+    expect(await asyncCode(() => io.readBinary('alias.png'))).toBe(
+      'ALLOWLIST_VIOLATION',
     );
   });
 
@@ -680,7 +758,7 @@ describe('hidden state on the markdown surfaces', () => {
     ).toBe('ALLOWLIST_VIOLATION');
   });
 
-  test('an in-vault symlink to a visible note still resolves', async () => {
+  test('an in-vault symlink to a visible note is refused', async () => {
     const io = createVaultIo({
       root: vault,
       prefixes: { read: [''], write: [''] },
@@ -688,7 +766,9 @@ describe('hidden state on the markdown surfaces', () => {
     await mkdir(join(vault, 'notes'), { recursive: true });
     await writeFile(join(vault, 'notes/real.md'), '# real');
     await symlink(join(vault, 'notes/real.md'), join(vault, 'alias.md'));
-    expect((await io.readVaultFile('alias.md'))?.content).toBe('# real');
+    expect(await asyncCode(() => io.readVaultFile('alias.md'))).toBe(
+      'ALLOWLIST_VIOLATION',
+    );
   });
 
   test('can() answers false for a hidden path, whatever the allowlist', () => {

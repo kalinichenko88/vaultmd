@@ -37,7 +37,7 @@ features:
     linkText: The link graph
   - icon: 🔐
     title: Scoped access
-    details: Per-instance read/write allowlists, path canonicalization and symlink containment behind one chokepoint — safe to hand a subtree to a subsystem.
+    details: Per-instance read/write allowlists, path canonicalization and a symlink refusal behind one chokepoint — safe to hand a subtree to a subsystem.
     link: /guide/concepts#scoped-access
     linkText: Scoped access
   - icon: 🧩

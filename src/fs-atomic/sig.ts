@@ -12,8 +12,14 @@ export function sigsEqual(a: Sig, b: Sig): boolean {
 }
 
 export async function statSig(fullPath: string): Promise<Sig | null> {
+  const st = await statOrNull(fullPath);
+
+  return st && makeSig(st);
+}
+
+export async function statOrNull(fullPath: string): Promise<Stats | null> {
   try {
-    return makeSig(await stat(fullPath));
+    return await stat(fullPath);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       return null;

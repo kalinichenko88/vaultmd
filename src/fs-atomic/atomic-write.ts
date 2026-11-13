@@ -1,5 +1,8 @@
 import { randomBytes } from 'node:crypto';
+import type { Stats } from 'node:fs';
 import {
+  chmod,
+  chown,
   link,
   mkdir,
   open,
@@ -13,7 +16,7 @@ import * as path from 'node:path';
 import { MdVaultError } from '@/errors.ts';
 
 import type { Sig } from './models/sig.ts';
-import { makeSig, sigsEqual, statSig } from './sig.ts';
+import { makeSig, sigsEqual, statOrNull, statSig } from './sig.ts';
 
 export async function atomicWrite(
   fullPath: string,
@@ -21,8 +24,9 @@ export async function atomicWrite(
 ): Promise<Sig> {
   await mkdir(path.dirname(fullPath), { recursive: true });
 
-  return placeTemp(fullPath, content, (tmp) => {
-    return rename(tmp, fullPath);
+  return placeTemp(fullPath, content, async (tmp) => {
+    await keepOwnership(tmp, await statOrNull(fullPath));
+    await rename(tmp, fullPath);
   });
 }
 
@@ -32,13 +36,14 @@ export function atomicWriteIfUnchanged(
   expected: Sig,
 ): Promise<Sig> {
   return placeTemp(fullPath, content, async (tmp) => {
-    const current = await statSig(fullPath);
-    if (!current || !sigsEqual(current, expected)) {
+    const current = await statOrNull(fullPath);
+    if (!current || !sigsEqual(makeSig(current), expected)) {
       throw new MdVaultError(
         'MTIME_CONFLICT',
         `file changed under write: ${fullPath}`,
       );
     }
+    await keepOwnership(tmp, current);
     await rename(tmp, fullPath);
   });
 }
@@ -101,6 +106,25 @@ async function placeTemp(
   }
 
   return makeSig(await stat(fullPath));
+}
+
+// The rename puts a new inode at the path, created with the default mode and
+// the writer's owner. Give it the replaced file's mode, and its owner and group
+// where the OS lets this process set them (EPERM: it keeps the writer's).
+// Extended attributes and hard links stay with the old inode (docs/pdr/0002).
+async function keepOwnership(tmp: string, old: Stats | null): Promise<void> {
+  if (!old) {
+    return;
+  }
+  try {
+    await chown(tmp, old.uid, old.gid);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EPERM') {
+      throw err;
+    }
+  }
+  // After the chown, which may clear the set-id bits.
+  await chmod(tmp, old.mode & 0o7777);
 }
 
 function tempPath(fullPath: string): string {
