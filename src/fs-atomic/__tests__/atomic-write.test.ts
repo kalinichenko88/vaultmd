@@ -628,6 +628,23 @@ describe('exclusiveCreate + unlinkIfUnchanged', () => {
     },
   );
 
+  test('a link() that fails and did not take effect throws its error, and leaves no tmp', async () => {
+    const file = path.join(dir, 'eio.md');
+    spyOn(fsp, 'link').mockImplementationOnce(async () => {
+      throw Object.assign(new Error('EIO: link'), { code: 'EIO' });
+    });
+    let error: unknown;
+    try {
+      error = await exclusiveCreate(file, 'fresh').catch((e: unknown) => {
+        return e;
+      });
+    } finally {
+      mock.restore();
+    }
+    expect((error as NodeJS.ErrnoException).code).toBe('EIO');
+    expect(await readdir(dir)).toEqual([]);
+  });
+
   test('unlinkIfUnchanged returns false (no-op) for a missing file', async () => {
     const ghost = path.join(dir, 'ghost.md');
     expect(await unlinkIfUnchanged(ghost, { mtimeMs: 1, size: 1 })).toBe(false);
