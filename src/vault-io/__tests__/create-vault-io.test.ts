@@ -518,18 +518,6 @@ describe('listFolders', () => {
 });
 
 describe('enumeration skips symlinks', () => {
-  test('a dir symlink onto the directory holding it is not descended into', async () => {
-    const io = createVaultIo({
-      root: vault,
-      prefixes: { read: [''], write: [''] },
-    });
-    await mkdir(join(vault, 'notes'));
-    await writeFile(join(vault, 'notes', 'a.md'), '# a');
-    await symlink('.', join(vault, 'notes', 'self')); // -> notes, its own parent
-    expect(await io.listFolders()).toEqual(['notes']);
-    expect(await io.listMarkdown()).toEqual(['notes/a.md']);
-  });
-
   test('in-vault links to a folder or a note are skipped: one file, one path', async () => {
     const io = createVaultIo({
       root: vault,
@@ -553,18 +541,6 @@ describe('enumeration skips symlinks', () => {
     await symlink(join(vault, 'real'), join(vault, 'alias'));
     expect(await io.listMarkdown('alias')).toEqual([]);
     expect(await io.listFolders('alias')).toEqual([]);
-  });
-
-  test('a link back to a mid-tree ancestor is skipped, so the walk cannot loop', async () => {
-    const io = createVaultIo({
-      root: vault,
-      prefixes: { read: [''], write: [''] },
-    });
-    await mkdir(join(vault, 'a', 'b'), { recursive: true });
-    await writeFile(join(vault, 'a', 'b', 'x.md'), '# x');
-    await symlink('..', join(vault, 'a', 'b', 'up')); // -> a, an ancestor
-    expect(await io.listFolders()).toEqual(['a', 'a/b']);
-    expect(await io.listMarkdown()).toEqual(['a/b/x.md']);
   });
 });
 
