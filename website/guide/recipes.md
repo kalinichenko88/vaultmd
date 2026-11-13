@@ -199,8 +199,8 @@ Keep the pool bounded. An unbounded `Promise.all` over a few thousand entries
 holds a file descriptor per in-flight write and will hit `EMFILE`.
 
 If the importing process is the only writer on the machine, opening the vault
-with `crossProcessWriterLock: false` drops a lockfile create + unlink from every
-note as well. Turn it back on for normal operation — it is what keeps a second
+with `crossProcessWriterLock: false` drops the lockfile work from every note as
+well. Turn it back on for normal operation — it is what keeps a second
 process from writing the same note underneath you.
 
 ## Reuse existing tags instead of inventing new ones
