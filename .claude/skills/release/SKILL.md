@@ -232,9 +232,14 @@ git commit -m "chore: release v<version>" && git push origin main
 Only `package.json`, `CHANGELOG.md`, and `README.md` should be in this commit.
 `dist/` is gitignored and must not be staged.
 
-**Push refused** → drop the release commit first. A later run must not find it:
-Step 1 would read its version as the current one, and its commit as a change to
-release.
+**Push cut off by a network error** → keep the release commit: GitHub can take it
+before the connection drops. When the network is back, run `git push origin main`
+again. When it succeeds, or prints `Everything up-to-date`, GitHub has the commit:
+go on to Step 7. A refusal goes as below.
+
+**Push refused** (`! [rejected]`, `! [remote rejected]`, an auth error) → GitHub
+took nothing. Drop the release commit first. A later run must not find it: Step 1
+would read its version as the current one, and its commit as a change to release.
 
 ```sh
 git reset --hard HEAD~1     # HEAD is the release commit made above
@@ -247,8 +252,8 @@ were never pushed. Then choose by the refusal:
   the preconditions, as when a pull request merged on GitHub. The version, the
   CHANGELOG section and Step 5 leave them out. Do not pull, merge or rebase. Start
   again at the preconditions.
-- **Any other refusal** (a branch rule, the auth, the network) → stop, and show the
-  error. Do not tag. When the cause is fixed, start again at the preconditions.
+- **Any other refusal** (a branch rule, the auth) → stop, and show the error. Do
+  not tag. When the cause is fixed, start again at the preconditions.
 
 ## Step 7 — Tag, then open a DRAFT GitHub Release (explicit confirmation required)
 
