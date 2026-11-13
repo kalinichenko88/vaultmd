@@ -191,7 +191,8 @@ deleteNote(path): Promise<boolean>
 // row follows, under BOTH ends' locks. Both ends are allowlist-checked, and the
 // destination is never clobbered. Throws NOT_FOUND / ALREADY_EXISTS /
 // VALIDATION_ERROR (from === to) / MTIME_CONFLICT (source changed mid-move —
-// the destination is rolled back). Emits `delete` then `create` on onCommit.
+// the destination is rolled back) / UNSAFE_MODE (the OS gave the destination
+// a wider mode than the source's). Emits `delete` then `create` on onCommit.
 // Inbound links are NOT rewritten — use query.danglingLinks() to find what broke.
 moveNote(from, to): Promise<void>
 ```

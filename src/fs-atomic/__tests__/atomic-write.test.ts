@@ -166,7 +166,7 @@ describe('the file a write replaces (#46)', () => {
     // and its others start with only the bits that both have on the note.
     for (const { mode, bound } of [
       { mode: 0o600, bound: 0o600 },
-      { mode: 0o664, bound: 0o644 },
+      { mode: 0o640, bound: 0o600 },
       { mode: 0o604, bound: 0o600 },
     ]) {
       test(`${name} creates its tmp for a ${oct(mode)} note no wider than ${oct(bound)}`, async () => {
@@ -194,17 +194,42 @@ describe('the file a write replaces (#46)', () => {
       expect((await stat(result(file))).mode & 0o7777).toBe(0o644);
     });
 
+    // Kept, the note's group keeps its own bits, not only the shared ones.
     test.skipIf(otherGroup === undefined)(
-      `${name} keeps the note's group`,
+      `${name} keeps the note's group and its bits`,
       async () => {
-        const { file } = await note(0o644);
+        const { file } = await note(0o640);
         await chown(file, (await stat(file)).uid, otherGroup as number);
 
         await write(file, (await statSig(file)) as Sig);
 
-        expect((await stat(result(file))).gid).toBe(otherGroup as number);
+        const after = await stat(result(file));
+        expect(after.gid).toBe(otherGroup as number);
+        expect(after.mode & 0o777).toBe(0o640);
       },
     );
+
+    // The writer becomes the owner then (PDR 0002).
+    test(`${name} still writes when the OS refuses to give the file back to the note's owner`, async () => {
+      const { file, sig } = await note(0o644);
+      spyOn(fsp, 'open').mockImplementationOnce(async (...args) => {
+        const handle = await realOpen(...args);
+        const realStat = handle.stat.bind(handle);
+        // The tmp is the writer's, and the note is another user's.
+        spyOn(handle, 'stat').mockImplementation((async () => {
+          const st = await realStat();
+
+          return Object.assign(st, { uid: st.uid + 1 });
+        }) as typeof handle.stat);
+        spyOn(handle, 'chown').mockRejectedValue(errno('EPERM'));
+
+        return handle;
+      });
+
+      await write(file, sig);
+
+      expect(await readFile(result(file), 'utf8')).toBe('new');
+    });
 
     // The new file's group is not the note's: no member of either group reads
     // more than before, and none less than every other user (#66).
@@ -222,7 +247,7 @@ describe('the file a write replaces (#46)', () => {
             const handle = await realOpen(...args);
             spyOn(handle, 'chown').mockImplementation(async () => {
               if (refuses) {
-                throw Object.assign(new Error('invalid'), { code: 'EINVAL' });
+                throw errno('EINVAL');
               }
             });
 
@@ -280,39 +305,22 @@ describe('the file a write replaces (#46)', () => {
     });
 
     // Narrowed after the open, the tmp would still be readable through a file
-    // descriptor that another user opened before the chmod.
-    for (const outcome of ['obeys', 'refuses', 'ignores'] as const) {
-      test(`${name} fails before any text when the OS creates the tmp wider than asked and ${outcome} chmod`, async () => {
-        const { file, sig } = await note(0o600);
-        const written = watchWrite();
-        fakeMount(outcome, 0o644);
+    // descriptor that another user opened before the chmod. 644 over a 640
+    // note in its own group widens the others only.
+    test(`${name} fails before any text when the OS creates the tmp wider than the note`, async () => {
+      const { file, sig } = await note(0o640);
+      const written = watchWrite();
+      fakeMount('obeys', 0o644);
 
-        const error = await write(file, sig).catch((e: unknown) => {
-          return e;
-        });
-
-        expect((error as MdVaultError).code).toBe('UNSAFE_MODE');
-        expect((error as MdVaultError).message).toContain(result(file));
-        expect(written()).toBe(false);
-        expect(await readFile(file, 'utf8')).toBe('old');
-        expect(await readdir(dir)).toEqual(['note.md']);
-      });
-    }
+      await expectUnsafeMode(write(file, sig), written, result(file));
+    });
 
     test(`${name} fails before any text when the OS turns a chmod into a wider mode`, async () => {
       const { file, sig } = await note(0o640);
       const written = watchWrite();
       fakeMount('widens');
 
-      const error = await write(file, sig).catch((e: unknown) => {
-        return e;
-      });
-
-      expect((error as MdVaultError).code).toBe('UNSAFE_MODE');
-      expect((error as MdVaultError).message).toContain(result(file));
-      expect(written()).toBe(false);
-      expect(await readFile(file, 'utf8')).toBe('old');
-      expect(await readdir(dir)).toEqual(['note.md']);
+      await expectUnsafeMode(write(file, sig), written, result(file));
     });
 
     // In a group that is not the note's, the bound is the shared bits, not
@@ -325,14 +333,11 @@ describe('the file a write replaces (#46)', () => {
         const written = watchWrite();
         fakeMount('ignores', 0o640);
 
-        const error = await write(file, (await statSig(file)) as Sig).catch(
-          (e: unknown) => {
-            return e;
-          },
+        await expectUnsafeMode(
+          write(file, (await statSig(file)) as Sig),
+          written,
+          result(file),
         );
-
-        expect((error as MdVaultError).code).toBe('UNSAFE_MODE');
-        expect(written()).toBe(false);
       },
     );
 
@@ -344,16 +349,31 @@ describe('the file a write replaces (#46)', () => {
         const written = watchWrite();
         fakeMount('widens', 0o600, true);
 
-        const error = await write(file, (await statSig(file)) as Sig).catch(
-          (e: unknown) => {
-            return e;
-          },
+        await expectUnsafeMode(
+          write(file, (await statSig(file)) as Sig),
+          written,
+          result(file),
         );
-
-        expect((error as MdVaultError).code).toBe('UNSAFE_MODE');
-        expect(written()).toBe(false);
       },
     );
+  }
+
+  // The write failed with UNSAFE_MODE, named `target`, and left the note and
+  // its folder as they were.
+  async function expectUnsafeMode(
+    pending: Promise<Sig>,
+    written: () => boolean,
+    target: string,
+  ): Promise<void> {
+    const error = await pending.catch((e: unknown) => {
+      return e;
+    });
+
+    expect((error as MdVaultError).code).toBe('UNSAFE_MODE');
+    expect((error as MdVaultError).message).toContain(target);
+    expect(written()).toBe(false);
+    expect(await readFile(path.join(dir, 'note.md'), 'utf8')).toBe('old');
+    expect(await readdir(dir)).toEqual(['note.md']);
   }
 
   // A mount that obeys chmod, refuses it, ignores it with no error, or sets a
@@ -371,15 +391,13 @@ describe('the file a write replaces (#46)', () => {
         await handle.chmod(createdAs);
       }
       if (refusesChown) {
-        spyOn(handle, 'chown').mockRejectedValue(
-          Object.assign(new Error('invalid'), { code: 'EINVAL' }),
-        );
+        spyOn(handle, 'chown').mockRejectedValue(errno('EINVAL'));
       }
       const realChmod = handle.chmod.bind(handle);
       if (outcome !== 'obeys') {
         spyOn(handle, 'chmod').mockImplementation(async (mode) => {
           if (outcome === 'refuses') {
-            throw Object.assign(new Error('not permitted'), { code: 'EPERM' });
+            throw errno('EPERM');
           }
           if (outcome === 'widens') {
             await realChmod(Number(mode) | 0o024);

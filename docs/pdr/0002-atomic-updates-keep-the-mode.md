@@ -21,17 +21,17 @@ is written into it. When the group cannot be kept, the new file's group and
 its others both get only the permission bits that the note's group and its
 others both have: no user reads more than before, and the members of the new
 group read no less than every other user. The new file is created no wider
-than the note for any user but the writer. When the OS gives it mode bits
-wider than asked (the note's mode in the note's group, the shared bits in
-another group), the update fails (`UNSAFE_MODE`) before any text is in it: a
-chmod after the open would not close a file that another user opened in time.
-A chmod that the OS refuses or ignores leaves the new file as it was created;
-one that it turns into a wider mode fails the same way.
-When the owner cannot be kept, the writer becomes
-the owner, and the old owner keeps only what the group or the others class
-gives them: no mode can give it back without widening the others. A move
-gives the new note the mode and owner of the old one the same way. A chmod or chown of the note
-while an update writes is a conflict (`MTIME_CONFLICT`): `updateNote` and the
+than the note for any user but the writer. When the OS gives its group or its
+others more than they may have (the note's mode while it is in the note's
+group, the shared bits in another group), the update fails (`UNSAFE_MODE`)
+before any text is in it: a chmod after the open would not close a file that
+another user opened in time. A chmod that the OS refuses or ignores leaves the
+new file as it was created; one that it turns into a wider mode fails the same
+way. When the owner cannot be kept, the writer becomes the owner, and the old
+owner keeps only what the group or the others class gives them: no mode can
+give it back without widening the others. A move gives the new note the mode
+and owner of the old one the same way. A chmod or chown of the note while an
+update writes is a conflict (`MTIME_CONFLICT`): `updateNote` and the
 other note mutations read the note again and retry, and a direct
 `rewriteIfUnchanged` caller must do so itself. Three cases still undo such a
 chmod or chown: one made after the final check and before the rename, one

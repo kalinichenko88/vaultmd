@@ -112,8 +112,8 @@ export type VaultIo = {
    * @throws {@link MdVaultError} `NOT_MARKDOWN` if `rel` is not a `.md` path,
    * `ALLOWLIST_VIOLATION` if it is outside the write allowlist, is hidden, or
    * passes a symlink, or `UNSAFE_MODE` if the OS gives the new file a mode
-   * that lets more users read it than the note's mode did, before any text is
-   * in it.
+   * that gives the group or the others more access than the note's mode did,
+   * before any text is in it.
    */
   writeVaultFile(rel: string, content: string): Promise<Sig>;
   /**

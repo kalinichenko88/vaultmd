@@ -85,14 +85,17 @@ export type NotesApi = {
    * `editByMatch` and `setSection`, `REFUSE_CREATE` when `setBody` targets a
    * missing note, `VALIDATION_ERROR` when a `setSection` body would
    * restructure the document outside its own section, or `UNSAFE_MODE` if the
-   * OS gives the new file a mode that lets more users read it than the note's
-   * mode did.
+   * OS gives the new file a mode that gives the group or the others more
+   * access than the note's mode did.
    */
   updateNote(path: string, op: UpdateOp): Promise<void>;
   /**
    * Edit a note's frontmatter in place via a mutator callback.
    * @returns Whether the frontmatter was `edited`, `unchanged`, or
    * `unverifiable`.
+   * @throws {@link MdVaultError} `UNSAFE_MODE` if the OS gives the new file a
+   * mode that gives the group or the others more access than the note's mode
+   * did.
    */
   editFrontmatter(
     path: string,
@@ -112,9 +115,10 @@ export type NotesApi = {
    * @throws {@link MdVaultError} `REFUSE_CREATE` if asked to write a missing
    * file, `MTIME_CONFLICT` if a concurrent writer, or a tool that keeps
    * changing the note's mode, owner or group, keeps winning past the retry
-   * budget, `UNSAFE_MODE` if the OS gives the new file a mode that lets more
-   * users read it than the note's mode did, or `COMMIT_FAILED` if the write-through index update or the
-   * `onCommit` hook throws.
+   * budget, `UNSAFE_MODE` if the OS gives the new file a mode that gives the
+   * group or the others more access than the note's mode did, or
+   * `COMMIT_FAILED` if the write-through index update or the `onCommit` hook
+   * throws.
    */
   transformNote(
     path: string,
@@ -139,8 +143,8 @@ export type NotesApi = {
    * to the same note, `NOT_FOUND` if `from` does not exist, `ALREADY_EXISTS`
    * if `to` is taken (the source is left in place), `MTIME_CONFLICT` if the
    * source changed mid-move (the destination is rolled back), or `UNSAFE_MODE`
-   * if the OS gives the destination a mode that lets more users read it than
-   * the source's mode did.
+   * if the OS gives the destination a mode that gives the group or the others
+   * more access than the source's mode did.
    */
   moveNote(from: string, to: string): Promise<void>;
 };

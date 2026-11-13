@@ -177,10 +177,11 @@ function tempPath(fullPath: string): string {
 // sync. On macOS the sync stops at the drive cache (no F_FULLFSYNC, see #43).
 // A tmp for `note` that takes the ownership of `like` — the note it replaces,
 // or the source of a move — is created no wider than `like` for any other user
-// (`safeMode`), and takes that ownership before any byte is written, so the
-// new text is never readable by more users than the old text was. `wx`: a name
-// that is already taken, or a link planted there, fails instead of being
-// written through.
+// (`safeMode`), and takes that ownership before any byte is written, so by
+// its mode the new text is never readable by more users than the old text was
+// (an ACL that the folder gives a new file is not checked, docs/pdr/0002).
+// `wx`: a name that is already taken, or a link planted there, fails instead
+// of being written through.
 async function writeSynced(
   file: string,
   content: string,
@@ -204,10 +205,11 @@ async function writeSynced(
 }
 
 // A new inode replaces the note: give it the note's group, mode and owner. A
-// tmp that the OS created wider than asked is refused at once: a chmod after
-// the open would not close a file descriptor that another user opened before
-// it. In the note's group the note's mode is what was asked; in another group,
-// `safeMode`, so a mount with one fixed mode for every file still writes. Past
+// tmp whose group or others bits the OS made wider than `target` allows is
+// refused at once: a chmod after the open would not close a file descriptor
+// that another user opened before it. `target` is the note's mode while the
+// tmp is in the note's group — so a mount with one fixed mode for every file
+// still writes — and `sharedBits` in another group. Past
 // that check the group, the mode and the owner are best effort — the OS may
 // refuse or ignore them, and giving a file away takes root — and the stat, not
 // a call's result, says what the OS kept. A group it could not keep gets
