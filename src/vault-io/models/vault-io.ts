@@ -109,8 +109,10 @@ export type VaultIo = {
    * @param rel Vault-relative `.md` path.
    * @param content New UTF-8 content.
    * @returns The {@link Sig} of the written file.
-   * @throws {@link MdVaultError} `UNSAFE_MODE` if the OS creates the new file
-   * with a wider mode than asked, before any text is written to it.
+   * @throws {@link MdVaultError} `NOT_MARKDOWN` if `rel` is not a `.md` path,
+   * `ALLOWLIST_VIOLATION` if it is outside the write allowlist, is hidden, or
+   * passes a symlink, or `UNSAFE_MODE` if the OS gives the new file mode bits
+   * wider than asked, before any text is in it.
    */
   writeVaultFile(rel: string, content: string): Promise<Sig>;
   /**

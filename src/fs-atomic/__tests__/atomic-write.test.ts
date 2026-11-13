@@ -237,20 +237,26 @@ describe('the file a write replaces (#46)', () => {
       );
     }
 
-    test(`${name} keeps a 644 note's mode when the OS refuses chmod (#66)`, async () => {
-      const { file, sig } = await note(0o644);
-      fakeMount('refuses');
+    // The 664 note asks for a chmod after the create; the 644 one does not.
+    for (const { mode, expected } of [
+      { mode: 0o644, expected: 0o644 },
+      { mode: 0o664, expected: 0o644 },
+    ]) {
+      test(`${name} still writes a ${oct(mode)} note as ${oct(expected)} when the OS refuses chmod (#66)`, async () => {
+        const { file, sig } = await note(mode);
+        fakeMount('refuses');
 
-      await write(file, sig);
+        await write(file, sig);
 
-      expect(await readFile(result(file), 'utf8')).toBe('new');
-      expect((await stat(result(file))).mode & 0o777).toBe(0o644);
-    });
+        expect(await readFile(result(file), 'utf8')).toBe('new');
+        expect((await stat(result(file))).mode & 0o777).toBe(expected);
+      });
+    }
 
-    for (const chmod of ['refuses', 'ignores'] as const) {
-      test(`${name} still writes a read-only note when the OS ${chmod} chmod`, async () => {
+    for (const outcome of ['refuses', 'ignores'] as const) {
+      test(`${name} still writes a read-only note when the OS ${outcome} chmod`, async () => {
         const { file, sig } = await note(0o444);
-        fakeMount(chmod);
+        fakeMount(outcome);
 
         await write(file, sig);
 
@@ -261,18 +267,25 @@ describe('the file a write replaces (#46)', () => {
       });
     }
 
+    // A shared folder of a VM or a CIFS mount gives every file one mode, so
+    // the tmp gets the note's own mode and group, whatever was asked.
+    test(`${name} writes on a mount with one fixed mode for every file`, async () => {
+      const { file, sig } = await note(0o664);
+      fakeMount('ignores', 0o664);
+
+      await write(file, sig);
+
+      expect(await readFile(result(file), 'utf8')).toBe('new');
+      expect((await stat(result(file))).mode & 0o777).toBe(0o664);
+    });
+
     // Narrowed after the open, the tmp would still be readable through a file
     // descriptor that another user opened before the chmod.
-    for (const chmod of ['obeys', 'refuses', 'ignores'] as const) {
-      test(`${name} fails before any text when the OS creates the tmp wider than asked and ${chmod} chmod`, async () => {
+    for (const outcome of ['obeys', 'refuses', 'ignores'] as const) {
+      test(`${name} fails before any text when the OS creates the tmp wider than asked and ${outcome} chmod`, async () => {
         const { file, sig } = await note(0o600);
-        let written = false;
-        spyOn(fsp, 'writeFile').mockImplementationOnce(async (...args) => {
-          written = true;
-
-          return realWriteFile(...args);
-        });
-        fakeMount(chmod, 0o644);
+        const written = watchWrite();
+        fakeMount(outcome, 0o644);
 
         const error = await write(file, sig).catch((e: unknown) => {
           return e;
@@ -280,18 +293,32 @@ describe('the file a write replaces (#46)', () => {
 
         expect((error as MdVaultError).code).toBe('UNSAFE_MODE');
         expect((error as MdVaultError).message).toContain(result(file));
-        expect(written).toBe(false);
+        expect(written()).toBe(false);
         expect(await readFile(file, 'utf8')).toBe('old');
         expect(await readdir(dir)).toEqual(['note.md']);
       });
     }
+
+    test(`${name} fails before any text when the OS turns a chmod into a wider mode`, async () => {
+      const { file, sig } = await note(0o640);
+      const written = watchWrite();
+      fakeMount('widens');
+
+      const error = await write(file, sig).catch((e: unknown) => {
+        return e;
+      });
+
+      expect((error as MdVaultError).code).toBe('UNSAFE_MODE');
+      expect(written()).toBe(false);
+      expect(await readFile(file, 'utf8')).toBe('old');
+    });
   }
 
-  // A mount that refuses chmod, ignores it with no error, or obeys it.
-  // `createdAs` stands for one that also ignores the mode a file is created
-  // with.
+  // A mount that obeys chmod, refuses it, ignores it with no error, or sets a
+  // wider mode than asked. `createdAs` stands for one that also ignores the
+  // mode a file is created with.
   function fakeMount(
-    chmod: 'obeys' | 'refuses' | 'ignores',
+    outcome: 'obeys' | 'refuses' | 'ignores' | 'widens',
     createdAs?: number,
   ): void {
     spyOn(fsp, 'open').mockImplementationOnce(async (...args) => {
@@ -299,16 +326,34 @@ describe('the file a write replaces (#46)', () => {
       if (createdAs !== undefined) {
         await handle.chmod(createdAs);
       }
-      if (chmod !== 'obeys') {
-        spyOn(handle, 'chmod').mockImplementation(async () => {
-          if (chmod === 'refuses') {
+      const realChmod = handle.chmod.bind(handle);
+      if (outcome !== 'obeys') {
+        spyOn(handle, 'chmod').mockImplementation(async (mode) => {
+          if (outcome === 'refuses') {
             throw Object.assign(new Error('not permitted'), { code: 'EPERM' });
+          }
+          if (outcome === 'widens') {
+            await realChmod(Number(mode) | 0o004);
           }
         });
       }
 
       return handle;
     });
+  }
+
+  // Whether the text of the next write reached its file.
+  function watchWrite(): () => boolean {
+    let written = false;
+    spyOn(fsp, 'writeFile').mockImplementationOnce(async (...args) => {
+      written = true;
+
+      return realWriteFile(...args);
+    });
+
+    return () => {
+      return written;
+    };
   }
 
   function oct(mode: number): string {

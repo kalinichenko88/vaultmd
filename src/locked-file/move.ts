@@ -29,8 +29,9 @@ import type { MoveTarget } from './models/move-target.ts';
  * @param opts Optional `onCommit` callback and cross-process lock config.
  * @throws {@link MdVaultError} `VALIDATION_ERROR` if both keys are identical
  * (the lock is serializing, not reentrant), `NOT_FOUND` if the source is
- * absent, `ALREADY_EXISTS` if the destination is taken, or `MTIME_CONFLICT` if
- * the source changed under the move.
+ * absent, `ALREADY_EXISTS` if the destination is taken, `MTIME_CONFLICT` if
+ * the source changed under the move, or `UNSAFE_MODE` if the OS gives the
+ * destination mode bits wider than asked.
  */
 export function withFileMove(
   from: MoveTarget,

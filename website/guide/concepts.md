@@ -88,10 +88,11 @@ does a moved note. When the group cannot be kept, the new file's group and
 all other users get only the permission bits that both had on the note. On a
 mount that refuses or ignores a change of mode, the update keeps the mode the
 new file was created with, which gives no other user more access than before.
-When the OS creates the new file wider than asked, the update fails with
-`UNSAFE_MODE` before any text is written. When the owner cannot be kept, the
+When the OS gives the new file mode bits wider than asked, the update fails
+with `UNSAFE_MODE` before any text is written. When the owner cannot be kept, the
 writer becomes the owner. Extended attributes (macOS Finder tags or a POSIX
-ACL, for example) and hard links do not survive an update.
+ACL, for example) and hard links do not survive an update: the new file has
+only those that its folder gives a new file.
 
 Everything else on the IO surface is `.md`-only — a non-markdown path throws
 `NOT_MARKDOWN`. The one exception is

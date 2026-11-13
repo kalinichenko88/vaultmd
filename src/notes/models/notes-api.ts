@@ -110,7 +110,8 @@ export type NotesApi = {
    * @throws {@link MdVaultError} `REFUSE_CREATE` if asked to write a missing
    * file, `MTIME_CONFLICT` if a concurrent writer, or a tool that keeps
    * changing the note's mode, owner or group, keeps winning past the retry
-   * budget, or `COMMIT_FAILED` if the write-through index update or the
+   * budget, `UNSAFE_MODE` if the OS gives the new file mode bits wider than
+   * asked, or `COMMIT_FAILED` if the write-through index update or the
    * `onCommit` hook throws.
    */
   transformNote(
@@ -136,7 +137,7 @@ export type NotesApi = {
    * to the same note, `NOT_FOUND` if `from` does not exist, `ALREADY_EXISTS`
    * if `to` is taken (the source is left in place), `MTIME_CONFLICT` if the
    * source changed mid-move (the destination is rolled back), or `UNSAFE_MODE`
-   * if the OS creates the destination with a wider mode than asked.
+   * if the OS gives the destination mode bits wider than asked.
    */
   moveNote(from: string, to: string): Promise<void>;
 };

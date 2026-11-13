@@ -10,6 +10,7 @@
 - 2026-11-13 #66: Decision. Was: no sentence on a mode that the OS refuses.
 - 2026-11-13 #66: Decision. Was: no sentence on an owner that cannot be kept.
 - 2026-11-13 #66: Decision. Was: "Extended attributes (macOS Finder tags, for example)".
+- 2026-11-13 #66: Decision. Was: "after an update the note has no extended attributes".
 
 ## Decision
 
@@ -20,10 +21,12 @@ is written into it. When the group cannot be kept, the new file's group and
 its others both get only the permission bits that the note's group and its
 others both have: no user reads more than before, and the members of the new
 group read no less than every other user. The new file is created no wider
-than the note for any user but the writer. When the OS creates it wider than
-asked, the update fails (`UNSAFE_MODE`) before any text is in it: a chmod after
-the open would not close a file that another user opened in time. Past that, a
-mode that the OS refuses or ignores leaves the new file as it was created.
+than the note for any user but the writer. When the OS gives it mode bits
+wider than asked (the note's mode in the note's group, the shared bits in
+another group), the update fails (`UNSAFE_MODE`) before any text is in it: a
+chmod after the open would not close a file that another user opened in time.
+A chmod that the OS refuses or ignores leaves the new file as it was created;
+one that it turns into a wider mode fails the same way.
 When the owner cannot be kept, the writer becomes
 the owner, and the old owner keeps only what the group or the others class
 gives them: no mode can give it back without widening the others. A move
@@ -35,7 +38,8 @@ chmod or chown: one made after the final check and before the rename, one
 during a blind `writeVaultFile`, and one during a move. A tmp is never
 reopened by its name. Extended attributes (macOS Finder tags or a POSIX
 ACL, for example) and hard links stay with the old file: after an update the
-note has no extended attributes, and a hard link to it keeps the old text.
+note has only the extended attributes and ACL entries that its folder gives a
+new file, and a hard link to it keeps the old text.
 
 ## Rests on
 
