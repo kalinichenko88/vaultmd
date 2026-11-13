@@ -159,10 +159,11 @@ describe('the file a write replaces (#46)', () => {
     });
 
     // The tmp's group is not known to be the note's at create, so its group
-    // class starts with only the bits the note's others have too.
+    // and its others start with only the bits that both have on the note.
     for (const { mode, bound } of [
       { mode: 0o600, bound: 0o600 },
       { mode: 0o664, bound: 0o644 },
+      { mode: 0o604, bound: 0o600 },
     ]) {
       test(`${name} creates its tmp for a ${oct(mode)} note no wider than ${oct(bound)}`, async () => {
         const { file, sig } = await note(mode);
@@ -201,11 +202,11 @@ describe('the file a write replaces (#46)', () => {
       },
     );
 
-    // The new file's group is not the note's: its members read no more than
-    // they could before, and no less than every other user (#66).
+    // The new file's group is not the note's: no member of either group reads
+    // more than before, and none less than every other user (#66).
     for (const { mode, expected, refuses } of [
       { mode: 0o664, expected: 0o644, refuses: true },
-      { mode: 0o604, expected: 0o604, refuses: true },
+      { mode: 0o604, expected: 0o600, refuses: true },
       { mode: 0o640, expected: 0o600, refuses: false },
     ]) {
       test.skipIf(otherGroup === undefined)(
@@ -235,8 +236,13 @@ describe('the file a write replaces (#46)', () => {
     test(`${name} keeps a 644 note's mode when the OS refuses chmod (#66)`, async () => {
       const { file, sig } = await note(0o644);
       refuseChmod();
+      const umask = process.umask(0o022); // the common one, which keeps 644
 
-      await write(file, sig);
+      try {
+        await write(file, sig);
+      } finally {
+        process.umask(umask);
+      }
 
       expect(await readFile(result(file), 'utf8')).toBe('new');
       expect((await stat(result(file))).mode & 0o777).toBe(0o644);
@@ -254,31 +260,35 @@ describe('the file a write replaces (#46)', () => {
       expect(mode & 0o077 & ~0o044).toBe(0);
     });
 
-    test(`${name} fails when the OS refuses chmod and the tmp is wider than the note`, async () => {
-      const { file, sig } = await note(0o600);
-      refuseChmod(0o644);
+    for (const silently of [false, true]) {
+      test(`${name} fails when the OS ${silently ? 'ignores' : 'refuses'} chmod and the tmp is wider than the note`, async () => {
+        const { file, sig } = await note(0o600);
+        refuseChmod(0o644, silently);
 
-      const error = await write(file, sig).catch((e: unknown) => {
-        return e;
+        const error = await write(file, sig).catch((e: unknown) => {
+          return e;
+        });
+
+        expect(error).toBeInstanceOf(Error);
+        expect(await readFile(file, 'utf8')).toBe('old');
+        expect(await readdir(dir)).toEqual(['note.md']);
       });
-
-      expect((error as NodeJS.ErrnoException).code).toBe('EPERM');
-      expect(await readFile(file, 'utf8')).toBe('old');
-      expect(await readdir(dir)).toEqual(['note.md']);
-    });
+    }
   }
 
-  // A mount that refuses chmod. `createdAs` stands for one that also ignores
-  // the mode a file is created with.
-  function refuseChmod(createdAs?: number): void {
+  // A mount that refuses chmod, or ignores it with no error. `createdAs`
+  // stands for one that also ignores the mode a file is created with.
+  function refuseChmod(createdAs?: number, silently = false): void {
     spyOn(fsp, 'open').mockImplementationOnce(async (...args) => {
       const handle = await realOpen(...args);
       if (createdAs !== undefined) {
         await handle.chmod(createdAs);
       }
-      spyOn(handle, 'chmod').mockRejectedValue(
-        Object.assign(new Error('not permitted'), { code: 'EPERM' }),
-      );
+      spyOn(handle, 'chmod').mockImplementation(async () => {
+        if (!silently) {
+          throw Object.assign(new Error('not permitted'), { code: 'EPERM' });
+        }
+      });
 
       return handle;
     });

@@ -175,10 +175,10 @@ function tempPath(fullPath: string): string {
 // The data must reach the disk before rename/link commits the name, or a crash
 // can leave the target empty or short; a writeback error surfaces only at the
 // sync. On macOS the sync stops at the drive cache (no F_FULLFSYNC, see #43).
-// A tmp that replaces a note is created no wider than the note for any user
-// (`safeMode`), and takes the note's ownership before any byte is written, so
-// the new text is never readable by more users than the old text was. `wx`: a
-// name that is already taken, or a link planted there, fails instead of being
+// A tmp that replaces a note is created no wider than the note for any other
+// user (`safeMode`), and takes the note's ownership before any byte is written,
+// so the new text is never readable by more users than the old text was. `wx`:
+// a name that is already taken, or a link planted there, fails instead of being
 // written through.
 async function writeSynced(
   file: string,
@@ -202,45 +202,53 @@ async function writeSynced(
 
 // A new inode replaces the note: give it the note's group, mode and owner. The
 // group and the owner are best effort — the OS may refuse them, and giving a
-// file away takes root. The stat, not the chown's result, says whether the
-// group was kept: a mount can ignore a chown with no error. A group it could
-// not keep gets `narrowGroup`. Set-id bits are dropped. A refused mode is no
-// error while the tmp gives the group and the others no more than the mode
-// does, as a mount that refuses chmod leaves it after `safeMode`. The mode goes
-// on before the owner, while this process still owns the file. Extended
-// attributes and hard links stay with the old inode (docs/pdr/0002).
+// file away takes root. A group it could not keep gets `sharedBits`. Set-id
+// bits are dropped. The mode is best effort while the tmp gives the group and
+// the others no more than it: a mount that refuses chmod leaves the tmp as
+// `safeMode` made it. The stat, not a call's result, says what the OS kept: a
+// mount can ignore a chown or a chmod with no error. The mode goes on before
+// the owner, while this process still owns the file. Extended attributes and
+// hard links stay with the old inode (docs/pdr/0002).
 async function keepOwnership(handle: FileHandle, like: Stats): Promise<void> {
-  await handle.chown(-1, like.gid).catch(() => {});
-  const own = await handle.stat();
-  const ownMode = own.mode & 0o777;
-  let mode = like.mode & 0o777;
+  let own = await handle.stat();
   if (own.gid !== like.gid) {
-    mode = narrowGroup(mode);
+    await handle.chown(-1, like.gid).catch(() => {});
+    own = await handle.stat();
   }
-  if (ownMode !== mode) {
-    await handle.chmod(mode).catch((err: unknown) => {
-      if ((ownMode & ~mode & 0o077) !== 0) {
-        throw err;
-      }
-    });
+  const mode = own.gid === like.gid ? like.mode & 0o777 : sharedBits(like.mode);
+  if ((own.mode & 0o777) !== mode) {
+    const refused = await handle.chmod(mode).then(
+      () => {
+        return null;
+      },
+      (err: unknown) => {
+        return err;
+      },
+    );
+    const kept = (await handle.stat()).mode & 0o777;
+    if ((kept & ~mode & 0o077) !== 0) {
+      throw refused ?? new Error(`the OS kept mode ${kept.toString(8)}`);
+    }
   }
   if (own.uid !== like.uid) {
     await handle.chown(like.uid, -1).catch(() => {});
   }
 }
 
-// The mode a tmp is created with: the note's mode under `narrowGroup`, since
-// the tmp's group is not the note's yet, and read and write for the writer.
+// The mode a tmp is created with: read and write for the writer, and
+// `sharedBits` for the rest, since the tmp's group is not the note's yet.
 function safeMode(mode: number): number {
-  return 0o600 | (narrowGroup(mode) & 0o077);
+  return 0o600 | (sharedBits(mode) & 0o077);
 }
 
-// A file's group that is not the note's gets only the bits that the note's
-// group and its others both have: its members then read no more than they
-// could before, as a member of the note's group or as others. Zero bits would
-// lock them out of what every other user can read (#66).
-function narrowGroup(mode: number): number {
-  return (mode & 0o707) | ((mode & (mode >> 3) & 0o007) << 3);
+// The note's mode for a file whose group is not the note's: its group and its
+// others both get only the bits that the note's group and others both have. A
+// member of either group then reads no more than before, whichever class it
+// falls into, and no less than every other user (#66).
+function sharedBits(mode: number): number {
+  const shared = mode & (mode >> 3) & 0o007;
+
+  return (mode & 0o700) | (shared << 3) | shared;
 }
 
 function sameOwnership(a: Stats, b: Stats): boolean {

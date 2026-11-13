@@ -14,13 +14,14 @@
 An update writes the new text to a file next to the note, syncs it, and renames
 it over the note. The new file gets the note's mode (set-id bits dropped), and
 its owner and group where the OS lets the writer set them, before the new text
-is written into it. When the group cannot be kept, the new file's group gets
-only the permission bits that the note's group and its others both have: its
-members read no more than before, and no less than every other user. The new
-file is created no wider than the note for any user, so when the OS refuses
-the mode, as a mount that refuses chmod does, the update keeps the mode the new
-file was created with; it fails only when that mode gives the group or the
-others more than the note's mode. A move gives the new note
+is written into it. When the group cannot be kept, the new file's group and
+its others both get only the permission bits that the note's group and its
+others both have: no user reads more than before, and the members of the new
+group read no less than every other user. The new file is created no wider
+than the note for any user but the writer, so when the OS refuses or ignores
+the mode, the update keeps the mode the new file was created with; it fails
+only when the mode the OS kept gives the group or the others more than the
+mode the file should get. A move gives the new note
 the mode and owner of the old one the same way. A chmod or chown of the note
 while an update writes is a conflict (`MTIME_CONFLICT`): `updateNote` and the
 other note mutations read the note again and retry, and a direct
