@@ -232,6 +232,19 @@ git push origin main
 Only `package.json`, `CHANGELOG.md`, and `README.md` should be in this commit.
 `dist/` is gitignored and must not be staged.
 
+- **Push refused** with `(fetch first)` or `(non-fast-forward)` → a pull request
+  merged on GitHub after the preconditions. The version and the CHANGELOG section
+  leave out its commits, and Step 5 did not check them. Do not pull, merge or
+  rebase onto the release commit. Drop it, and start again at the preconditions:
+
+  ```sh
+  git reset --hard HEAD~1     # HEAD is the release commit made above
+  ```
+
+  Not `git reset --hard origin/main`: it also drops local commits on `main` that
+  were not pushed, which ship with the release.
+- **Any other refused push** → stop, and show the error. Do not tag.
+
 ## Step 7 — Tag, then open a DRAFT GitHub Release (explicit confirmation required)
 
 This is the irreversible step. **Before tagging, ask the user to confirm in plain
