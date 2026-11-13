@@ -608,27 +608,7 @@ describe('exclusiveCreate + unlinkIfUnchanged', () => {
     expect(await readdir(dir)).toEqual(['real.md']); // no tmp left
   });
 
-  test.each(['EEXIST', 'EIO'])(
-    'a link() that took effect but failed with %s, as on NFS, is a create (#45)',
-    async (code) => {
-      const file = path.join(dir, 'nfs.md');
-      const realLink = fsp.link;
-      spyOn(fsp, 'link').mockImplementationOnce(async (from, to) => {
-        await realLink(from, to); // the server made the link; its reply was lost
-        throw Object.assign(new Error(`${code}: link`), { code });
-      });
-      try {
-        const sig = await exclusiveCreate(file, 'fresh');
-        expect(await statSig(file)).toEqual(sig);
-      } finally {
-        mock.restore();
-      }
-      expect(await readFile(file, 'utf8')).toBe('fresh');
-      expect(await readdir(dir)).toEqual(['nfs.md']);
-    },
-  );
-
-  test('a link() that fails and did not take effect throws its error, and leaves no tmp', async () => {
+  test('a link() that fails with an error other than EEXIST throws it, and leaves no tmp', async () => {
     const file = path.join(dir, 'eio.md');
     spyOn(fsp, 'link').mockImplementationOnce(async () => {
       throw Object.assign(new Error('EIO: link'), { code: 'EIO' });

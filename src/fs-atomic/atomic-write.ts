@@ -83,16 +83,6 @@ export async function exclusiveCreate(
     try {
       await link(tmp, fullPath); // O_EXCL via hardlink: fails EEXIST if target present
     } catch (err) {
-      // On NFS a link() that took effect can still fail, with EEXIST or
-      // another error: open(2) says to check that the tmp's link count rose
-      // to 2. Then the create is done, and a retry above must not apply its
-      // change a second time. No other process knows the tmp's name.
-      const tmpStat = await lstat(tmp).catch(() => {
-        return null;
-      });
-      if (tmpStat?.nlink === 2) {
-        return;
-      }
       if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
         // A link there, dangling or not, is refused as every write refuses
         // it (docs/pdr/0001), not reported as a file that is there.
