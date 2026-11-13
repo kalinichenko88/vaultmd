@@ -153,7 +153,7 @@ async function placeTemp(
 ): Promise<Sig> {
   const tmp = tempPath(fullPath);
   try {
-    await writeSynced(tmp, content, like);
+    await writeSynced(tmp, content, like, fullPath);
     await place(tmp);
   } finally {
     await unlink(tmp).catch(() => {});
@@ -175,19 +175,24 @@ function tempPath(fullPath: string): string {
 // The data must reach the disk before rename/link commits the name, or a crash
 // can leave the target empty or short; a writeback error surfaces only at the
 // sync. On macOS the sync stops at the drive cache (no F_FULLFSYNC, see #43).
-// A tmp that replaces a note is created for its owner only, and takes the
-// note's ownership before any byte is written, so the new text is never
-// readable by more users than the old text was. `wx`: a name that is already
-// taken, or a link planted there, fails instead of being written through.
+// A tmp for `note` that takes the ownership of `like` — the note it replaces,
+// or the source of a move — is created no wider than `like` for any other user
+// (`safeMode`), and takes that ownership before any byte is written, so by
+// its mode the new text is never readable by more users than the old text was
+// (an ACL that the folder gives a new file is not checked, docs/pdr/0002).
+// `wx`: a name that is already taken, or a link planted there, fails instead
+// of being written through.
 async function writeSynced(
   file: string,
   content: string,
   like: Stats | null,
+  note: string,
 ): Promise<void> {
-  const handle = await open(file, 'wx', like ? 0o600 : 0o666);
+  const handle = await open(file, 'wx', like ? safeMode(like.mode) : 0o666);
   try {
     if (like) {
-      await keepOwnership(handle, like);
+      // Before any byte: it also refuses a tmp the OS made wider (UNSAFE_MODE).
+      await keepOwnership(handle, like, note);
     }
     await writeFile(handle, content, 'utf8');
     await handle.datasync();
@@ -199,34 +204,68 @@ async function writeSynced(
   await handle.close();
 }
 
-// A new inode replaces the note: give it the note's group, mode and owner. The
-// group and the owner are best effort — the OS may refuse them, and giving a
-// file away takes root. A group it could not keep loses its bits, so they do
-// not reach the new file's group instead. Set-id bits are dropped. The mode goes
-// on before the owner, while this process still owns the file. Extended
-// attributes and hard links stay with the old inode (docs/pdr/0002).
-async function keepOwnership(handle: FileHandle, like: Stats): Promise<void> {
-  const own = await handle.stat();
-  let mode = like.mode & 0o777;
+// A new inode replaces the note: give it the note's group, mode and owner. A
+// tmp whose group or others bits the OS made wider than `target` allows is
+// refused at once: a chmod after the open would not close a file descriptor
+// that another user opened before it. `target` is the note's mode while the
+// tmp is in the note's group — so a mount with one fixed mode for every file
+// still writes — and `sharedBits` in another group. Past
+// that check the group, the mode and the owner are best effort — the OS may
+// refuse or ignore them, and giving a file away takes root — and the stat, not
+// a call's result, says what the OS kept. A group it could not keep gets
+// `sharedBits`. Set-id bits are dropped. The mode goes on before the owner,
+// while this process still owns the file. Extended attributes and hard links
+// stay with the old inode (docs/pdr/0002).
+async function keepOwnership(
+  handle: FileHandle,
+  like: Stats,
+  note: string,
+): Promise<void> {
+  // The note's mode for a tmp in the note's group, `sharedBits` in another.
+  const target = (st: Stats): number => {
+    return st.gid === like.gid ? like.mode & 0o777 : sharedBits(like.mode);
+  };
+  let own = await handle.stat();
+  refuseWider(own, target(own), note);
   if (own.gid !== like.gid) {
-    const kept = await handle.chown(-1, like.gid).then(
-      () => {
-        return true;
-      },
-      () => {
-        return false;
-      },
-    );
-    if (!kept) {
-      mode &= ~0o070;
-    }
+    await handle.chown(-1, like.gid).catch(() => {});
+    own = await handle.stat();
   }
+  const mode = target(own);
   if ((own.mode & 0o777) !== mode) {
-    await handle.chmod(mode);
+    await handle.chmod(mode).catch(() => {});
+    refuseWider(await handle.stat(), mode, note);
   }
   if (own.uid !== like.uid) {
     await handle.chown(like.uid, -1).catch(() => {});
   }
+}
+
+// The tmp may give the group and the others no more than `mode`. The owner's
+// bits do not count: they are the writer's, or the note's owner's.
+function refuseWider(own: Stats, mode: number, note: string): void {
+  if ((own.mode & ~mode & 0o077) !== 0) {
+    throw new MdVaultError(
+      'UNSAFE_MODE',
+      `the OS gave the tmp for ${note} mode ${(own.mode & 0o777).toString(8)}, wider than ${mode.toString(8)}`,
+    );
+  }
+}
+
+// The mode a tmp is created with: read and write for the writer, and
+// `sharedBits` for the rest, since the tmp's group is not the note's yet.
+function safeMode(mode: number): number {
+  return 0o600 | (sharedBits(mode) & 0o077);
+}
+
+// The note's mode for a file whose group is not the note's: its group and its
+// others both get only the bits that the note's group and others both have. A
+// member of either group then reads no more than before, whichever class it
+// falls into, and no less than every other user (#66).
+function sharedBits(mode: number): number {
+  const shared = mode & (mode >> 3) & 0o007;
+
+  return (mode & 0o700) | (shared << 3) | shared;
 }
 
 function sameOwnership(a: Stats, b: Stats): boolean {

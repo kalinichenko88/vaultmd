@@ -15,7 +15,8 @@ export type MdVaultCode =
   | 'FRONTMATTER_INVALID'
   | 'VALIDATION_ERROR'
   | 'COMMIT_FAILED'
-  | 'INDEX_UNAVAILABLE';
+  | 'INDEX_UNAVAILABLE'
+  | 'UNSAFE_MODE';
 
 /**
  * Structured error thrown by all vaultmd operations. Carries a

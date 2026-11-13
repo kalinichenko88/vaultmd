@@ -83,14 +83,19 @@ export type NotesApi = {
    * unique substring, and `setSection` replaces the body under one heading.
    * @throws {@link MdVaultError} `NO_MATCH` / `AMBIGUOUS_MATCH` for
    * `editByMatch` and `setSection`, `REFUSE_CREATE` when `setBody` targets a
-   * missing note, or `VALIDATION_ERROR` when a `setSection` body would
-   * restructure the document outside its own section.
+   * missing note, `VALIDATION_ERROR` when a `setSection` body would
+   * restructure the document outside its own section, or `UNSAFE_MODE` if the
+   * OS gives the new file a mode that gives the group or the others more
+   * access than the note's mode did.
    */
   updateNote(path: string, op: UpdateOp): Promise<void>;
   /**
    * Edit a note's frontmatter in place via a mutator callback.
    * @returns Whether the frontmatter was `edited`, `unchanged`, or
    * `unverifiable`.
+   * @throws {@link MdVaultError} `UNSAFE_MODE` if the OS gives the new file a
+   * mode that gives the group or the others more access than the note's mode
+   * did.
    */
   editFrontmatter(
     path: string,
@@ -110,8 +115,10 @@ export type NotesApi = {
    * @throws {@link MdVaultError} `REFUSE_CREATE` if asked to write a missing
    * file, `MTIME_CONFLICT` if a concurrent writer, or a tool that keeps
    * changing the note's mode, owner or group, keeps winning past the retry
-   * budget, or `COMMIT_FAILED` if the write-through index update or the
-   * `onCommit` hook throws.
+   * budget, `UNSAFE_MODE` if the OS gives the new file a mode that gives the
+   * group or the others more access than the note's mode did, or
+   * `COMMIT_FAILED` if the write-through index update or the `onCommit` hook
+   * throws.
    */
   transformNote(
     path: string,
@@ -125,16 +132,19 @@ export type NotesApi = {
   /**
    * Move a note to a new vault-relative path, byte-for-byte: the content and
    * its frontmatter are carried over untouched, and so are the file's mode and,
-   * where the OS allows, its group and owner; the index row follows to the new
-   * path. Both ends are allowlist-,
-   * hidden- and symlink-checked; the destination is never clobbered. Runs under BOTH per-file locks, so a
-   * concurrent write to either end serializes against it.
+   * where the OS allows, its group and owner (as on an update: where the OS
+   * refuses or ignores the mode, no other user gets more access than before);
+   * the index row follows to the new path. Both ends are allowlist-, hidden-
+   * and symlink-checked; the destination is never clobbered. Runs under BOTH
+   * per-file locks, so a concurrent write to either end serializes against it.
    * @param from Vault-relative path of the note to move.
    * @param to Vault-relative destination path (must be a free `.md` path).
    * @throws {@link MdVaultError} `VALIDATION_ERROR` if `from` and `to` resolve
    * to the same note, `NOT_FOUND` if `from` does not exist, `ALREADY_EXISTS`
-   * if `to` is taken (the source is left in place), or `MTIME_CONFLICT` if the
-   * source changed mid-move (the destination is rolled back).
+   * if `to` is taken (the source is left in place), `MTIME_CONFLICT` if the
+   * source changed mid-move (the destination is rolled back), or `UNSAFE_MODE`
+   * if the OS gives the destination a mode that gives the group or the others
+   * more access than the source's mode did.
    */
   moveNote(from: string, to: string): Promise<void>;
 };

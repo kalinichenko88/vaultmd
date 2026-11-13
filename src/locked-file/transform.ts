@@ -16,7 +16,9 @@ import type { TransformResult } from './models/transform-result.ts';
  * receives the current file content (or `null` if the file is absent) and
  * must return the desired new content, or `null` to leave the file untouched.
  * The write is atomic and keeps the file's mode and, where the OS allows, its
- * group and owner. It refuses a `fullPath` that is a symlink rather than
+ * group and owner, as `VaultIo.writeVaultFile` says; it fails with
+ * `UNSAFE_MODE` when the OS gives the new file a mode that gives the group or
+ * the others more access than the file's mode did. It refuses a `fullPath` that is a symlink rather than
  * replace the link; the read follows a link like any read does, so pass paths
  * that `VaultIo` resolved — it refuses a link on every segment.
  *
