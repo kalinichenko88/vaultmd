@@ -111,8 +111,9 @@ export type VaultIo = {
    * @returns The {@link Sig} of the written file.
    * @throws {@link MdVaultError} `NOT_MARKDOWN` if `rel` is not a `.md` path,
    * `ALLOWLIST_VIOLATION` if it is outside the write allowlist, is hidden, or
-   * passes a symlink, or `UNSAFE_MODE` if the OS gives the new file mode bits
-   * wider than asked, before any text is in it.
+   * passes a symlink, or `UNSAFE_MODE` if the OS gives the new file a mode
+   * that lets more users read it than the note's mode did, before any text is
+   * in it.
    */
   writeVaultFile(rel: string, content: string): Promise<Sig>;
   /**
@@ -121,7 +122,8 @@ export type VaultIo = {
    * the file is absent, and also when its mode, owner or group changed during
    * the write (the Sig stays the same then; read the file again and retry).
    * A change in the last moment before the rename is undone with no error.
-   * The file keeps its mode and owner as {@link writeVaultFile} says.
+   * The file keeps its mode and owner as {@link writeVaultFile} says, and the
+   * write fails with `UNSAFE_MODE` where that one does.
    * @param rel Vault-relative `.md` path.
    * @param content New UTF-8 content.
    * @param expected Signature the file must currently have.

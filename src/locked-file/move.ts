@@ -31,7 +31,7 @@ import type { MoveTarget } from './models/move-target.ts';
  * (the lock is serializing, not reentrant), `NOT_FOUND` if the source is
  * absent, `ALREADY_EXISTS` if the destination is taken, `MTIME_CONFLICT` if
  * the source changed under the move, or `UNSAFE_MODE` if the OS gives the
- * destination mode bits wider than asked.
+ * destination a mode that lets more users read it than the source's mode did.
  */
 export function withFileMove(
   from: MoveTarget,

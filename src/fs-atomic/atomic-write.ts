@@ -219,17 +219,17 @@ async function keepOwnership(
   like: Stats,
   note: string,
 ): Promise<void> {
+  // The note's mode for a tmp in the note's group, `sharedBits` in another.
+  const target = (st: Stats): number => {
+    return st.gid === like.gid ? like.mode & 0o777 : sharedBits(like.mode);
+  };
   let own = await handle.stat();
-  refuseWider(
-    own,
-    own.gid === like.gid ? like.mode & 0o777 : safeMode(like.mode),
-    note,
-  );
+  refuseWider(own, target(own), note);
   if (own.gid !== like.gid) {
     await handle.chown(-1, like.gid).catch(() => {});
     own = await handle.stat();
   }
-  const mode = own.gid === like.gid ? like.mode & 0o777 : sharedBits(like.mode);
+  const mode = target(own);
   if ((own.mode & 0o777) !== mode) {
     await handle.chmod(mode).catch(() => {});
     refuseWider(await handle.stat(), mode, note);

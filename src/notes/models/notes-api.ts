@@ -83,8 +83,10 @@ export type NotesApi = {
    * unique substring, and `setSection` replaces the body under one heading.
    * @throws {@link MdVaultError} `NO_MATCH` / `AMBIGUOUS_MATCH` for
    * `editByMatch` and `setSection`, `REFUSE_CREATE` when `setBody` targets a
-   * missing note, or `VALIDATION_ERROR` when a `setSection` body would
-   * restructure the document outside its own section.
+   * missing note, `VALIDATION_ERROR` when a `setSection` body would
+   * restructure the document outside its own section, or `UNSAFE_MODE` if the
+   * OS gives the new file a mode that lets more users read it than the note's
+   * mode did.
    */
   updateNote(path: string, op: UpdateOp): Promise<void>;
   /**
@@ -110,8 +112,8 @@ export type NotesApi = {
    * @throws {@link MdVaultError} `REFUSE_CREATE` if asked to write a missing
    * file, `MTIME_CONFLICT` if a concurrent writer, or a tool that keeps
    * changing the note's mode, owner or group, keeps winning past the retry
-   * budget, `UNSAFE_MODE` if the OS gives the new file mode bits wider than
-   * asked, or `COMMIT_FAILED` if the write-through index update or the
+   * budget, `UNSAFE_MODE` if the OS gives the new file a mode that lets more
+   * users read it than the note's mode did, or `COMMIT_FAILED` if the write-through index update or the
    * `onCommit` hook throws.
    */
   transformNote(
@@ -137,7 +139,8 @@ export type NotesApi = {
    * to the same note, `NOT_FOUND` if `from` does not exist, `ALREADY_EXISTS`
    * if `to` is taken (the source is left in place), `MTIME_CONFLICT` if the
    * source changed mid-move (the destination is rolled back), or `UNSAFE_MODE`
-   * if the OS gives the destination mode bits wider than asked.
+   * if the OS gives the destination a mode that lets more users read it than
+   * the source's mode did.
    */
   moveNote(from: string, to: string): Promise<void>;
 };

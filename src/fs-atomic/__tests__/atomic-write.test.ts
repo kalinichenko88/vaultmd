@@ -309,22 +309,71 @@ describe('the file a write replaces (#46)', () => {
       });
 
       expect((error as MdVaultError).code).toBe('UNSAFE_MODE');
+      expect((error as MdVaultError).message).toContain(result(file));
       expect(written()).toBe(false);
       expect(await readFile(file, 'utf8')).toBe('old');
+      expect(await readdir(dir)).toEqual(['note.md']);
     });
+
+    // In a group that is not the note's, the bound is the shared bits, not
+    // the note's mode: the note's group bits would reach the wrong group.
+    test.skipIf(otherGroup === undefined)(
+      `${name} fails before any text when the OS creates the tmp at the note's mode in another group`,
+      async () => {
+        const { file } = await note(0o640);
+        await chown(file, (await stat(file)).uid, otherGroup as number);
+        const written = watchWrite();
+        fakeMount('ignores', 0o640);
+
+        const error = await write(file, (await statSig(file)) as Sig).catch(
+          (e: unknown) => {
+            return e;
+          },
+        );
+
+        expect((error as MdVaultError).code).toBe('UNSAFE_MODE');
+        expect(written()).toBe(false);
+      },
+    );
+
+    test.skipIf(otherGroup === undefined)(
+      `${name} fails before any text when the group is lost and the OS turns a chmod into a wider mode`,
+      async () => {
+        const { file } = await note(0o664);
+        await chown(file, (await stat(file)).uid, otherGroup as number);
+        const written = watchWrite();
+        fakeMount('widens', 0o600, true);
+
+        const error = await write(file, (await statSig(file)) as Sig).catch(
+          (e: unknown) => {
+            return e;
+          },
+        );
+
+        expect((error as MdVaultError).code).toBe('UNSAFE_MODE');
+        expect(written()).toBe(false);
+      },
+    );
   }
 
   // A mount that obeys chmod, refuses it, ignores it with no error, or sets a
   // wider mode than asked. `createdAs` stands for one that also ignores the
-  // mode a file is created with.
+  // mode a file is created with, and `refusesChown` for one that refuses a
+  // change of group.
   function fakeMount(
     outcome: 'obeys' | 'refuses' | 'ignores' | 'widens',
     createdAs?: number,
+    refusesChown = false,
   ): void {
     spyOn(fsp, 'open').mockImplementationOnce(async (...args) => {
       const handle = await realOpen(...args);
       if (createdAs !== undefined) {
         await handle.chmod(createdAs);
+      }
+      if (refusesChown) {
+        spyOn(handle, 'chown').mockRejectedValue(
+          Object.assign(new Error('invalid'), { code: 'EINVAL' }),
+        );
       }
       const realChmod = handle.chmod.bind(handle);
       if (outcome !== 'obeys') {
@@ -333,7 +382,7 @@ describe('the file a write replaces (#46)', () => {
             throw Object.assign(new Error('not permitted'), { code: 'EPERM' });
           }
           if (outcome === 'widens') {
-            await realChmod(Number(mode) | 0o004);
+            await realChmod(Number(mode) | 0o024);
           }
         });
       }
