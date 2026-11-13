@@ -15,9 +15,8 @@ export type TransformOpts = {
    */
   onCommit?: (e: CommitEvent) => void | Promise<void>;
   /**
-   * Maximum number of optimistic-concurrency retries on `MTIME_CONFLICT`, or
-   * on `ALREADY_EXISTS` when the file appears during a create, before that
-   * error is re-thrown (default 3).
+   * Maximum number of optimistic-concurrency retries on `MTIME_CONFLICT`
+   * before the conflict error is re-thrown (default 3).
    */
   maxRetries?: number;
   /**

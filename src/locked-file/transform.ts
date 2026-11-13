@@ -18,8 +18,7 @@ import type { TransformResult } from './models/transform-result.ts';
  * must return the desired new content, or `null` to leave the file untouched.
  * A create never replaces a file that appeared after the read: the transform
  * runs again on that file's text. When other writers still change or create
- * the file after `maxRetries` retries, it throws `MTIME_CONFLICT` or
- * `ALREADY_EXISTS`.
+ * the file after `maxRetries` retries, it throws `MTIME_CONFLICT`.
  * The write is atomic and keeps the file's mode and, where the OS allows, its
  * group and owner, as `VaultIo.writeVaultFile` says; it fails with
  * `UNSAFE_MODE` when the OS gives the new file a mode that gives the group or
@@ -66,16 +65,28 @@ export function withFileTransform(
       }
       try {
         if (create) {
-          // Not a rename: a file that another writer made after the read is
-          // ALREADY_EXISTS, and the next round transforms its text (#45).
-          await exclusiveCreate(fullPath, next);
+          // Not a rename: a file that another writer made after the read is a
+          // conflict, as a change under the write is, and the next round
+          // transforms its text (#45). ponytail: on NFS a link() that took
+          // effect can still fail with EEXIST, and the next round then
+          // applies the change twice (#76).
+          await exclusiveCreate(fullPath, next).catch((err: unknown) => {
+            if (err instanceof MdVaultError && err.code === 'ALREADY_EXISTS') {
+              throw new MdVaultError(
+                'MTIME_CONFLICT',
+                `file created under write: ${relForCommit}`,
+                { cause: err },
+              );
+            }
+            throw err;
+          });
         } else {
           await atomicWriteIfUnchanged(fullPath, next, read.sig);
         }
       } catch (err) {
         if (
           err instanceof MdVaultError &&
-          (err.code === 'MTIME_CONFLICT' || err.code === 'ALREADY_EXISTS') &&
+          err.code === 'MTIME_CONFLICT' &&
           attempt < maxRetries
         ) {
           await Bun.sleep(50 * (attempt + 1));

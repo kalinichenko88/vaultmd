@@ -7,7 +7,7 @@ import {
   spyOn,
   test,
 } from 'bun:test';
-import { writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import {
   chmod,
@@ -187,6 +187,69 @@ describe('withFileTransform', () => {
     expect(events).toEqual([
       { op: 'update', path: REL, content: 'EXTERNAL\nA' },
     ]);
+  });
+
+  test('a file that appears at every create, past maxRetries → MTIME_CONFLICT, nothing left', async () => {
+    const realLink = fsp.link;
+    spyOn(fsp, 'link').mockImplementation(async (tmp, to) => {
+      // A sync client puts its file there at each link, and takes it away after.
+      writeFileSync(to, 'x');
+      try {
+        await realLink(tmp, to);
+      } finally {
+        rmSync(to);
+      }
+    });
+    let calls = 0;
+    let err: unknown;
+    try {
+      await withFileTransform(
+        file,
+        KEY,
+        REL,
+        () => {
+          calls++;
+
+          return 'A';
+        },
+        { allowCreate: true, maxRetries: 1 },
+      );
+    } catch (e) {
+      err = e;
+    } finally {
+      mock.restore();
+    }
+    expect((err as MdVaultError).code).toBe('MTIME_CONFLICT');
+    expect(((err as MdVaultError).cause as MdVaultError).code).toBe(
+      'ALREADY_EXISTS',
+    );
+    expect(calls).toBe(2);
+    expect(await statSig(file)).toBeNull();
+  });
+
+  test('a file that changes under every update, past maxRetries → MTIME_CONFLICT', async () => {
+    await writeFile(file, 'base');
+    let calls = 0;
+    let err: unknown;
+    try {
+      await withFileTransform(
+        file,
+        KEY,
+        REL,
+        (c) => {
+          calls++;
+          writeFileSync(file, `${c}X`); // another writer, after each read
+
+          return `${c}A`;
+        },
+        { maxRetries: 1 },
+      );
+    } catch (e) {
+      err = e;
+    }
+    expect((err as MdVaultError).code).toBe('MTIME_CONFLICT');
+    expect(calls).toBe(2);
+    expect(await readFile(file, 'utf8')).toBe('baseXX');
   });
 
   test('a symlinked path is refused, and the link and its target stay (#46)', async () => {
