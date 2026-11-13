@@ -149,6 +149,8 @@ describe('withCrossProcessLock', () => {
       expect(
         await withCrossProcessLock(dir, key, 1000, async () => 'ok', STALE),
       ).toBe('ok');
+      expect(await statSig(lockPath(dir, key))).toBeNull();
+      expect(await statSig(`${lockPath(dir, key)}.reclaim`)).toBeNull();
     },
   );
 
@@ -317,12 +319,44 @@ describe('withCrossProcessLock', () => {
     ).toBe('ok');
   });
 
-  test('takes a stale lockfile over when a slow read outlasts the watch', async () => {
+  test('takes a stale lockfile over with a wait of 0', async () => {
     const key = 'note.md';
     await writeFile(lockPath(dir, key), '{"pid":12');
     await pastStaleBound(lockPath(dir, key));
-    const real = fsp.readFile;
-    spyOn(fsp, 'readFile').mockImplementation((async (file, options) => {
+
+    expect(await withCrossProcessLock(dir, key, 0, async () => 'ok', 300)).toBe(
+      'ok',
+    );
+  });
+
+  test('takes a lockfile over whose mtime is past the stale bound in the future', async () => {
+    const key = 'note.md';
+    await writeFile(lockPath(dir, key), '{"pid":12');
+    // A writer that died before the clock was stepped back.
+    const future = new Date(Date.now() + STALE_MS + 1000);
+    await utimes(lockPath(dir, key), future, future);
+
+    expect(
+      await withCrossProcessLock(dir, key, 1000, async () => 'ok', STALE),
+    ).toBe('ok');
+  });
+
+  test('writes no pid or host key, which released versions read to take a lock over at once', async () => {
+    const key = 'note.md';
+    const content = await withCrossProcessLock(dir, key, 300, async () => {
+      return readFile(lockPath(dir, key), 'utf8');
+    });
+
+    expect(Object.keys(JSON.parse(content))).not.toContain('pid');
+    expect(Object.keys(JSON.parse(content))).not.toContain('host');
+  });
+
+  test('takes a stale lockfile over when a slow stat outlasts the watch', async () => {
+    const key = 'note.md';
+    await writeFile(lockPath(dir, key), '{"pid":12');
+    await pastStaleBound(lockPath(dir, key));
+    const real = fsp.stat;
+    spyOn(fsp, 'stat').mockImplementation((async (file, options) => {
       await Bun.sleep(100);
 
       return real(file, options);

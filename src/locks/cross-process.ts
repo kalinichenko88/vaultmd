@@ -26,18 +26,19 @@ export async function withCrossProcessLock<T>(
     `${createHash('sha256').update(key).digest('hex')}.lock`,
   );
   // `id` tells this holder's lockfile from the next one on the same key.
-  // `pid` and `host` are for a person who reads a stuck lockfile: no code
-  // reads them.
+  // `holder` is for a person who reads a stuck lockfile, and no code reads it.
+  // It is not `pid` and `host`: versions before #62 read those to take a lock
+  // over at once, and would take a live one from another PID namespace.
   const payload = JSON.stringify({
-    pid: process.pid,
-    host: hostname(),
+    holder: `${process.pid}@${hostname()}`,
     id: randomUUID(),
   });
   const beatMs = Math.min(1000, staleMs / 4);
   const watch: Watch = { mtimeMs: Number.NaN, since: 0, lengthMs: beatMs * 3 };
-  const deadline = performance.now() + busyTimeoutMs;
+  const start = performance.now();
+  const deadline = start + busyTimeoutMs;
 
-  for (;;) {
+  for (let poll = start; ; poll = performance.now()) {
     try {
       await createLockfile(lockfile, payload);
       break; // acquired
@@ -45,13 +46,13 @@ export async function withCrossProcessLock<T>(
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
         throw err;
       }
-      const next = await reclaim(lockfile, staleMs, watch);
+      const next = await reclaim(lockfile, staleMs, watch, poll);
       if (next === 'retry') {
         continue;
       }
-      // A watch that began before the deadline runs to its end, so that any
-      // busyTimeoutMs can take a stale lock over.
-      const watching = next === 'watching' && watch.since < deadline;
+      // A watch begun in a poll that started by the deadline runs to its end,
+      // so that any busyTimeoutMs, 0 too, can take a stale lock over.
+      const watching = next === 'watching' && watch.since <= deadline;
       if (performance.now() >= deadline && !watching) {
         throw new MdVaultError(
           'MTIME_CONFLICT',
@@ -99,7 +100,8 @@ export const STALE_MS = 30_000;
 // The age is read on the wall clock, which jumps forward when the machine
 // wakes from sleep or the clock is stepped, before the holder's heartbeat has
 // run again. So a waiter takes a lockfile as aged only once it has also seen
-// the same mtime for three heartbeats (lengthMs) on its own monotonic clock.
+// the same mtime for three heartbeats (lengthMs) on its own monotonic clock,
+// counted from the start of the poll that first saw it.
 type Watch = { mtimeMs: number; since: number; lengthMs: number };
 
 // The exclusive create makes this process the file's only writer, so a write
@@ -119,15 +121,16 @@ async function createLockfile(
   }
 }
 
-// Two waiters that both read the dead holder's file would each remove it, and
-// the second would remove the lock the first had just taken. So only the
-// waiter that holds the guard removes it, after it checks the lockfile again.
+// Two waiters that both find the lockfile stale would each remove it, and the
+// second would remove the lock the first had just taken. So only the waiter
+// that holds the guard removes it, after it checks the lockfile again.
 async function reclaim(
   lockfile: string,
   staleMs: number,
   watch: Watch,
+  poll: number,
 ): Promise<'retry' | 'watching' | 'busy'> {
-  const before = await staleness(lockfile, staleMs, watch);
+  const before = await staleness(lockfile, staleMs, watch, poll);
   if (before !== 'stale') {
     return outcomeOf(before);
   }
@@ -152,7 +155,7 @@ async function reclaim(
     );
   }
   try {
-    const now = await staleness(lockfile, staleMs, watch);
+    const now = await staleness(lockfile, staleMs, watch, poll);
     if (now !== 'stale') {
       return outcomeOf(now);
     }
@@ -182,17 +185,21 @@ async function staleness(
   lockfile: string,
   staleMs: number,
   watch: Watch,
+  poll: number,
 ): Promise<'gone' | 'live' | 'watching' | 'stale'> {
   const info = await stat(lockfile).catch(() => null);
   if (!info) {
     return 'gone';
   }
-  if (!isOld(info.mtimeMs, staleMs)) {
+  // An mtime past the bound in the future is a dead writer's too, seen after
+  // the clock was stepped back; the watch keeps a live writer's lock, whose
+  // heartbeat moves the mtime.
+  if (Math.abs(Date.now() - info.mtimeMs) <= staleMs) {
     return 'live';
   }
   if (watch.mtimeMs !== info.mtimeMs) {
     watch.mtimeMs = info.mtimeMs;
-    watch.since = performance.now();
+    watch.since = poll;
   } else if (performance.now() - watch.since >= watch.lengthMs) {
     return 'stale';
   }
