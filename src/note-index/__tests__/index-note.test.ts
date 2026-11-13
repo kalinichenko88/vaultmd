@@ -148,3 +148,41 @@ describe('dropNote', () => {
     expect(countRows('notes_fts')).toBe(0);
   });
 });
+
+describe('a write that meets another connection holding the write lock', () => {
+  // #58: a deferred transaction that reads first gets SQLITE_BUSY at once in WAL,
+  // without the busy handler; the write must wait busy_timeout like any writer.
+  const busyTimeoutMs = 200;
+  const writes: [string, () => void][] = [
+    [
+      'indexNote',
+      () => {
+        indexNote(db, io, cfg, 'a.md', '# A', { mtimeMs: 1, size: 3 });
+      },
+    ],
+    [
+      'dropNote',
+      () => {
+        dropNote(db, 'a.md');
+      },
+    ],
+  ];
+
+  test.each(writes)('%s waits busy_timeout before it fails', (_name, write) => {
+    db.run('PRAGMA journal_mode = WAL'); // as openIndexDb opens it
+    db.run(`PRAGMA busy_timeout = ${busyTimeoutMs}`);
+    const other = new Database(join(dir, 'index.db'));
+    other.run('BEGIN IMMEDIATE');
+    const start = performance.now();
+    try {
+      expect(write).toThrow('database is locked');
+    } finally {
+      other.run('ROLLBACK');
+      other.close();
+    }
+
+    expect(performance.now() - start).toBeGreaterThanOrEqual(
+      busyTimeoutMs * 0.75,
+    );
+  });
+});

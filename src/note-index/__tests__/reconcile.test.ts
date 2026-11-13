@@ -1,4 +1,4 @@
-import type { Database } from 'bun:sqlite';
+import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -274,6 +274,24 @@ describe('note-index reconcile', () => {
 
     expect(readMeta(db, 'config_fingerprint')).toBe(configFingerprint(cfg));
     expect(readMeta(db, 'schema_version')).toBe(String(SCHEMA_VERSION));
+  });
+
+  test('rebuild waits busy_timeout when another connection holds the write lock (#58)', async () => {
+    const busyTimeoutMs = 200;
+    db.run(`PRAGMA busy_timeout = ${busyTimeoutMs}`);
+    const other = new Database(path.join(dataDir, 'index.db'));
+    other.run('BEGIN IMMEDIATE');
+    const start = performance.now();
+    try {
+      await expect(reconciler.rebuild()).rejects.toThrow('database is locked');
+    } finally {
+      other.run('ROLLBACK');
+      other.close();
+    }
+
+    expect(performance.now() - start).toBeGreaterThanOrEqual(
+      busyTimeoutMs * 0.75,
+    );
   });
 
   test('rebuild reads files via readConsistent before the swap transaction', async () => {

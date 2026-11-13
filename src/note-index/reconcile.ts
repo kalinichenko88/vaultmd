@@ -149,7 +149,7 @@ export function createReconciler(
       writeMeta(db, 'config_fingerprint', configFingerprint(cfg));
       writeMeta(db, 'schema_version', String(SCHEMA_VERSION));
     });
-    swap();
+    swap.immediate(); // reads first: see indexNote
   }
 
   return { reconcile, reconcilePaths, rebuild };
