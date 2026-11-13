@@ -194,9 +194,9 @@ describe('the file a write replaces (#46)', () => {
     );
 
     test.skipIf(otherGroup === undefined)(
-      `${name} still writes when the OS refuses the group`,
+      `${name} still writes when the OS refuses the group, without the group bits`,
       async () => {
-        const { file } = await note(0o644);
+        const { file } = await note(0o664);
         await chown(file, (await stat(file)).uid, otherGroup as number);
         spyOn(fsp, 'open').mockImplementationOnce(async (...args) => {
           const handle = await realOpen(...args);
@@ -209,10 +209,25 @@ describe('the file a write replaces (#46)', () => {
 
         await write(file, (await statSig(file)) as Sig);
 
+        // The group bits would reach the writer's group, not the note's.
         expect(await readFile(result(file), 'utf8')).toBe('new');
+        expect((await stat(result(file))).mode & 0o777).toBe(0o604);
       },
     );
   }
+
+  test('atomicWriteIfUnchanged keeps a chmod made while it writes', async () => {
+    const { file, sig } = await note(0o644);
+    spyOn(fsp, 'writeFile').mockImplementationOnce(async (...args) => {
+      await chmod(file, 0o600); // the person narrows the note mid-write
+
+      return realWriteFile(...args);
+    });
+
+    await atomicWriteIfUnchanged(file, 'new', sig);
+
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+  });
 
   test('a write onto a symlink is refused, and the link and its target stay', async () => {
     const real = path.join(dir, 'real.md');

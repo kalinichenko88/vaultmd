@@ -38,12 +38,22 @@ export async function atomicWriteIfUnchanged(
   const like = await fileAt(fullPath);
 
   return placeTemp(fullPath, content, like, async (tmp) => {
-    const current = await statSig(fullPath);
-    if (!current || !sigsEqual(current, expected)) {
+    const current = await fileAt(fullPath);
+    if (!current || !sigsEqual(makeSig(current), expected)) {
       throw new MdVaultError(
         'MTIME_CONFLICT',
         `file changed under write: ${fullPath}`,
       );
+    }
+    // A chmod or chown during the write changes no Sig: take it over, so the
+    // rename does not undo it. Rare, so the usual path adds no syscall here.
+    if (like && !sameOwnership(current, like)) {
+      const handle = await open(tmp, 'r+');
+      try {
+        await keepOwnership(handle, current);
+      } finally {
+        await handle.close();
+      }
     }
     await rename(tmp, fullPath);
   });
@@ -56,8 +66,9 @@ export async function exclusiveCreate(
   content: string,
   copyOf?: string,
 ): Promise<Sig> {
-  await mkdir(path.dirname(fullPath), { recursive: true });
+  // Before the mkdir, so a refused source makes no folder.
   const like = copyOf === undefined ? null : await fileAt(copyOf);
+  await mkdir(path.dirname(fullPath), { recursive: true });
 
   return placeTemp(fullPath, content, like, async (tmp) => {
     try {
@@ -150,15 +161,16 @@ function tempPath(fullPath: string): string {
 // The data must reach the disk before rename/link commits the name, or a crash
 // can leave the target empty or short; a writeback error surfaces only at the
 // sync. On macOS the sync stops at the drive cache (no F_FULLFSYNC, see #43).
-// The tmp is created no wider than `like` (umask can only narrow it) and takes
-// its ownership before any byte is written, so the new text is never readable
-// by more users than the old text was.
+// A tmp that replaces a note is created for its owner only, and takes the
+// note's ownership before any byte is written, so the new text is never
+// readable by more users than the old text was. `wx`: a name that is already
+// taken, or a link planted there, fails instead of being written through.
 async function writeSynced(
   file: string,
   content: string,
   like: Stats | null,
 ): Promise<void> {
-  const handle = await open(file, 'w', like ? like.mode & 0o777 : 0o666);
+  const handle = await open(file, 'wx', like ? 0o600 : 0o666);
   try {
     if (like) {
       await keepOwnership(handle, like);
@@ -173,20 +185,38 @@ async function writeSynced(
   await handle.close();
 }
 
-// A new inode replaces the note: give it the note's group and owner where the
-// OS lets this process set them — each on its own, best effort, since giving a
-// file away takes root — then its mode, set-id bits dropped. Extended
+// A new inode replaces the note: give it the note's group, mode and owner. The
+// group and the owner are best effort — the OS may refuse them, and giving a
+// file away takes root. A group it could not keep loses its bits, so they do
+// not reach the writer's group instead. Set-id bits are dropped. The mode goes
+// on before the owner, while this process still owns the file. Extended
 // attributes and hard links stay with the old inode (docs/pdr/0002).
 async function keepOwnership(handle: FileHandle, like: Stats): Promise<void> {
   const own = await handle.stat();
+  let mode = like.mode & 0o777;
   if (own.gid !== like.gid) {
-    await handle.chown(-1, like.gid).catch(() => {});
+    const kept = await handle.chown(-1, like.gid).then(
+      () => {
+        return true;
+      },
+      () => {
+        return false;
+      },
+    );
+    if (!kept) {
+      mode &= ~0o070;
+    }
+  }
+  if ((own.mode & 0o777) !== mode) {
+    await handle.chmod(mode);
   }
   if (own.uid !== like.uid) {
     await handle.chown(like.uid, -1).catch(() => {});
   }
-  const mode = like.mode & 0o777;
-  if ((own.mode & 0o777) !== mode) {
-    await handle.chmod(mode);
-  }
+}
+
+function sameOwnership(a: Stats, b: Stats): boolean {
+  return (
+    (a.mode & 0o777) === (b.mode & 0o777) && a.uid === b.uid && a.gid === b.gid
+  );
 }

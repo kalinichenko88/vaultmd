@@ -123,8 +123,9 @@ export type NotesApi = {
   deleteNote(path: string): Promise<boolean>;
   /**
    * Move a note to a new vault-relative path, byte-for-byte: the content and
-   * its frontmatter are carried over untouched, and so are the file's mode and
-   * owner; the index row follows to the new path. Both ends are allowlist-,
+   * its frontmatter are carried over untouched, and so are the file's mode and,
+   * where the OS allows, its group and owner; the index row follows to the new
+   * path. Both ends are allowlist-,
    * hidden- and symlink-checked; the destination is never clobbered. Runs under BOTH per-file locks, so a
    * concurrent write to either end serializes against it.
    * @param from Vault-relative path of the note to move.

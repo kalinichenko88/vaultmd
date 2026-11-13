@@ -8,6 +8,7 @@ import { passesSymlink } from './symlink-guard.ts';
 type EnumerateDeps = {
   can(rel: string, access: 'read' | 'write'): boolean;
   isIgnored(rel: string): boolean;
+  resolveVaultPath(rel: string, access?: 'read' | 'write'): string;
   toVaultRelative(rel: string): string;
 };
 
@@ -46,14 +47,18 @@ async function walk(
       await walk(join(absDir, name), childRel, out, deps);
       continue;
     }
-    // The walk never follows a link and started on a path with none, so the
-    // read scope (with the hidden rule) is all that is left to check.
-    if (
-      ent.isFile() &&
-      name.endsWith('.md') &&
-      !deps.isIgnored(childRel) &&
-      deps.can(childRel, 'read')
-    ) {
+    if (ent.isFile() && name.endsWith('.md')) {
+      if (deps.isIgnored(childRel)) {
+        continue;
+      }
+      // The full gate, not just the read scope: a name's canonical form can
+      // differ from the walked name (a `\` in it on POSIX, NFC), and it is the
+      // canonical path that reconcile will resolve.
+      try {
+        deps.resolveVaultPath(childRel, 'read');
+      } catch {
+        continue;
+      }
       out.files.push(deps.toVaultRelative(childRel));
     }
   }
@@ -82,13 +87,8 @@ async function enumerate(
 ): Promise<Walked> {
   const out: Walked = { files: [], folders: [] };
   const startRel = dir === undefined ? '' : deps.toVaultRelative(dir);
-  // Nothing under a hidden folder can be listed, so it is not walked. A start
-  // that cannot be checked lists nothing, as an unreadable folder does.
-  try {
-    if (isHidden(startRel) || passesSymlink(root, startRel)) {
-      return out;
-    }
-  } catch {
+  // Nothing under a hidden folder can be listed, so it is not walked.
+  if (isHidden(startRel) || passesSymlink(root, startRel)) {
     return out;
   }
   await walk(join(root, startRel), startRel, out, deps);

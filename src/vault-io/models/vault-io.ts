@@ -139,7 +139,8 @@ export type VaultIo = {
   /**
    * Enumerate all `.md` files under `dir` (default: vault root) that pass
    * the read allowlist and are not matched by the `ignore` patterns. Symlinks
-   * are skipped, never followed.
+   * are skipped, never followed; a `dir` that is hidden or passes a symlink
+   * lists nothing.
    * @param dir Optional vault-relative subdirectory to constrain the listing.
    * @returns Sorted vault-relative paths of enumerated `.md` files.
    */
@@ -148,7 +149,7 @@ export type VaultIo = {
    * Enumerate the folders under `dir` (default: vault root) that pass the read
    * allowlist, skipping dot-folders, `ignore` matches, and symlinks, which the
    * walk never follows — the same walk {@link listMarkdown} uses. A `dir` that
-   * passes a symlink lists nothing. Empty folders **are** listed: a directory
+   * is hidden or passes a symlink lists nothing. Empty folders **are** listed: a directory
    * exists on disk whether or
    * not it holds markdown. The root is never included, and a folder whose own
    * parent is outside the read scope still appears, so treat a missing parent

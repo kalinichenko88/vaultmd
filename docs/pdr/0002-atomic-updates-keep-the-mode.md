@@ -9,7 +9,8 @@
 An update writes the new text to a file next to the note, syncs it, and renames
 it over the note. The new file gets the note's mode (set-id bits dropped), and
 its owner and group where the OS lets the writer set them, before the new text
-is written into it. A move gives the new note the mode and owner of the old one
+is written into it. When the group cannot be kept, its permission bits are
+dropped, so they do not pass to the writer's group. A move gives the new note the mode and owner of the old one
 the same way. Extended attributes (macOS Finder tags, for example) and hard
 links stay with the old file: after an update the note has no extended
 attributes, and a hard link to it keeps the old text.

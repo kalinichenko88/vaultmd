@@ -203,7 +203,7 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
     return ignoreRes.some((re) => re.test(rel));
   }
 
-  const enumerateDeps = { can, isIgnored, toVaultRelative };
+  const enumerateDeps = { can, isIgnored, resolveVaultPath, toVaultRelative };
 
   function listMarkdown(dir?: string): Promise<string[]> {
     return enumerateMarkdown(root, dir, enumerateDeps);

@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import * as fs from 'node:fs';
 import {
   chmod,
   mkdir,
@@ -56,17 +57,26 @@ describe('passesSymlink', () => {
 
   // Root reads every folder, so it gets no EACCES to test.
   test.skipIf(process.getuid?.() === 0)(
-    'any other lstat error is thrown, not read as "no symlink"',
+    'a folder it may not search stops the walk: the IO fails there too',
     async () => {
       await mkdir(join(root, 'locked'));
       await chmod(join(root, 'locked'), 0o000);
       try {
-        expect(() => {
-          return passesSymlink(root, 'locked/a.md');
-        }).toThrow();
+        expect(passesSymlink(root, 'locked/a.md')).toBe(false);
       } finally {
         await chmod(join(root, 'locked'), 0o755);
       }
     },
   );
+
+  test('any other lstat error refuses the path: the guard never fails open', () => {
+    const spy = spyOn(fs, 'lstatSync').mockImplementation(() => {
+      throw Object.assign(new Error('io'), { code: 'EIO' });
+    });
+    try {
+      expect(passesSymlink(root, 'a.md')).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });

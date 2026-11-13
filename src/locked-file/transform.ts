@@ -16,7 +16,9 @@ import type { TransformResult } from './models/transform-result.ts';
  * receives the current file content (or `null` if the file is absent) and
  * must return the desired new content, or `null` to leave the file untouched.
  * The write is atomic and keeps the file's mode and, where the OS allows, its
- * owner. A `fullPath` that is a symlink is refused, never written through.
+ * group and owner. It refuses a `fullPath` that is a symlink rather than
+ * replace the link; the read follows a link like any read does, so pass paths
+ * that `VaultIo` resolved — it refuses a link on every segment.
  *
  * @param fullPath     Absolute filesystem path to the target file.
  * @param lockKey      Canonical/case-folded serialization key — pass `VaultIo.toKey(rel)`.
