@@ -239,9 +239,36 @@ describe('the file a write replaces (#46)', () => {
       return result;
     });
 
-    await atomicWriteIfUnchanged(file, 'new', sig).catch(() => {});
+    const error = await atomicWriteIfUnchanged(file, 'new', sig).catch(
+      (e: unknown) => {
+        return e;
+      },
+    );
 
+    expect(tmp).not.toBe('');
+    expect((error as MdVaultError).code).toBe('MTIME_CONFLICT');
     expect((await stat(victim)).mode & 0o777).toBe(0o600);
+    expect((await lstat(file)).isSymbolicLink()).toBe(false);
+    expect(await readFile(file, 'utf8')).toBe('old');
+  });
+
+  test('a chmod made while atomicWriteIfUnchanged writes is a conflict, not undone', async () => {
+    const { file, sig } = await note(0o644);
+    spyOn(fsp, 'writeFile').mockImplementationOnce(async (...args) => {
+      await chmod(file, 0o600); // the person narrows the note mid-write
+
+      return realWriteFile(...args);
+    });
+
+    const error = await atomicWriteIfUnchanged(file, 'new', sig).catch(
+      (e: unknown) => {
+        return e;
+      },
+    );
+
+    expect((error as MdVaultError).code).toBe('MTIME_CONFLICT');
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect(await readFile(file, 'utf8')).toBe('old');
   });
 
   test('a write onto a symlink is refused, and the link and its target stay', async () => {

@@ -37,13 +37,17 @@ export async function atomicWriteIfUnchanged(
 ): Promise<Sig> {
   const like = await fileAt(fullPath);
 
-  // ponytail: the ownership is the one from before the write, so a chmod or
-  // chown made during the write and sync is undone by the rename. Taking it
-  // over needs the tmp's own handle at the rename, never a reopen by name (a
-  // link planted at the tmp name would get the chmod).
+  // A chmod or chown during the write changes no Sig, and the tmp carries the
+  // ownership from before it: a conflict, so the caller retries on the new
+  // ownership instead of the rename undoing it. Never reopen the tmp by name
+  // to take it over: a link planted at that name would get the chmod.
   return placeTemp(fullPath, content, like, async (tmp) => {
     const current = await fileAt(fullPath);
-    if (!current || !sigsEqual(makeSig(current), expected)) {
+    if (
+      !current ||
+      !sigsEqual(makeSig(current), expected) ||
+      (like !== null && !sameOwnership(current, like))
+    ) {
       throw new MdVaultError(
         'MTIME_CONFLICT',
         `file changed under write: ${fullPath}`,
@@ -125,6 +129,11 @@ async function fileAt(fullPath: string): Promise<Stats | null> {
 // Write `content` to a synced tmp next to `fullPath`, let `place` give it the
 // target's name, then always remove the tmp: after a rename it is already
 // gone, after a link it is a second name, after a failure it is junk.
+// ponytail: `like` is read before the write. atomicWriteIfUnchanged turns a
+// chmod or chown made during the write into a conflict; atomicWrite and a
+// move's exclusiveCreate have no check point, so the new file gets the
+// ownership from before. Upgrade path: the tmp's own handle at the place
+// step, never a reopen by name.
 async function placeTemp(
   fullPath: string,
   content: string,
@@ -207,4 +216,10 @@ async function keepOwnership(handle: FileHandle, like: Stats): Promise<void> {
   if (own.uid !== like.uid) {
     await handle.chown(like.uid, -1).catch(() => {});
   }
+}
+
+function sameOwnership(a: Stats, b: Stats): boolean {
+  return (
+    (a.mode & 0o777) === (b.mode & 0o777) && a.uid === b.uid && a.gid === b.gid
+  );
 }
