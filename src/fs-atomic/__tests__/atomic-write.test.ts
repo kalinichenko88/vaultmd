@@ -88,12 +88,16 @@ describe('statSig + atomicWrite', () => {
 
 describe('the file a write replaces (#46)', () => {
   let dir: string;
+  let umask: number;
 
+  // The common umask, so the mode a tmp is created with does not vary.
   beforeEach(async () => {
     dir = await mkdtemp(path.join(tmpdir(), 'vaultmd-'));
+    umask = process.umask(0o022);
   });
 
   afterEach(async () => {
+    process.umask(umask);
     mock.restore();
     await rm(dir, { recursive: true, force: true });
   });
@@ -236,29 +240,26 @@ describe('the file a write replaces (#46)', () => {
     test(`${name} keeps a 644 note's mode when the OS refuses chmod (#66)`, async () => {
       const { file, sig } = await note(0o644);
       refuseChmod();
-      const umask = process.umask(0o022); // the common one, which keeps 644
 
-      try {
-        await write(file, sig);
-      } finally {
-        process.umask(umask);
-      }
+      await write(file, sig);
 
       expect(await readFile(result(file), 'utf8')).toBe('new');
       expect((await stat(result(file))).mode & 0o777).toBe(0o644);
     });
 
-    test(`${name} still writes a read-only note when the OS refuses chmod`, async () => {
-      const { file, sig } = await note(0o444);
-      refuseChmod();
+    for (const silently of [false, true]) {
+      test(`${name} still writes a read-only note when the OS ${silently ? 'ignores' : 'refuses'} chmod`, async () => {
+        const { file, sig } = await note(0o444);
+        refuseChmod(undefined, silently);
 
-      await write(file, sig);
+        await write(file, sig);
 
-      const mode = (await stat(result(file))).mode & 0o777;
-      expect(await readFile(result(file), 'utf8')).toBe('new');
-      expect(mode).not.toBe(0o444); // the chmod was refused
-      expect(mode & 0o077 & ~0o044).toBe(0);
-    });
+        const mode = (await stat(result(file))).mode & 0o777;
+        expect(await readFile(result(file), 'utf8')).toBe('new');
+        expect(mode).not.toBe(0o444); // the chmod did not apply
+        expect(mode & 0o077 & ~0o044).toBe(0);
+      });
+    }
 
     for (const silently of [false, true]) {
       test(`${name} fails when the OS ${silently ? 'ignores' : 'refuses'} chmod and the tmp is wider than the note`, async () => {
@@ -270,6 +271,9 @@ describe('the file a write replaces (#46)', () => {
         });
 
         expect(error).toBeInstanceOf(Error);
+        if (!silently) {
+          expect((error as NodeJS.ErrnoException).code).toBe('EPERM');
+        }
         expect(await readFile(file, 'utf8')).toBe('old');
         expect(await readdir(dir)).toEqual(['note.md']);
       });

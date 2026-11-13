@@ -126,7 +126,8 @@ export type NotesApi = {
    * Move a note to a new vault-relative path, byte-for-byte: the content and
    * its frontmatter are carried over untouched, and so are the file's mode and,
    * where the OS allows, its group and owner (as on an update: where the OS
-   * refuses the mode, no other user gets more access than before); the index
+   * refuses or ignores the mode, no other user gets more access than before,
+   * and the move fails when the mode the OS keeps is wider); the index
    * row follows to the new
    * path. Both ends are allowlist-,
    * hidden- and symlink-checked; the destination is never clobbered. Runs under BOTH per-file locks, so a

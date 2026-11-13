@@ -87,9 +87,11 @@ mode, and its owner and group where the OS lets the writer set them, and so
 does a moved note. When the group cannot be kept, the new file's group and
 all other users get only the permission bits that both had on the note. On a
 mount that refuses to change a mode, the update keeps the mode the new file
-was created with, which gives no other user more access than before. Extended
-attributes (macOS Finder tags, for example) and hard links do
-not survive an update.
+was created with, which gives no other user more access than before, and a
+chmod that the OS ignores is treated the same way; when the mode the OS keeps
+is wider than the note's, the update fails. When the owner cannot be kept, the
+writer becomes the owner. Extended attributes (macOS Finder tags or a POSIX
+ACL, for example) and hard links do not survive an update.
 
 Everything else on the IO surface is `.md`-only — a non-markdown path throws
 `NOT_MARKDOWN`. The one exception is

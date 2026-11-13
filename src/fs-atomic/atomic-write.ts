@@ -217,14 +217,9 @@ async function keepOwnership(handle: FileHandle, like: Stats): Promise<void> {
   }
   const mode = own.gid === like.gid ? like.mode & 0o777 : sharedBits(like.mode);
   if ((own.mode & 0o777) !== mode) {
-    const refused = await handle.chmod(mode).then(
-      () => {
-        return null;
-      },
-      (err: unknown) => {
-        return err;
-      },
-    );
+    const refused = await handle.chmod(mode).catch((err: unknown) => {
+      return err;
+    });
     const kept = (await handle.stat()).mode & 0o777;
     if ((kept & ~mode & 0o077) !== 0) {
       throw refused ?? new Error(`the OS kept mode ${kept.toString(8)}`);

@@ -8,6 +8,8 @@
 
 - 2026-11-13 #66: Decision. Was: "When the group cannot be kept, its permission bits are dropped, so they do not pass to the new file's group."
 - 2026-11-13 #66: Decision. Was: no sentence on a mode that the OS refuses.
+- 2026-11-13 #66: Decision. Was: no sentence on an owner that cannot be kept.
+- 2026-11-13 #66: Decision. Was: "Extended attributes (macOS Finder tags, for example)".
 
 ## Decision
 
@@ -21,16 +23,18 @@ group read no less than every other user. The new file is created no wider
 than the note for any user but the writer, so when the OS refuses or ignores
 the mode, the update keeps the mode the new file was created with; it fails
 only when the mode the OS kept gives the group or the others more than the
-mode the file should get. A move gives the new note
-the mode and owner of the old one the same way. A chmod or chown of the note
+mode the file should get. When the owner cannot be kept, the writer becomes
+the owner, and the old owner keeps only what the group or the others class
+gives them: no mode can give it back without widening the others. A move
+gives the new note the mode and owner of the old one the same way. A chmod or chown of the note
 while an update writes is a conflict (`MTIME_CONFLICT`): `updateNote` and the
 other note mutations read the note again and retry, and a direct
 `rewriteIfUnchanged` caller must do so itself. Three cases still undo such a
 chmod or chown: one made after the final check and before the rename, one
 during a blind `writeVaultFile`, and one during a move. A tmp is never
-reopened by its name. Extended attributes (macOS Finder tags, for
-example) and hard links stay with the old file: after an update the note has
-no extended attributes, and a hard link to it keeps the old text.
+reopened by its name. Extended attributes (macOS Finder tags or a POSIX
+ACL, for example) and hard links stay with the old file: after an update the
+note has no extended attributes, and a hard link to it keeps the old text.
 
 ## Rests on
 

@@ -104,8 +104,9 @@ export type VaultIo = {
    * file it replaces keeps its mode, and its owner and group where the OS lets
    * the writer set them (when the group cannot be kept, the group and the
    * others get only the permission bits that both had; where the OS refuses
-   * the mode, no other user gets more access than before); extended attributes
-   * and hard links do not carry over.
+   * or ignores the mode, no other user gets more access than before, and the
+   * write fails when the mode the OS keeps is wider); extended attributes,
+   * ACLs and hard links do not carry over.
    * @param rel Vault-relative `.md` path.
    * @param content New UTF-8 content.
    * @returns The {@link Sig} of the written file.
