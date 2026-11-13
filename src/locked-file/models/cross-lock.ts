@@ -10,7 +10,7 @@ export type CrossLock = {
   lockDir: string;
   /**
    * Milliseconds to wait for the lock before throwing a busy error. A wait
-   * that has begun to confirm that a lock file is stale goes on for up to 3
+   * that has begun to confirm that a lock file is stale goes on for about 3
    * seconds more, until it knows.
    */
   busyTimeoutMs: number;

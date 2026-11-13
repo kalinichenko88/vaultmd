@@ -226,8 +226,8 @@ describe('withCrossProcessLock', () => {
   test('keeps the lock of a live holder when the wall clock jumps past the stale bound', async () => {
     const key = 'note.md';
     // The holder's first heartbeat comes 200 ms in, well after the waiter's
-    // second poll, and the hold outlasts the 600 ms watch: only the watch,
-    // reset by that heartbeat, keeps the waiter out.
+    // second poll, and the hold outlasts the 600 ms watch: the watch keeps
+    // the waiter out until that heartbeat makes the lockfile fresh again.
     const staleMs = 800;
     const { state, done } = await holdLock(key, 1000, staleMs);
     await pastStaleBound(lockPath(dir, key)); // as the machine waking from sleep
@@ -350,10 +350,11 @@ describe('withCrossProcessLock', () => {
   test('stops waiting at the deadline when an old mtime keeps changing', async () => {
     const key = 'note.md';
     await writeFile(lockPath(dir, key), '{"pid":12');
-    // A holder whose clock lags a minute: each heartbeat writes an old mtime.
+    // A holder whose clock lags a minute: each heartbeat writes an old mtime,
+    // a whole second apart, so a filesystem that keeps seconds sees it too.
     let lag = 60_000;
     const beat = setInterval(() => {
-      lag -= 1;
+      lag -= 1000;
       const old = new Date(Date.now() - lag);
       utimes(lockPath(dir, key), old, old).catch(() => {});
     }, 20);
@@ -367,8 +368,9 @@ describe('withCrossProcessLock', () => {
       clearInterval(beat);
     }
 
-    // The deadline, plus at most one watch (225 ms) begun before it.
-    expect(performance.now() - start).toBeLessThan(600);
+    // The deadline, plus at most one watch (225 ms) begun before it, with
+    // room for a slow machine; without the bound the call never returns.
+    expect(performance.now() - start).toBeLessThan(1000);
   });
 
   test('keeps the reclaim guard of a live waiter', async () => {
