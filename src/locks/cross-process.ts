@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   mkdir,
+  open,
   readFile,
   stat,
   unlink,
@@ -34,7 +35,8 @@ export async function withCrossProcessLock<T>(
 
   for (;;) {
     try {
-      await writeFile(lockfile, payload, { flag: 'wx' });
+      await createLockfile(lockfile, payload);
+      sightings.delete(lockfile);
       break; // acquired
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
@@ -79,13 +81,29 @@ export async function withCrossProcessLock<T>(
 }
 
 // A lockfile that nobody refreshed for this long is stale, whatever it holds:
-// a payload that a failed write cut off, the name of a host that is gone, or a
-// pid that a new process got.
+// the name of a host that is gone, a pid that a new process got, or a payload
+// that a crash cut off.
 // ponytail: a live holder loses the lock when its event loop blocks for more
-// than 3/4 of STALE_MS (a sqliteBusyTimeoutMs above 7.5 s can do it), or when
-// the machine sleeps while another process waits; a waiter that confirms the
-// age on its own monotonic clock closes both, if they ever matter.
-export const STALE_MS = 10_000;
+// than 3/4 of STALE_MS (22.5 s); a heartbeat off the main thread would close
+// that, if it ever matters.
+export const STALE_MS = 30_000;
+
+// The exclusive create makes this process the file's only writer, so a write
+// that fails leaves no cut-off lockfile to block the key: the file goes.
+async function createLockfile(
+  lockfile: string,
+  payload: string,
+): Promise<void> {
+  const handle = await open(lockfile, 'wx');
+  try {
+    await handle.writeFile(payload);
+    await handle.close();
+  } catch (err) {
+    await handle.close().catch(() => {});
+    await unlink(lockfile).catch(() => {});
+    throw err;
+  }
+}
 
 // Two waiters that both read the dead holder's file would each remove it, and
 // the second would remove the lock the first had just taken. So only the
@@ -132,19 +150,21 @@ async function removeIfStale(
 async function isStale(file: string, staleMs: number): Promise<boolean> {
   const info = await stat(file).catch(() => null);
   if (!info) {
+    sightings.delete(file);
+
     return false; // gone: the caller polls again
   }
-  if (Date.now() - info.mtimeMs > staleMs) {
+  if (hasAged(file, info.mtimeMs, staleMs)) {
     return true;
   }
   // Fresh, but its holder can be dead already: a same-host pid tells at once.
-  let holder: { pid?: unknown; host?: unknown };
+  let holder: { pid?: unknown; host?: unknown } | null;
   try {
     holder = JSON.parse(await readFile(file, 'utf8'));
   } catch {
     return false; // gone, or not written in full yet
   }
-  if (holder.host !== hostname() || typeof holder.pid !== 'number') {
+  if (holder?.host !== hostname() || typeof holder?.pid !== 'number') {
     return false;
   }
   try {
@@ -155,3 +175,26 @@ async function isStale(file: string, staleMs: number): Promise<boolean> {
     return (err as NodeJS.ErrnoException).code === 'ESRCH'; // EPERM: alive
   }
 }
+
+// The age is read on the wall clock, which jumps forward when the machine
+// wakes from sleep or the clock is stepped, before the holder's heartbeat has
+// run again. So a file counts as aged only once this process has also seen
+// its mtime stay the same for staleMs / 2 on its own monotonic clock: two
+// heartbeats of a live holder.
+function hasAged(file: string, mtimeMs: number, staleMs: number): boolean {
+  if (Date.now() - mtimeMs <= staleMs) {
+    sightings.delete(file);
+
+    return false;
+  }
+  const seen = sightings.get(file);
+  if (seen?.mtimeMs !== mtimeMs) {
+    sightings.set(file, { mtimeMs, since: performance.now() });
+
+    return false;
+  }
+
+  return performance.now() - seen.since >= staleMs / 2;
+}
+
+const sightings = new Map<string, { mtimeMs: number; since: number }>();

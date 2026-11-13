@@ -145,7 +145,7 @@ The only public entry point is `createVault`. Everything below hangs off the
 | `linkResolution`         | `'wikilink' \| 'relative'`             | `'wikilink'` | How links are extracted and resolved.                                       |
 | `lazyReconcile`          | `boolean`                              | `true`       | Fire background reconcile sweeps on read.                                   |
 | `reconcileTtlMs`         | `number`                               | `2000`       | Minimum gap between lazy sweeps.                                            |
-| `sqliteBusyTimeoutMs`    | `number`                               | `5000`       | SQLite busy timeout / lock wait; ≤ 5000 if `crossProcessWriterLock` is on.  |
+| `sqliteBusyTimeoutMs`    | `number`                               | `5000`       | SQLite busy timeout / lock wait; < 20000 if `crossProcessWriterLock` is on. |
 | `crossProcessWriterLock` | `boolean`                              | `true`       | Guard writes with cross-process lockfiles.                                  |
 | `onCommit`               | `(e: CommitEvent) => void \| Promise`  | —            | Hook fired after each committed mutation (e.g. to mirror changes upstream). |
 
