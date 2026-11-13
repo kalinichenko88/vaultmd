@@ -83,6 +83,10 @@ export async function exclusiveCreate(
     try {
       await link(tmp, fullPath); // O_EXCL via hardlink: fails EEXIST if target present
     } catch (err) {
+      // ponytail: on NFS a link() that took effect can still fail with
+      // EEXIST, and withFileTransform then applies its change twice. The
+      // tmp's link count is no proof (another tool can hard-link the tmp);
+      // the fix compares the inodes, #76.
       if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
         // A link there, dangling or not, is refused as every write refuses
         // it (docs/pdr/0001), not reported as a file that is there.

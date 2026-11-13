@@ -625,6 +625,27 @@ describe('exclusiveCreate + unlinkIfUnchanged', () => {
     expect(await readdir(dir)).toEqual([]);
   });
 
+  test('a tmp that another tool hard-links is no proof of a create: the file there stays, ALREADY_EXISTS (#76)', async () => {
+    const file = path.join(dir, 'taken.md');
+    await atomicWrite(file, 'theirs');
+    const realLink = fsp.link;
+    spyOn(fsp, 'link').mockImplementationOnce(async (tmp, to) => {
+      // A `cp -al` snapshot links the tmp while the target holds another file.
+      await realLink(tmp, path.join(dir, 'snapshot.md'));
+      await realLink(tmp, to); // EEXIST
+    });
+    let error: unknown;
+    try {
+      error = await exclusiveCreate(file, 'mine').catch((e: unknown) => {
+        return e;
+      });
+    } finally {
+      mock.restore();
+    }
+    expect((error as MdVaultError).code).toBe('ALREADY_EXISTS');
+    expect(await readFile(file, 'utf8')).toBe('theirs');
+  });
+
   test('unlinkIfUnchanged returns false (no-op) for a missing file', async () => {
     const ghost = path.join(dir, 'ghost.md');
     expect(await unlinkIfUnchanged(ghost, { mtimeMs: 1, size: 1 })).toBe(false);
