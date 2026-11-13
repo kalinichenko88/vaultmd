@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  lstat,
   mkdir,
   open,
   readFile,
@@ -34,7 +35,12 @@ export async function withCrossProcessLock<T>(
     id: randomUUID(),
   });
   const beatMs = Math.min(1000, staleMs / 4);
-  const watch: Watch = { mtimeMs: Number.NaN, since: 0, lengthMs: beatMs * 3 };
+  const watch: Watch = {
+    mtimeMs: Number.NaN,
+    since: 0,
+    begun: 0,
+    lengthMs: beatMs * 3,
+  };
   const start = performance.now();
   const deadline = start + busyTimeoutMs;
 
@@ -51,8 +57,8 @@ export async function withCrossProcessLock<T>(
         continue;
       }
       // A watch begun in a poll that started by the deadline runs to its end,
-      // so that any busyTimeoutMs, 0 too, can take a stale lock over.
-      const watching = next === 'watching' && watch.since <= deadline;
+      // so that a busyTimeoutMs of 0 or more can take a stale lock over.
+      const watching = next === 'watching' && watch.begun <= deadline;
       if (performance.now() >= deadline && !watching) {
         throw new MdVaultError(
           'MTIME_CONFLICT',
@@ -94,15 +100,24 @@ export async function withCrossProcessLock<T>(
 // ponytail: a live holder loses the lock when its event loop blocks for about
 // STALE_MS, or for longer than the 3 s watch just after the machine wakes or
 // the clock steps; a heartbeat off the main thread would close both, if they
-// ever matter.
+// ever matter. A dead holder's lockfile whose mtime is in the future, after
+// the clock was stepped back, waits until the clock passes it: taking it
+// sooner would take a live holder's lock whose heartbeat waits on SQLite.
 export const STALE_MS = 30_000;
 
 // The age is read on the wall clock, which jumps forward when the machine
 // wakes from sleep or the clock is stepped, before the holder's heartbeat has
 // run again. So a waiter takes a lockfile as aged only once it has also seen
-// the same mtime for three heartbeats (lengthMs) on its own monotonic clock,
-// counted from the start of the poll that first saw it.
-type Watch = { mtimeMs: number; since: number; lengthMs: number };
+// the same mtime for three heartbeats (lengthMs) on its own monotonic clock:
+// from after the stat that first saw it (since) to before the stat that sees
+// it again. `begun` is the start of the poll in which the watch began, which
+// the deadline reads.
+type Watch = {
+  mtimeMs: number;
+  since: number;
+  begun: number;
+  lengthMs: number;
+};
 
 // The exclusive create makes this process the file's only writer, so a write
 // that fails leaves no cut-off lockfile to block the key: the file goes.
@@ -187,20 +202,26 @@ async function staleness(
   watch: Watch,
   poll: number,
 ): Promise<'gone' | 'live' | 'watching' | 'stale'> {
-  const info = await stat(lockfile).catch(() => null);
+  const asked = performance.now();
+  // lstat, so that a link at the path is judged as a file: stat would fail on
+  // a dangling one, and any error but ENOENT read as 'gone' spins the poll.
+  const info = await lstat(lockfile).catch((err: NodeJS.ErrnoException) => {
+    if (err.code === 'ENOENT') {
+      return null;
+    }
+    throw err;
+  });
   if (!info) {
     return 'gone';
   }
-  // An mtime past the bound in the future is a dead writer's too, seen after
-  // the clock was stepped back; the watch keeps a live writer's lock, whose
-  // heartbeat moves the mtime.
-  if (Math.abs(Date.now() - info.mtimeMs) <= staleMs) {
+  if (!isOld(info.mtimeMs, staleMs)) {
     return 'live';
   }
   if (watch.mtimeMs !== info.mtimeMs) {
     watch.mtimeMs = info.mtimeMs;
-    watch.since = poll;
-  } else if (performance.now() - watch.since >= watch.lengthMs) {
+    watch.since = performance.now();
+    watch.begun = poll;
+  } else if (asked - watch.since >= watch.lengthMs) {
     return 'stale';
   }
 

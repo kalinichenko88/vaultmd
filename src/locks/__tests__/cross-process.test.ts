@@ -10,10 +10,12 @@ import {
 import { createHash, randomUUID } from 'node:crypto';
 import * as fsp from 'node:fs/promises';
 import {
+  lutimes,
   mkdtemp,
   readFile,
   rm,
   stat,
+  symlink,
   utimes,
   writeFile,
 } from 'node:fs/promises';
@@ -329,17 +331,71 @@ describe('withCrossProcessLock', () => {
     );
   });
 
-  test('takes a lockfile over whose mtime is past the stale bound in the future', async () => {
+  test('keeps a lockfile whose mtime is past the stale bound in the future', async () => {
     const key = 'note.md';
     await writeFile(lockPath(dir, key), '{"pid":12');
-    // A writer that died before the clock was stepped back.
+    // A live writer's, after the clock was stepped back, while its heartbeat
+    // waits on a busy SQLite.
     const future = new Date(Date.now() + STALE_MS + 1000);
     await utimes(lockPath(dir, key), future, future);
+
+    await expect(
+      withCrossProcessLock(dir, key, 400, async () => 'never', STALE),
+    ).rejects.toThrow('cross-process lock busy');
+  });
+
+  test('keeps a live lock whose heartbeat is late, when each stat returns late', async () => {
+    const key = 'note.md';
+    const content = '{"pid":12';
+    await writeFile(lockPath(dir, key), content);
+    await pastStaleBound(lockPath(dir, key));
+    // Each stat reads at once and returns 400 ms later, as from a blocked
+    // event loop; the reads see the old mtime for less than the 1500 ms watch
+    // before the heartbeat at 2000 ms.
+    const real = fsp.lstat;
+    spyOn(fsp, 'lstat').mockImplementation((async (file, options) => {
+      const info = await real(file, options);
+      await Bun.sleep(400);
+
+      return info;
+    }) as typeof real);
+    const beat = setTimeout(() => {
+      const now = new Date();
+      utimes(lockPath(dir, key), now, now).catch(() => {});
+    }, 2000);
+
+    try {
+      await expect(
+        withCrossProcessLock(dir, key, 2300, async () => 'never', 2000),
+      ).rejects.toThrow('cross-process lock busy');
+    } finally {
+      clearTimeout(beat);
+    }
+    expect(await readFile(lockPath(dir, key), 'utf8')).toBe(content);
+  }, 5000);
+
+  test('takes over a dangling link at the lockfile path, once past the stale bound', async () => {
+    const key = 'note.md';
+    await symlink(path.join(dir, 'gone'), lockPath(dir, key));
+    const past = new Date(Date.now() - STALE_MS - 1000);
+    await lutimes(lockPath(dir, key), past, past);
 
     expect(
       await withCrossProcessLock(dir, key, 1000, async () => 'ok', STALE),
     ).toBe('ok');
-  });
+  }, 3000);
+
+  test('throws the error of a lockfile it cannot stat', async () => {
+    const key = 'note.md';
+    await writeFile(lockPath(dir, key), '{"pid":12');
+    spyOn(fsp, 'lstat').mockImplementation(async () => {
+      throw Object.assign(new Error('i/o error'), { code: 'EIO' });
+    });
+
+    await expect(
+      withCrossProcessLock(dir, key, 200, async () => 'never'),
+    ).rejects.toThrow('i/o error');
+  }, 3000);
 
   test('writes no pid or host key, which released versions read to take a lock over at once', async () => {
     const key = 'note.md';
@@ -355,8 +411,8 @@ describe('withCrossProcessLock', () => {
     const key = 'note.md';
     await writeFile(lockPath(dir, key), '{"pid":12');
     await pastStaleBound(lockPath(dir, key));
-    const real = fsp.stat;
-    spyOn(fsp, 'stat').mockImplementation((async (file, options) => {
+    const real = fsp.lstat;
+    spyOn(fsp, 'lstat').mockImplementation((async (file, options) => {
       await Bun.sleep(100);
 
       return real(file, options);
