@@ -231,6 +231,21 @@ describe('updateNote', () => {
     },
   );
 
+  test('append to a missing file whose link() took effect but failed, as on NFS, appends once (#45)', async () => {
+    const realLink = fsp.link;
+    spyOn(fsp, 'link').mockImplementationOnce(async (from, to) => {
+      await realLink(from, to); // the server made the link; its reply was lost
+      throw Object.assign(new Error('EEXIST: link'), { code: 'EEXIST' });
+    });
+    try {
+      await notes.updateNote('fresh.md', { append: 'hello world' });
+    } finally {
+      mock.restore();
+    }
+    expect(await read('fresh.md')).toBe('hello world');
+    expect(query.searchText('hello').map((h) => h.path)).toContain('fresh.md');
+  });
+
   test('append newline rule: one newline before text iff existing lacks a trailing newline', async () => {
     await notes.createNote('log.md', { body: 'line1' });
     await notes.updateNote('log.md', { append: 'line2' });

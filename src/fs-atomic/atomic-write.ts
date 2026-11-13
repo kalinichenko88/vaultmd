@@ -83,17 +83,20 @@ export async function exclusiveCreate(
     try {
       await link(tmp, fullPath); // O_EXCL via hardlink: fails EEXIST if target present
     } catch (err) {
+      // On NFS a link() that took effect can still fail, with EEXIST or
+      // another error: open(2) says to check that the tmp's link count rose
+      // to 2. Then the create is done, and a retry above must not apply its
+      // change a second time. No other process knows the tmp's name.
+      const tmpStat = await lstat(tmp).catch(() => {
+        return null;
+      });
+      if (tmpStat?.nlink === 2) {
+        return;
+      }
       if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
         // A link there, dangling or not, is refused as every write refuses
         // it (docs/pdr/0001), not reported as a file that is there.
-        const there = await fileAt(fullPath);
-        // On NFS a link() that took effect can still fail with EEXIST
-        // (open(2)): the name then holds the tmp's inode, and the create is
-        // done. A retry above must not apply its change a second time.
-        const mine = await lstat(tmp);
-        if (there && there.ino === mine.ino && there.dev === mine.dev) {
-          return;
-        }
+        await fileAt(fullPath);
         throw new MdVaultError(
           'ALREADY_EXISTS',
           `already exists: ${fullPath}`,
