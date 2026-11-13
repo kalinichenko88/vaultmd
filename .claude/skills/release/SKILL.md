@@ -7,10 +7,10 @@ description: >-
   "release it" or "let's publish". Drives the whole local side of the release:
   derive the next semver version from the commit history, write the CHANGELOG
   section, sync `package.json`, check and refresh `README.md` for accuracy,
-  run the full verification suite, commit, push, and (only after explicit
-  confirmation) tag — the tag push triggers the GitHub Actions npm-publish
-  workflow. Then open a draft GitHub Release with friendly notes and publish it
-  once CI confirms the npm publish succeeded.
+  run the full verification suite, commit, and (only after explicit
+  confirmation) push `main` with the tag — the tag push triggers the GitHub
+  Actions npm-publish workflow. Then open a draft GitHub Release with friendly
+  notes and publish it once CI confirms the npm publish succeeded.
 ---
 
 # Releasing vaultmd
@@ -34,9 +34,10 @@ The workflow also self-enforces two guards before publishing — the tag must eq
 `v` + the `package.json` version, and the tagged commit must be on `origin/main`.
 
 Your job is everything around that CI publish: pick the version, write the
-changelog, sync `package.json`, prove the build is green, commit, push, and — after
-an explicit confirmation, because pushing the tag publishes to npm and **an npm
-version number can never be used again, even after an unpublish** — push the tag.
+changelog, sync `package.json`, prove the build is green, commit, and — after an
+explicit confirmation, because pushing the tag publishes to npm and **an npm
+version number can never be used again, even after an unpublish** — push `main`
+and the tag in one push.
 You also own the GitHub Release: create it as a **draft** right after tagging, then
 **publish the draft only once CI confirms the npm publish succeeded**. That ordering
 means a failed publish never leaves a public GitHub Release pointing at a version
@@ -52,9 +53,10 @@ git rev-parse --abbrev-ref HEAD     # must be main
 git status --porcelain              # must be empty (clean tree)
 git fetch --tags origin             # so the "last tag" below is accurate
 git pull --ff-only origin main      # bring in the PRs merged on GitHub
+git log --oneline origin/main..main --grep='^chore: release v'   # must be empty
 ```
 
-- **Not on `main`** → stop, and ask the user to switch to `main`. Step 6 pushes
+- **Not on `main`** → stop, and ask the user to switch to `main`. Step 7 pushes
   `main`, not this branch, and `release.yml` refuses a tag that is not on
   `origin/main`.
 - **Dirty tree** → stop. Uncommitted work must be committed or stashed first; the
@@ -63,6 +65,14 @@ git pull --ff-only origin main      # bring in the PRs merged on GitHub
   commits that `origin/main` does not have. Show them with
   `git log --oneline origin/main..main` and let the user decide. Do not merge or
   rebase them yourself.
+- **A release commit that GitHub does not have** → an earlier run made it at
+  Step 6 and stopped before GitHub took its push: the session ended at the Step 7
+  question, or after a push that the network cut off. GitHub has neither the
+  commit nor its tag, so its version is still free. Step 1 would read that version
+  as the current one and bump past it. When it is the last commit (`HEAD`), drop
+  it with `git reset --hard HEAD~1` and go on: this run writes the version and the
+  CHANGELOG section again. Otherwise stop, show
+  `git log --oneline origin/main..main`, and let the user decide.
 - It's fine if `dist/` shows as modified after a build later — that's gitignored.
 
 ## Step 1 — Gather state
@@ -76,9 +86,10 @@ npm view vaultmd version --prefer-online                  # last version on npm 
 Call the last tag `<tag>`. Before anything else, check that the previous release
 is finished. A session can end while its CI runs, and leave it half done.
 
-**A tag that reached npm with its release still a draft.** When `npm view` prints
-the version of `<tag>`, check its GitHub Release:
-`gh release view <tag> --json isDraft -q .isDraft`. If it prints `true`, finish
+**A tag that reached npm with its release still a draft, or with no release.**
+When `npm view` prints the version of `<tag>`, check its GitHub Release:
+`gh release view <tag> --json isDraft -q .isDraft`. If it prints `true`, or fails
+with `release not found` (the session ended before `gh release create`), finish
 that release at Step 8, **On success**, with `<version>` as the version of `<tag>`.
 
 **A tag that never reached npm.** When `npm view` prints a version and `<tag>` is
@@ -222,54 +233,70 @@ output, and do not commit, push, or tag. A red build must never become a tag,
 because the tag is the publish trigger. Revert the version/changelog edits or leave
 them for the user to fix — say which you did.
 
-## Step 6 — Commit and push the branch
+## Step 6 — Commit the release
 
 ```sh
 git add package.json CHANGELOG.md README.md
-git commit -m "chore: release v<version>" && git push origin main
+git commit -m "chore: release v<version>"
 ```
 
 Only `package.json`, `CHANGELOG.md`, and `README.md` should be in this commit.
 `dist/` is gitignored and must not be staged.
 
-**Push cut off by a network error** → keep the release commit: GitHub can take it
-before the connection drops. When the network is back, run `git push origin main`
-again. When it succeeds, or prints `Everything up-to-date`, GitHub has the commit:
-go on to Step 7. A refusal goes as below.
+Do not push yet. The commit stays local until the user says yes in Step 7, so a
+"no" leaves nothing on GitHub. If the commit fails (for example, a signing prompt
+that was dismissed), stop and show the error: `HEAD` is then not the release
+commit, and the `git reset --hard HEAD~1` of Step 7 would drop another commit.
 
-**Push refused** (`! [rejected]`, `! [remote rejected]`, an auth error) → GitHub
-took nothing. Drop the release commit first. A later run must not find it: Step 1
-would read its version as the current one, and its commit as a change to release.
+## Step 7 — Push `main` and the tag, then open a DRAFT GitHub Release (explicit confirmation required)
+
+This is the irreversible step. **Before any push, ask the user to confirm in plain
+terms**, e.g.: "Ready to publish `v<version>` to npm? Pushing `main` and the tag
+triggers the release workflow, and the version number can never be used again.
+Proceed?"
+
+**No** → drop the release commit, and stop. GitHub has nothing of this release. A
+later run must not find the commit: Step 1 would read its version as the current
+one, and its commit as a change to release.
 
 ```sh
-git reset --hard HEAD~1     # HEAD is the release commit made above
+git reset --hard HEAD~1     # HEAD is the release commit of Step 6
 ```
 
 Not `git reset --hard origin/main`: it also drops the commits on local `main` that
-were never pushed. Then choose by the refusal:
+were never pushed.
 
-- `(fetch first)` or `(non-fast-forward)` → new commits reached `origin/main` after
-  the preconditions, as when a pull request merged on GitHub. The version, the
-  CHANGELOG section and Step 5 leave them out. Do not pull, merge or rebase. Start
-  again at the preconditions.
-- **Any other refusal** (a branch rule, the auth) → stop, and show the error. Do
-  not tag. When the cause is fixed, start again at the preconditions.
-
-## Step 7 — Tag, then open a DRAFT GitHub Release (explicit confirmation required)
-
-This is the irreversible step. **Before tagging, ask the user to confirm in plain
-terms**, e.g.: "Ready to publish `v<version>` to npm? Pushing the tag triggers the
-release workflow, and the version number can never be used again. Proceed?"
-
-Only after an explicit yes, push the tag:
+**Yes** → check the tag first: `v` + the version you just committed to
+`package.json`. If they don't match, stop — fix the mismatch first. Then push
+`main` and the tag in one push:
 
 ```sh
-git tag v<version>
-git push origin v<version>      # ← triggers release.yml → npm publish
+git push --atomic origin main HEAD:refs/tags/v<version> && git tag v<version>   # ← triggers release.yml → npm publish
 ```
 
-Double-check the tag matches `package.json` before pushing: `v` + the version you
-just committed. If they don't match, stop — fix the mismatch first.
+With `--atomic`, GitHub takes `main` and the tag together, or neither of them. So
+`origin/main` never holds a release commit without its tag, and the tag never
+points at a commit that is not on `origin/main` (the `release.yml` guard). The
+local tag comes only after GitHub took the push: a local tag that GitHub does not
+have would be the last tag of the next run's Step 1.
+
+**Push cut off by a network error** → keep the release commit: GitHub can take the
+push before the connection drops. When the network is back, run the same command
+again. When it succeeds, or prints `Everything up-to-date`, GitHub has `main` and
+the tag: go on to the draft below. A refusal goes as below.
+
+**Push refused** (`! [rejected]`, `! [remote rejected]`, an auth error) → this push
+changed nothing on GitHub: not `main`, not the tag. Drop the release commit with the same
+`git reset --hard HEAD~1` as for a "no". Then choose by the reason on the line of
+`main` (the line of the tag says `(atomic push failed)` when only `main` was
+refused):
+
+- `(fetch first)` or `(non-fast-forward)` → new commits reached `origin/main` after
+  the preconditions, as when a pull request merged on GitHub while the user
+  decided. The version, the CHANGELOG section and Step 5 leave them out. Do not
+  pull, merge or rebase. Start again at the preconditions.
+- **Any other refusal** (a branch rule, a tag rule, the auth) → stop, and show the
+  error. When the cause is fixed, start again at the preconditions.
 
 Then immediately create the GitHub Release **as a draft**. It stays a draft until
 the npm publish actually succeeds (Step 8), so a failed publish never leaves a
@@ -305,7 +332,7 @@ Watch the publish workflow (the tag push started it; the run may take a few seco
 to appear, so retry the list once if it's empty):
 
 ```sh
-gh run watch --exit-status $(gh run list --workflow=release.yml --limit=1 --json databaseId -q '.[0].databaseId')
+gh run watch --exit-status $(gh run list --workflow=release.yml --branch v<version> --limit=1 --json databaseId -q '.[0].databaseId')
 ```
 
 **On success** — confirm the version is live, then flip the draft to published:
@@ -345,7 +372,7 @@ where the cause is:
   can change them. Ask the user to fix the cause and confirm. A cancelled run or a
   transient error (the network, a registry outage) needs no fix. Then rerun the
   failed run with `gh run rerun <run-id>`, where `<run-id>` is what
-  `gh run list --workflow=release.yml --limit=1 --json databaseId -q '.[0].databaseId'`
+  `gh run list --workflow=release.yml --branch v<version> --limit=1 --json databaseId -q '.[0].databaseId'`
   prints. The rerun runs the tagged commit and publishes the same tag. Watch it with
   `gh run watch --exit-status <run-id>`, and when it succeeds, go on with
   **On success**.
