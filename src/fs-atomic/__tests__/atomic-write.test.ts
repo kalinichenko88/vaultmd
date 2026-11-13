@@ -194,7 +194,7 @@ describe('the file a write replaces (#46)', () => {
     );
 
     test.skipIf(otherGroup === undefined)(
-      `${name} still writes when the OS refuses the group, without the group bits`,
+      `${name} still writes when the OS refuses the group, and the group gets the others bits (#66)`,
       async () => {
         const { file } = await note(0o664);
         await chown(file, (await stat(file)).uid, otherGroup as number);
@@ -209,11 +209,47 @@ describe('the file a write replaces (#46)', () => {
 
         await write(file, (await statSig(file)) as Sig);
 
-        // The group bits would reach the writer's group, not the note's.
+        // The new file's group is not the note's: it gets what every user
+        // has, not the note's group bits and not less than the others.
         expect(await readFile(result(file), 'utf8')).toBe('new');
-        expect((await stat(result(file))).mode & 0o777).toBe(0o604);
+        expect((await stat(result(file))).mode & 0o777).toBe(0o644);
       },
     );
+
+    test(`${name} still writes when the OS refuses the mode and the tmp is no wider (#66)`, async () => {
+      const { file, sig } = await note(0o644);
+      refuseChmod();
+
+      await write(file, sig);
+
+      expect(await readFile(result(file), 'utf8')).toBe('new');
+      expect((await stat(result(file))).mode & 0o777 & ~0o644).toBe(0);
+    });
+
+    test(`${name} fails when the OS refuses the mode and the tmp is wider`, async () => {
+      const { file, sig } = await note(0o400);
+      refuseChmod();
+
+      const error = await write(file, sig).catch((e: unknown) => {
+        return e;
+      });
+
+      expect((error as NodeJS.ErrnoException).code).toBe('EPERM');
+      expect(await readFile(file, 'utf8')).toBe('old');
+      expect(await readdir(dir)).toEqual(['note.md']);
+    });
+  }
+
+  // A mount that keeps no mode per file, as SMB without Unix extensions.
+  function refuseChmod(): void {
+    spyOn(fsp, 'open').mockImplementationOnce(async (...args) => {
+      const handle = await realOpen(...args);
+      spyOn(handle, 'chmod').mockRejectedValue(
+        Object.assign(new Error('not permitted'), { code: 'EPERM' }),
+      );
+
+      return handle;
+    });
   }
 
   // The attack of the security review: while the write runs, swap the tmp

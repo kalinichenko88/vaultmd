@@ -201,12 +201,16 @@ async function writeSynced(
 
 // A new inode replaces the note: give it the note's group, mode and owner. The
 // group and the owner are best effort — the OS may refuse them, and giving a
-// file away takes root. A group it could not keep loses its bits, so they do
-// not reach the new file's group instead. Set-id bits are dropped. The mode goes
-// on before the owner, while this process still owns the file. Extended
-// attributes and hard links stay with the old inode (docs/pdr/0002).
+// file away takes root. A group it could not keep gets the others bits: the
+// note's group bits would reach another group, and zero bits would lock that
+// group's members out of what every other user can read (#66). Set-id bits are
+// dropped. A refused mode is no error while the tmp is no wider than the mode,
+// as on a mount with no mode per file. The mode goes on before the owner, while
+// this process still owns the file. Extended attributes and hard links stay
+// with the old inode (docs/pdr/0002).
 async function keepOwnership(handle: FileHandle, like: Stats): Promise<void> {
   const own = await handle.stat();
+  const ownMode = own.mode & 0o777;
   let mode = like.mode & 0o777;
   if (own.gid !== like.gid) {
     const kept = await handle.chown(-1, like.gid).then(
@@ -218,11 +222,15 @@ async function keepOwnership(handle: FileHandle, like: Stats): Promise<void> {
       },
     );
     if (!kept) {
-      mode &= ~0o070;
+      mode = (mode & ~0o070) | ((mode & 0o007) << 3);
     }
   }
-  if ((own.mode & 0o777) !== mode) {
-    await handle.chmod(mode);
+  if (ownMode !== mode) {
+    await handle.chmod(mode).catch((err: unknown) => {
+      if ((ownMode & ~mode) !== 0) {
+        throw err;
+      }
+    });
   }
   if (own.uid !== like.uid) {
     await handle.chown(like.uid, -1).catch(() => {});

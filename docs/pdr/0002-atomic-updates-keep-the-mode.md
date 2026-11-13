@@ -4,13 +4,21 @@
 - Level: project
 - Date: 2026-11-13
 
+## Updates
+
+- 2026-11-13 #66: Decision. Was: "When the group cannot be kept, its permission bits are dropped, so they do not pass to the new file's group."
+- 2026-11-13 #66: Decision. Was: no sentence on a mode that the OS refuses.
+
 ## Decision
 
 An update writes the new text to a file next to the note, syncs it, and renames
 it over the note. The new file gets the note's mode (set-id bits dropped), and
 its owner and group where the OS lets the writer set them, before the new text
-is written into it. When the group cannot be kept, its permission bits are
-dropped, so they do not pass to the new file's group. A move gives the new note
+is written into it. When the group cannot be kept, the group gets the others'
+permission bits: the note's group bits do not pass to the new file's group, and
+the members of that group keep what every other user has. When the OS refuses
+the mode, as a mount with no mode per file does, the update goes on only while
+the new file is no wider than the note's mode. A move gives the new note
 the mode and owner of the old one the same way. A chmod or chown of the note
 while an update writes is a conflict (`MTIME_CONFLICT`): `updateNote` and the
 other note mutations read the note again and retry, and a direct

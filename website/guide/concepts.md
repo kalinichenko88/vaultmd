@@ -84,9 +84,11 @@ the upgrade if your vault has such links.
 An update writes a new file and renames it over the note, so a crash leaves
 the old note or the new one, never a cut-off one. The new file keeps the note's
 mode, and its owner and group where the OS lets the writer set them, and so
-does a moved note. When the group cannot be kept, the group's permission bits
-are dropped. Extended attributes (macOS Finder tags, for example) and hard
-links do not survive an update.
+does a moved note. When the group cannot be kept, the group gets the same
+permission bits as all other users. On a mount that keeps no mode per file, a
+refused mode does not stop the update while the new file is no wider than the
+note. Extended attributes (macOS Finder tags, for example) and hard links do
+not survive an update.
 
 Everything else on the IO surface is `.md`-only — a non-markdown path throws
 `NOT_MARKDOWN`. The one exception is
