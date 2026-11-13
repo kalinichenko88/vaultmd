@@ -219,12 +219,13 @@ describe('withFileTransform', () => {
     } finally {
       mock.restore();
     }
+    expect(err).toBeInstanceOf(MdVaultError);
     expect((err as MdVaultError).code).toBe('MTIME_CONFLICT');
     expect(((err as MdVaultError).cause as MdVaultError).code).toBe(
       'ALREADY_EXISTS',
     );
     expect(calls).toBe(2);
-    expect(await statSig(file)).toBeNull();
+    expect(await fsp.readdir(dir)).toEqual([]); // no note, no tmp
   });
 
   test('a file that changes under every update, past maxRetries → MTIME_CONFLICT', async () => {
@@ -247,6 +248,7 @@ describe('withFileTransform', () => {
     } catch (e) {
       err = e;
     }
+    expect(err).toBeInstanceOf(MdVaultError);
     expect((err as MdVaultError).code).toBe('MTIME_CONFLICT');
     expect(calls).toBe(2);
     expect(await readFile(file, 'utf8')).toBe('baseXX');
