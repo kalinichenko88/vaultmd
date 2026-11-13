@@ -30,19 +30,19 @@ export type CreateVaultConfig = VaultIoConfig & {
    * Milliseconds to wait for a busy SQLite lock before throwing (default 5000).
    * Applies to both read and write operations, and is also how long a write
    * waits for the cross-process lock. With `crossProcessWriterLock` on, keep
-   * it at the default or lower: a SQLite wait blocks the writer, and a wait
-   * near 7500 can let another process take the writer's lock.
+   * it at the default or lower: a writer refreshes its lock from the event
+   * loop, so a SQLite wait or other synchronous work that blocks the loop for
+   * more than 7.5 seconds can let another process take the writer's lock.
    */
   sqliteBusyTimeoutMs?: number;
   /**
    * When `true` (default), serialise writes via a cross-process advisory lock
    * stored next to the index file. Set to `false` for single-process scenarios
    * to avoid the lock-file overhead. A writer refreshes its lock while it
-   * holds it. When a writer dies with the lock held, the next writer on the
-   * same host takes it over at once if the dead writer's pid is free. A lock
-   * that this check cannot judge (another host name, a pid in use again, a
-   * cut-off lock file) is taken over once nobody has refreshed it for 10
-   * seconds; until then, writes to that note fail with `MTIME_CONFLICT`.
+   * holds it. A lock that nobody refreshes for 10 seconds is taken over, and
+   * so, without that wait, is a lock written under this host name with a pid
+   * that no process here has now. Until a dead writer's lock is taken over,
+   * writes to that note fail with `MTIME_CONFLICT`.
    */
   crossProcessWriterLock?: boolean;
   /**

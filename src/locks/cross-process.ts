@@ -65,7 +65,8 @@ export async function withCrossProcessLock<T>(
     clearInterval(heartbeat);
     // Leave the lockfile of a holder that took the lock over after this one
     // lost it by age; this narrows that race, it cannot close it. A lockfile
-    // that cannot be read (EMFILE) is taken as this holder's own.
+    // that cannot be read, for any reason but ENOENT, is taken as this
+    // holder's own, as the release always did.
     const current = await readFile(lockfile, 'utf8').catch(
       (err: NodeJS.ErrnoException) => {
         return err.code === 'ENOENT' ? null : payload;
