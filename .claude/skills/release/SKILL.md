@@ -51,12 +51,17 @@ stale tree produces a release that doesn't match what's reviewed.
 git rev-parse --abbrev-ref HEAD     # must be main
 git status --porcelain              # must be empty (clean tree)
 git fetch --tags origin             # so the "last tag" below is accurate
+git pull --ff-only origin main      # bring in the PRs merged on GitHub
 ```
 
 - **Not on `main`** → ask the user to switch or confirm they really want to release
   from this branch.
 - **Dirty tree** → stop. Uncommitted work must be committed or stashed first; the
   release commit should contain only the version bump + changelog.
+- **Pull refused** (`Not possible to fast-forward`) → stop. Local `main` has
+  commits that `origin/main` does not have. Show them with
+  `git log --oneline origin/main..main` and let the user decide. Do not merge or
+  rebase them yourself.
 - It's fine if `dist/` shows as modified after a build later — that's gitignored.
 
 ## Step 1 — Gather state
@@ -90,14 +95,14 @@ with `gh run list --workflow=release.yml --limit=5`, and choose by its state:
     network, a registry outage): a rerun of that run fixes it, not a new version.
     Go to Step 8, **On failure**, with `<version>` as the version of `<tag>`.
   - A cause in those files: when `HEAD` still has it, pause the release. Tell the
-    user, commit the fix on `main`, push it, and start again at Step 1. When `HEAD`
-    has the fix, this run is a **re-cut**. Delete the draft of the failed version
-    if it is still there (`gh release delete <tag> --yes`). Then `<last-tag>` below
-    is `v<npm version>`, not `<tag>`, so the range also holds the commits of the
-    failed version, which ship in this one.
+    user, commit the fix on `main`, push it, and start again at the preconditions.
+    When `HEAD` has the fix, this run is a **re-cut**. Delete the draft of the
+    failed version if it is still there (`gh release delete <tag> --yes`). Then
+    `<last-tag>` below is `v<npm version>`, not `<tag>`, so the range also holds
+    the commits of the failed version, which ship in this one.
 
-When a release finished at Step 8 this way, start again at Step 1 for the commits
-after its tag.
+When a release finished at Step 8 this way, start again at the preconditions for
+the commits after its tag.
 
 Then collect the commits since the last tag. If there is **no** prior tag, use the
 whole history (`git log --oneline`) — this is the first release.
@@ -323,6 +328,7 @@ where the cause is:
   **On success**.
 - **In the repository** (the workflow or `package.json` of the tagged commit): fix
   it in a new commit. Delete the draft of the failed version with
-  `gh release delete v<version> --yes`: that version is not on npm. The tag stays. Then release again from the top: Step 1
-  finds the failed tag and runs a **re-cut**, which ships the failed version's
-  changes in the next version.
+  `gh release delete v<version> --yes`: that version is not on npm. The tag
+  stays. Then release again from the preconditions: Step 1 finds the failed tag
+  and runs a **re-cut**, which ships the failed version's changes in the next
+  version.
