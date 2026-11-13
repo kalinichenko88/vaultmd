@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  lstat,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -66,6 +75,32 @@ describe('withFileMove', () => {
     expect((err as MdVaultError).code).toBe('MTIME_CONFLICT');
     expect(await fsSig.statSig(to.full)).toBeNull();
     expect(await readFile(from.full, 'utf8')).toBe('hi');
+  });
+
+  test('a symlinked source is refused, and no destination folder is made (#46)', async () => {
+    await writeFile(join(dir, 'real.md'), 'hi');
+    await symlink(join(dir, 'real.md'), from.full);
+    const deep = {
+      full: join(dir, 'new', 'deep', 'b.md'),
+      key: 'new/deep/b.md',
+      relative: 'new/deep/b.md',
+    };
+    let err: unknown;
+    try {
+      await withFileMove(from, deep);
+    } catch (e) {
+      err = e;
+    }
+    expect((err as MdVaultError).code).toBe('ALLOWLIST_VIOLATION');
+    expect(await fsSig.statSig(join(dir, 'new'))).toBeNull();
+    expect((await lstat(from.full)).isSymbolicLink()).toBe(true);
+  });
+
+  test('the moved note keeps its mode (#46)', async () => {
+    await writeFile(from.full, 'private');
+    await chmod(from.full, 0o604); // no common umask gives a new file this
+    await withFileMove(from, to);
+    expect((await stat(to.full)).mode & 0o777).toBe(0o604);
   });
 });
 

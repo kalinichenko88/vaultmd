@@ -7,8 +7,19 @@ import {
   spyOn,
   test,
 } from 'bun:test';
+import { statSync } from 'node:fs';
 import * as fsp from 'node:fs/promises';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import {
+  chmod,
+  chown,
+  lstat,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 
@@ -72,6 +83,262 @@ describe('statSig + atomicWrite', () => {
     expect((caught as MdVaultError).code).toBe('MTIME_CONFLICT');
     expect(await readFile(file, 'utf8')).toBe('one'); // original untouched
     expect(await readdir(dir)).toEqual(['note.md']); // no tmp left
+  });
+});
+
+describe('the file a write replaces (#46)', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'vaultmd-'));
+  });
+
+  afterEach(async () => {
+    mock.restore();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // A group the tmp would not get by default: not the new dir's (BSD, macOS)
+  // and not the process's (Linux). Without one, the group case cannot fail.
+  const otherGroup = (process.getgroups?.() ?? []).find((gid) => {
+    return gid !== statSync(tmpdir()).gid && gid !== process.getegid?.();
+  });
+
+  // 0o604 is a mode that no common umask gives a new file, so a write that
+  // does not copy the mode cannot pass by luck.
+  const MODE = 0o604;
+
+  // `exclusiveCreate` replaces nothing: it copies the mode of the note a move
+  // reads from, so the moved note keeps it.
+  const writers = [
+    {
+      name: 'atomicWrite',
+      write: (file: string, _sig: Sig) => {
+        return atomicWrite(file, 'new');
+      },
+      result: (file: string) => {
+        return file;
+      },
+    },
+    {
+      name: 'atomicWriteIfUnchanged',
+      write: (file: string, sig: Sig) => {
+        return atomicWriteIfUnchanged(file, 'new', sig);
+      },
+      result: (file: string) => {
+        return file;
+      },
+    },
+    {
+      name: 'exclusiveCreate',
+      write: (file: string, _sig: Sig) => {
+        return exclusiveCreate(`${file}.moved`, 'new', file);
+      },
+      result: (file: string) => {
+        return `${file}.moved`;
+      },
+    },
+  ];
+
+  async function note(mode: number): Promise<{ file: string; sig: Sig }> {
+    const file = path.join(dir, 'note.md');
+    await atomicWrite(file, 'old');
+    await chmod(file, mode);
+
+    return { file, sig: (await statSig(file)) as Sig };
+  }
+
+  for (const { name, write, result } of writers) {
+    test(`${name} keeps the note's mode`, async () => {
+      const { file, sig } = await note(MODE);
+
+      await write(file, sig);
+
+      expect(await readFile(result(file), 'utf8')).toBe('new');
+      expect((await stat(result(file))).mode & 0o7777).toBe(MODE);
+    });
+
+    test(`${name} creates its tmp no wider than the note`, async () => {
+      const { file, sig } = await note(0o600);
+      let atCreate = -1;
+      spyOn(fsp, 'open').mockImplementationOnce(async (...args) => {
+        const handle = await realOpen(...args);
+        atCreate = (await handle.stat()).mode & 0o777;
+
+        return handle;
+      });
+
+      await write(file, sig);
+
+      expect(atCreate & ~0o600).toBe(0);
+    });
+
+    test(`${name} drops set-id bits`, async () => {
+      const { file, sig } = await note(0o4644);
+
+      await write(file, sig);
+
+      expect((await stat(result(file))).mode & 0o7777).toBe(0o644);
+    });
+
+    test.skipIf(otherGroup === undefined)(
+      `${name} keeps the note's group`,
+      async () => {
+        const { file } = await note(0o644);
+        await chown(file, (await stat(file)).uid, otherGroup as number);
+
+        await write(file, (await statSig(file)) as Sig);
+
+        expect((await stat(result(file))).gid).toBe(otherGroup as number);
+      },
+    );
+
+    test.skipIf(otherGroup === undefined)(
+      `${name} still writes when the OS refuses the group, without the group bits`,
+      async () => {
+        const { file } = await note(0o664);
+        await chown(file, (await stat(file)).uid, otherGroup as number);
+        spyOn(fsp, 'open').mockImplementationOnce(async (...args) => {
+          const handle = await realOpen(...args);
+          spyOn(handle, 'chown').mockRejectedValue(
+            Object.assign(new Error('invalid'), { code: 'EINVAL' }),
+          );
+
+          return handle;
+        });
+
+        await write(file, (await statSig(file)) as Sig);
+
+        // The group bits would reach the writer's group, not the note's.
+        expect(await readFile(result(file), 'utf8')).toBe('new');
+        expect((await stat(result(file))).mode & 0o777).toBe(0o604);
+      },
+    );
+  }
+
+  // The attack of the security review: while the write runs, swap the tmp
+  // name for a link to another file and chmod the note. Nothing may reopen
+  // the tmp by name and carry that chmod onto the link's target.
+  test('a link planted at the tmp name never gets the note mode', async () => {
+    const { file, sig } = await note(0o644);
+    const victim = path.join(dir, 'victim');
+    await fsp.writeFile(victim, 'private');
+    await chmod(victim, 0o600);
+    let tmp = '';
+    spyOn(fsp, 'open').mockImplementationOnce(async (...args) => {
+      tmp = String(args[0]);
+
+      return realOpen(...args);
+    });
+    spyOn(fsp, 'writeFile').mockImplementationOnce(async (...args) => {
+      const result = await realWriteFile(...args);
+      await rm(tmp);
+      await symlink(victim, tmp);
+      await chmod(file, 0o666);
+
+      return result;
+    });
+
+    const error = await atomicWriteIfUnchanged(file, 'new', sig).catch(
+      (e: unknown) => {
+        return e;
+      },
+    );
+
+    expect(tmp).not.toBe('');
+    expect((error as MdVaultError).code).toBe('MTIME_CONFLICT');
+    expect((await stat(victim)).mode & 0o777).toBe(0o600);
+    expect((await lstat(file)).isSymbolicLink()).toBe(false);
+    expect(await readFile(file, 'utf8')).toBe('old');
+  });
+
+  test('a chmod made while atomicWriteIfUnchanged writes is a conflict, not undone', async () => {
+    const { file, sig } = await note(0o644);
+    spyOn(fsp, 'writeFile').mockImplementationOnce(async (...args) => {
+      await chmod(file, 0o600); // the person narrows the note mid-write
+
+      return realWriteFile(...args);
+    });
+
+    const error = await atomicWriteIfUnchanged(file, 'new', sig).catch(
+      (e: unknown) => {
+        return e;
+      },
+    );
+
+    expect((error as MdVaultError).code).toBe('MTIME_CONFLICT');
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect(await readFile(file, 'utf8')).toBe('old');
+  });
+
+  test.skipIf(otherGroup === undefined)(
+    'a chgrp made while atomicWriteIfUnchanged writes is a conflict, not undone',
+    async () => {
+      const { file, sig } = await note(0o640);
+      spyOn(fsp, 'writeFile').mockImplementationOnce(async (...args) => {
+        await chown(file, (await stat(file)).uid, otherGroup as number);
+
+        return realWriteFile(...args);
+      });
+
+      const error = await atomicWriteIfUnchanged(file, 'new', sig).catch(
+        (e: unknown) => {
+          return e;
+        },
+      );
+
+      expect((error as MdVaultError).code).toBe('MTIME_CONFLICT');
+      expect((await stat(file)).gid).toBe(otherGroup as number);
+    },
+  );
+
+  test('a note absent when atomicWriteIfUnchanged starts is a conflict at once', async () => {
+    const { file, sig } = await note(0o600);
+    const away = path.join(dir, 'away.md');
+    await fsp.rename(file, away);
+    // A sync tool brings it back, same Sig, while the write would run.
+    const writeSpy = spyOn(fsp, 'writeFile').mockImplementationOnce(
+      async (...args) => {
+        await fsp.rename(away, file);
+
+        return realWriteFile(...args);
+      },
+    );
+
+    const error = await atomicWriteIfUnchanged(file, 'new', sig).catch(
+      (e: unknown) => {
+        return e;
+      },
+    );
+
+    expect((error as MdVaultError).code).toBe('MTIME_CONFLICT');
+    expect(writeSpy).not.toHaveBeenCalled();
+    expect(await readdir(dir)).toEqual(['away.md']);
+    expect(await readFile(away, 'utf8')).toBe('old');
+  });
+
+  test('a write onto a symlink is refused, and the link and its target stay', async () => {
+    const real = path.join(dir, 'real.md');
+    const alias = path.join(dir, 'alias.md');
+    await atomicWrite(real, 'old\n');
+    await symlink(real, alias);
+    const sig = (await statSig(alias)) as Sig;
+
+    for (const write of [
+      () => {
+        return atomicWrite(alias, 'new');
+      },
+      () => {
+        return atomicWriteIfUnchanged(alias, 'new', sig);
+      },
+    ]) {
+      const error = await write().catch((e: unknown) => {
+        return e;
+      });
+      expect((error as MdVaultError).code).toBe('ALLOWLIST_VIOLATION');
+    }
+    expect((await lstat(alias)).isSymbolicLink()).toBe(true);
+    expect(await readFile(real, 'utf8')).toBe('old\n');
   });
 });
 

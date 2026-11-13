@@ -59,7 +59,7 @@ Each vault instance carries read/write path allowlists
 `''` means the whole vault). Queries return only notes the instance is allowed
 to read, and writes outside the write scope throw
 `ALLOWLIST_VIOLATION`. This is the security chokepoint — all path
-canonicalization, `..`-escape rejection, and symlink containment live behind it.
+canonicalization, `..`-escape rejection, and the symlink refusal live behind it.
 
 The scope covers enumeration too — `vault.io.listMarkdown` and
 `vault.io.listFolders` ([`VaultIo`](/api/type-aliases/VaultIo)) walk the vault
@@ -68,21 +68,32 @@ and report only what this instance may read, minus dot-folders and anything the
 
 Hidden state is out of reach on every path that goes through the chokepoint —
 reads, writes, `stat` and enumeration alike. A path with a dot-segment is
-refused, and it is checked twice: on the requested path *and* on the
-symlink-resolved target, so `.git`, `.env`, `.obsidian` and the index's own
-`.db` sidecars stay unreachable even behind a link that never leaves the vault.
-An alias like `notes.md` → `.obsidian/secret.md` throws `ALLOWLIST_VIOLATION`,
-and `listFolders` skips `notes` → `.obsidian` too; a symlink to a *visible*
-note resolves normally. Since nothing hidden is reachable, a hidden prefix in
-`prefixes` is rejected outright by `createVaultIo` rather than silently
-matching nothing.
+refused, so `.git`, `.env`, `.obsidian` and the index's own `.db` sidecars stay
+unreachable. Since nothing hidden is reachable, a hidden prefix in `prefixes`
+is rejected outright by `createVaultIo` rather than silently matching nothing.
+
+vaultmd does not follow symlinks inside the vault: one file has one path. A
+path with a symlink on any segment under the root — a linked note, a linked
+folder, a dangling link — throws `ALLOWLIST_VIOLATION` on read and write, and
+`listMarkdown` / `listFolders` skip the link. So a link can neither lead out of
+the vault nor give a hidden file a visible name. The vault root itself may be a
+symlink. An index built by an older version can still hold rows for linked
+paths; the next reconcile drops them, so call `vault.reconcile()` once after
+the upgrade if your vault has such links.
+
+An update writes a new file and renames it over the note, so a crash leaves
+the old note or the new one, never a cut-off one. The new file keeps the note's
+mode, and its owner and group where the OS lets the writer set them, and so
+does a moved note. When the group cannot be kept, the group's permission bits
+are dropped. Extended attributes (macOS Finder tags, for example) and hard
+links do not survive an update.
 
 Everything else on the IO surface is `.md`-only — a non-markdown path throws
 `NOT_MARKDOWN`. The one exception is
 [`vault.io.readBinary`](/api/type-aliases/VaultIo), which returns the raw bytes
 of any vault file so attachments (images, PDFs, audio) are reachable. It lifts
 the extension requirement and nothing else: the read allowlist, `..`-escape
-rejection, symlink containment and the hidden-state guard all still apply.
+rejection, the symlink refusal and the hidden-state guard all still apply.
 Attachments carry no frontmatter, links or body, so they get no index row — and
 there is no matching write path.
 

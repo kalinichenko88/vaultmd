@@ -1,6 +1,9 @@
 import { randomBytes } from 'node:crypto';
+import type { Stats } from 'node:fs';
 import {
+  type FileHandle,
   link,
+  lstat,
   mkdir,
   open,
   rename,
@@ -20,36 +23,63 @@ export async function atomicWrite(
   content: string,
 ): Promise<Sig> {
   await mkdir(path.dirname(fullPath), { recursive: true });
+  const like = await fileAt(fullPath);
 
-  return placeTemp(fullPath, content, (tmp) => {
+  return placeTemp(fullPath, content, like, (tmp) => {
     return rename(tmp, fullPath);
   });
 }
 
-export function atomicWriteIfUnchanged(
+export async function atomicWriteIfUnchanged(
   fullPath: string,
   content: string,
   expected: Sig,
 ): Promise<Sig> {
-  return placeTemp(fullPath, content, async (tmp) => {
-    const current = await statSig(fullPath);
-    if (!current || !sigsEqual(current, expected)) {
+  // `expected` is the Sig of a file that was there: with none now, the tmp
+  // would get no ownership to carry, so it is a conflict before any write.
+  const like = await fileAt(fullPath);
+  if (!like) {
+    throw new MdVaultError(
+      'MTIME_CONFLICT',
+      `file gone before write: ${fullPath}`,
+    );
+  }
+
+  // A chmod or chown during the write changes no Sig, and the tmp carries the
+  // ownership from before it: a conflict, so the caller retries on the new
+  // ownership instead of the rename undoing it. One that lands after this
+  // check and before the rename is still undone. Never reopen the tmp by name
+  // to take it over: a link planted at that name would get the chmod.
+  return placeTemp(fullPath, content, like, async (tmp) => {
+    const current = await fileAt(fullPath);
+    if (!current || !sigsEqual(makeSig(current), expected)) {
       throw new MdVaultError(
         'MTIME_CONFLICT',
         `file changed under write: ${fullPath}`,
+      );
+    }
+    if (!sameOwnership(current, like)) {
+      throw new MdVaultError(
+        'MTIME_CONFLICT',
+        `mode, owner or group changed under write: ${fullPath}`,
       );
     }
     await rename(tmp, fullPath);
   });
 }
 
+// `copyOf` is the file whose content this is — the source of a move — so the
+// new file gets its mode and owner, as a replaced file gives them.
 export async function exclusiveCreate(
   fullPath: string,
   content: string,
+  copyOf?: string,
 ): Promise<Sig> {
+  // Before the mkdir, so a refused source makes no folder.
+  const like = copyOf === undefined ? null : await fileAt(copyOf);
   await mkdir(path.dirname(fullPath), { recursive: true });
 
-  return placeTemp(fullPath, content, async (tmp) => {
+  return placeTemp(fullPath, content, like, async (tmp) => {
     try {
       await link(tmp, fullPath); // O_EXCL via hardlink: fails EEXIST if target present
     } catch (err) {
@@ -84,17 +114,46 @@ export async function unlinkIfUnchanged(
   return true;
 }
 
+// The file at `fullPath`, or null when there is none. A symlink is refused, not
+// written through or replaced: a rename puts a regular file where the link was
+// and leaves its target stale (#46, docs/pdr/0001).
+async function fileAt(fullPath: string): Promise<Stats | null> {
+  let st: Stats;
+  try {
+    st = await lstat(fullPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+    throw err;
+  }
+  if (st.isSymbolicLink()) {
+    throw new MdVaultError(
+      'ALLOWLIST_VIOLATION',
+      `path is a symlink: ${fullPath}`,
+    );
+  }
+
+  return st;
+}
+
 // Write `content` to a synced tmp next to `fullPath`, let `place` give it the
 // target's name, then always remove the tmp: after a rename it is already
 // gone, after a link it is a second name, after a failure it is junk.
+// ponytail: `like` is read before the write. atomicWriteIfUnchanged turns a
+// chmod or chown made during the write into a conflict; atomicWrite has no
+// check point, and a move checks only its source's Sig, so there the new file
+// gets the ownership from before. Upgrade path: the tmp's own handle at the
+// place step, never a reopen by name.
 async function placeTemp(
   fullPath: string,
   content: string,
+  like: Stats | null,
   place: (tmp: string) => Promise<void>,
 ): Promise<Sig> {
   const tmp = tempPath(fullPath);
   try {
-    await writeSynced(tmp, content);
+    await writeSynced(tmp, content, like);
     await place(tmp);
   } finally {
     await unlink(tmp).catch(() => {});
@@ -116,9 +175,20 @@ function tempPath(fullPath: string): string {
 // The data must reach the disk before rename/link commits the name, or a crash
 // can leave the target empty or short; a writeback error surfaces only at the
 // sync. On macOS the sync stops at the drive cache (no F_FULLFSYNC, see #43).
-async function writeSynced(file: string, content: string): Promise<void> {
-  const handle = await open(file, 'w');
+// A tmp that replaces a note is created for its owner only, and takes the
+// note's ownership before any byte is written, so the new text is never
+// readable by more users than the old text was. `wx`: a name that is already
+// taken, or a link planted there, fails instead of being written through.
+async function writeSynced(
+  file: string,
+  content: string,
+  like: Stats | null,
+): Promise<void> {
+  const handle = await open(file, 'wx', like ? 0o600 : 0o666);
   try {
+    if (like) {
+      await keepOwnership(handle, like);
+    }
     await writeFile(handle, content, 'utf8');
     await handle.datasync();
   } catch (err) {
@@ -127,4 +197,40 @@ async function writeSynced(file: string, content: string): Promise<void> {
     throw err;
   }
   await handle.close();
+}
+
+// A new inode replaces the note: give it the note's group, mode and owner. The
+// group and the owner are best effort — the OS may refuse them, and giving a
+// file away takes root. A group it could not keep loses its bits, so they do
+// not reach the new file's group instead. Set-id bits are dropped. The mode goes
+// on before the owner, while this process still owns the file. Extended
+// attributes and hard links stay with the old inode (docs/pdr/0002).
+async function keepOwnership(handle: FileHandle, like: Stats): Promise<void> {
+  const own = await handle.stat();
+  let mode = like.mode & 0o777;
+  if (own.gid !== like.gid) {
+    const kept = await handle.chown(-1, like.gid).then(
+      () => {
+        return true;
+      },
+      () => {
+        return false;
+      },
+    );
+    if (!kept) {
+      mode &= ~0o070;
+    }
+  }
+  if ((own.mode & 0o777) !== mode) {
+    await handle.chmod(mode);
+  }
+  if (own.uid !== like.uid) {
+    await handle.chown(like.uid, -1).catch(() => {});
+  }
+}
+
+function sameOwnership(a: Stats, b: Stats): boolean {
+  return (
+    (a.mode & 0o777) === (b.mode & 0o777) && a.uid === b.uid && a.gid === b.gid
+  );
 }

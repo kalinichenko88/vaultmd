@@ -110,15 +110,29 @@ code** — only the API-freeze test (`src/__tests__/index.test.ts`) imports it.
   each TTL window) fires one fire-and-forget background reconcile sweep whose
   result is visible to the *next* read. A failed sweep never breaks a read.
 - **vault-io is the security chokepoint.** All path canonicalization (NFC,
-  reject absolute/`..`-escape), allowlist matching, and realpath/symlink
-  containment live here. Treat its pure helpers (`paths.ts`, `allowlist.ts`,
-  `realpath-guard.ts`) as security-critical. The `.md` requirement is a contract
+  reject absolute/`..`-escape), allowlist matching, and the symlink refusal
+  live here. Treat its pure helpers (`paths.ts`, `allowlist.ts`,
+  `symlink-guard.ts`) as security-critical. The `.md` requirement is a contract
   check on `resolveCanonical`, not the boundary; `readBinary` is its only
   opt-out. The dot-segment (hidden-state) rule *is* the boundary: `isHidden`
-  (`paths.ts`) is applied to the requested path and the resolved target in
-  `resolveCanonical`, to the resolved target of every directory in the walk,
-  and in `can` — which is the only scope filter `query` has. A hidden prefix is
-  rejected by `canonPrefix`.
+  (`paths.ts`) is applied to the requested path in `resolveCanonical`, to each
+  directory name in the walk, and in `can` — which is the only scope filter
+  `query` has. A hidden prefix is rejected by `canonPrefix`.
+- **No symlinks under the vault root — a product decision, do not undo it**
+  ([PDR 0001](docs/pdr/0001-no-symlinks-in-the-vault.md)). `passesSymlink`
+  (`symlink-guard.ts`) refuses a path with a link on any segment under the root,
+  so at the check the file is where its path says: inside the root, and visible
+  when the path is (a link swapped in after the check is #59). `fs-atomic`
+  also refuses to write onto a link at the last segment, which the raw
+  `withFile*` primitives reach.
+  The walk skips links and never follows them. The root itself may be a link.
+  Do not add "follow the link to its target" back.
+- **Updates stay atomic — a product decision, do not undo it**
+  ([PDR 0002](docs/pdr/0002-atomic-updates-keep-the-mode.md)). `fs-atomic`
+  writes a synced tmp and renames it over the note. The tmp is created for its
+  owner only and takes the note's group and owner (where the OS allows; a
+  group it cannot keep loses its bits) and mode before any byte is written; a
+  move copies them from its source. Never trade this for a write in place.
 - **Index db location.** The index `.db` and its `-wal`/`-shm` sidecars must live
   in a data dir, **not** the synced vault, and stay gitignored (`*.db*` already
   is).
@@ -213,6 +227,10 @@ a successful `release` (or manual `workflow_dispatch`), via
   `src/__tests__/index.test.ts`), not hidden via `intentionallyNotExported`.
 
 ## Planning docs
+
+Product decisions live in `docs/PRODUCT.md` (the index) and `docs/pdr/` (one
+decision per file). An accepted decision is not changed by a task: a task that
+must go around one says so and asks.
 
 Design specs and implementation plans live in `docs/superpowers/`. The
 module-reorg spec (`specs/2026-06-27-vaultmd-module-reorg-design.md`) is the
