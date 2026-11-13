@@ -169,6 +169,17 @@ describe('withCrossProcessLock', () => {
     },
   );
 
+  test('takes a stale lockfile over in one call whose wait is shorter than the watch', async () => {
+    const key = 'note.md';
+    await writeFile(lockPath(dir, key), '{"pid":12');
+    await pastStaleBound(lockPath(dir, key));
+
+    // The watch takes three heartbeats (225 ms); the call waits 50 ms.
+    expect(
+      await withCrossProcessLock(dir, key, 50, async () => 'ok', 300),
+    ).toBe('ok');
+  });
+
   // Holds the lock for `holdMs` and reports, through `holding`, whether it
   // still does.
   const holdLock = async (key: string, holdMs: number, staleMs = STALE) => {
@@ -322,11 +333,11 @@ describe('withCrossProcessLock', () => {
     await writeFile(lockPath(dir, key), '{"pid":12');
     await pastStaleBound(lockPath(dir, key));
     await writeFile(guard, '');
+    const fresh = new Date(Date.now() + 60_000); // fresh for the whole test
+    await utimes(guard, fresh, fresh);
 
-    // The lockfile is confirmed stale after 500 ms; the guard stays fresh
-    // past the 800 ms deadline.
     await expect(
-      withCrossProcessLock(dir, key, 800, async () => 'never', 1000),
+      withCrossProcessLock(dir, key, 400, async () => 'never', STALE),
     ).rejects.toThrow('cross-process lock busy');
     expect(await statSig(guard)).not.toBeNull();
   });
