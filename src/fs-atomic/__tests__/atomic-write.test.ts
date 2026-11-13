@@ -216,17 +216,32 @@ describe('the file a write replaces (#46)', () => {
     );
   }
 
-  test('atomicWriteIfUnchanged keeps a chmod made while it writes', async () => {
+  // The attack of the security review: while the write runs, swap the tmp
+  // name for a link to another file and chmod the note. Nothing may reopen
+  // the tmp by name and carry that chmod onto the link's target.
+  test('a link planted at the tmp name never gets the note mode', async () => {
     const { file, sig } = await note(0o644);
-    spyOn(fsp, 'writeFile').mockImplementationOnce(async (...args) => {
-      await chmod(file, 0o600); // the person narrows the note mid-write
+    const victim = path.join(dir, 'victim');
+    await fsp.writeFile(victim, 'private');
+    await chmod(victim, 0o600);
+    let tmp = '';
+    spyOn(fsp, 'open').mockImplementationOnce(async (...args) => {
+      tmp = String(args[0]);
 
-      return realWriteFile(...args);
+      return realOpen(...args);
+    });
+    spyOn(fsp, 'writeFile').mockImplementationOnce(async (...args) => {
+      const result = await realWriteFile(...args);
+      await rm(tmp);
+      await symlink(victim, tmp);
+      await chmod(file, 0o666);
+
+      return result;
     });
 
-    await atomicWriteIfUnchanged(file, 'new', sig);
+    await atomicWriteIfUnchanged(file, 'new', sig).catch(() => {});
 
-    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect((await stat(victim)).mode & 0o777).toBe(0o600);
   });
 
   test('a write onto a symlink is refused, and the link and its target stay', async () => {

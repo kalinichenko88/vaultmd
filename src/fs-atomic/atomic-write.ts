@@ -37,6 +37,10 @@ export async function atomicWriteIfUnchanged(
 ): Promise<Sig> {
   const like = await fileAt(fullPath);
 
+  // ponytail: the ownership is the one from before the write, so a chmod or
+  // chown made during the write and sync is undone by the rename. Taking it
+  // over needs the tmp's own handle at the rename, never a reopen by name (a
+  // link planted at the tmp name would get the chmod).
   return placeTemp(fullPath, content, like, async (tmp) => {
     const current = await fileAt(fullPath);
     if (!current || !sigsEqual(makeSig(current), expected)) {
@@ -44,16 +48,6 @@ export async function atomicWriteIfUnchanged(
         'MTIME_CONFLICT',
         `file changed under write: ${fullPath}`,
       );
-    }
-    // A chmod or chown during the write changes no Sig: take it over, so the
-    // rename does not undo it. Rare, so the usual path adds no syscall here.
-    if (like && !sameOwnership(current, like)) {
-      const handle = await open(tmp, 'r+');
-      try {
-        await keepOwnership(handle, current);
-      } finally {
-        await handle.close();
-      }
     }
     await rename(tmp, fullPath);
   });
@@ -213,10 +207,4 @@ async function keepOwnership(handle: FileHandle, like: Stats): Promise<void> {
   if (own.uid !== like.uid) {
     await handle.chown(like.uid, -1).catch(() => {});
   }
-}
-
-function sameOwnership(a: Stats, b: Stats): boolean {
-  return (
-    (a.mode & 0o777) === (b.mode & 0o777) && a.uid === b.uid && a.gid === b.gid
-  );
 }
