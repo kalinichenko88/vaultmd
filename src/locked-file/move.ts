@@ -60,7 +60,8 @@ export function withFileMove(
       throw new MdVaultError('NOT_FOUND', `note not found: ${from.relative}`);
     }
     // exclusiveCreate (temp + link) → ALREADY_EXISTS on clash, never clobbers.
-    await exclusiveCreate(to.full, src.content);
+    // The moved note keeps the source's mode and owner.
+    await exclusiveCreate(to.full, src.content, from.full);
     let removed = false;
     try {
       removed = await unlinkIfUnchanged(from.full, src.sig);

@@ -12,11 +12,13 @@ import * as fsp from 'node:fs/promises';
 import {
   chmod,
   chown,
+  lstat,
   mkdtemp,
   readdir,
   readFile,
   rm,
   stat,
+  symlink,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
@@ -92,6 +94,7 @@ describe('the file a write replaces (#46)', () => {
   });
 
   afterEach(async () => {
+    mock.restore();
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -101,46 +104,139 @@ describe('the file a write replaces (#46)', () => {
     return gid !== statSync(tmpdir()).gid && gid !== process.getegid?.();
   });
 
-  const replacers = [
+  // 0o604 is a mode that no common umask gives a new file, so a write that
+  // does not copy the mode cannot pass by luck.
+  const MODE = 0o604;
+
+  // `exclusiveCreate` replaces nothing: it copies the mode of the note a move
+  // reads from, so the moved note keeps it.
+  const writers = [
     {
       name: 'atomicWrite',
-      replace: (file: string, _sig: Sig) => {
+      write: (file: string, _sig: Sig) => {
         return atomicWrite(file, 'new');
+      },
+      result: (file: string) => {
+        return file;
       },
     },
     {
       name: 'atomicWriteIfUnchanged',
-      replace: (file: string, sig: Sig) => {
+      write: (file: string, sig: Sig) => {
         return atomicWriteIfUnchanged(file, 'new', sig);
+      },
+      result: (file: string) => {
+        return file;
+      },
+    },
+    {
+      name: 'exclusiveCreate',
+      write: (file: string, _sig: Sig) => {
+        return exclusiveCreate(`${file}.moved`, 'new', file);
+      },
+      result: (file: string) => {
+        return `${file}.moved`;
       },
     },
   ];
 
-  for (const { name, replace } of replacers) {
-    test(`${name} keeps the mode of the file it replaces`, async () => {
-      const file = path.join(dir, 'note.md');
-      await atomicWrite(file, 'old');
-      await chmod(file, 0o600);
+  async function note(mode: number): Promise<{ file: string; sig: Sig }> {
+    const file = path.join(dir, 'note.md');
+    await atomicWrite(file, 'old');
+    await chmod(file, mode);
 
-      await replace(file, (await statSig(file)) as Sig);
+    return { file, sig: (await statSig(file)) as Sig };
+  }
 
-      expect(await readFile(file, 'utf8')).toBe('new');
-      expect((await stat(file)).mode & 0o7777).toBe(0o600);
+  for (const { name, write, result } of writers) {
+    test(`${name} keeps the note's mode`, async () => {
+      const { file, sig } = await note(MODE);
+
+      await write(file, sig);
+
+      expect(await readFile(result(file), 'utf8')).toBe('new');
+      expect((await stat(result(file))).mode & 0o7777).toBe(MODE);
+    });
+
+    test(`${name} creates its tmp no wider than the note`, async () => {
+      const { file, sig } = await note(0o600);
+      let atCreate = -1;
+      spyOn(fsp, 'open').mockImplementationOnce(async (...args) => {
+        const handle = await realOpen(...args);
+        atCreate = (await handle.stat()).mode & 0o777;
+
+        return handle;
+      });
+
+      await write(file, sig);
+
+      expect(atCreate & ~0o600).toBe(0);
+    });
+
+    test(`${name} drops set-id bits`, async () => {
+      const { file, sig } = await note(0o4644);
+
+      await write(file, sig);
+
+      expect((await stat(result(file))).mode & 0o7777).toBe(0o644);
     });
 
     test.skipIf(otherGroup === undefined)(
-      `${name} keeps the group of the file it replaces`,
+      `${name} keeps the note's group`,
       async () => {
-        const file = path.join(dir, 'note.md');
-        await atomicWrite(file, 'old');
+        const { file } = await note(0o644);
         await chown(file, (await stat(file)).uid, otherGroup as number);
 
-        await replace(file, (await statSig(file)) as Sig);
+        await write(file, (await statSig(file)) as Sig);
 
-        expect((await stat(file)).gid).toBe(otherGroup as number);
+        expect((await stat(result(file))).gid).toBe(otherGroup as number);
+      },
+    );
+
+    test.skipIf(otherGroup === undefined)(
+      `${name} still writes when the OS refuses the group`,
+      async () => {
+        const { file } = await note(0o644);
+        await chown(file, (await stat(file)).uid, otherGroup as number);
+        spyOn(fsp, 'open').mockImplementationOnce(async (...args) => {
+          const handle = await realOpen(...args);
+          spyOn(handle, 'chown').mockRejectedValue(
+            Object.assign(new Error('invalid'), { code: 'EINVAL' }),
+          );
+
+          return handle;
+        });
+
+        await write(file, (await statSig(file)) as Sig);
+
+        expect(await readFile(result(file), 'utf8')).toBe('new');
       },
     );
   }
+
+  test('a write onto a symlink is refused, and the link and its target stay', async () => {
+    const real = path.join(dir, 'real.md');
+    const alias = path.join(dir, 'alias.md');
+    await atomicWrite(real, 'old\n');
+    await symlink(real, alias);
+    const sig = (await statSig(alias)) as Sig;
+
+    for (const write of [
+      () => {
+        return atomicWrite(alias, 'new');
+      },
+      () => {
+        return atomicWriteIfUnchanged(alias, 'new', sig);
+      },
+    ]) {
+      const error = await write().catch((e: unknown) => {
+        return e;
+      });
+      expect((error as MdVaultError).code).toBe('ALLOWLIST_VIOLATION');
+    }
+    expect((await lstat(alias)).isSymbolicLink()).toBe(true);
+    expect(await readFile(real, 'utf8')).toBe('old\n');
+  });
 });
 
 describe('exclusiveCreate + unlinkIfUnchanged', () => {

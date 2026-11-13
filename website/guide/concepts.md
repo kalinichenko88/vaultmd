@@ -77,13 +77,15 @@ path with a symlink on any segment under the root — a linked note, a linked
 folder, a dangling link — throws `ALLOWLIST_VIOLATION` on read and write, and
 `listMarkdown` / `listFolders` skip the link. So a link can neither lead out of
 the vault nor give a hidden file a visible name. The vault root itself may be a
-symlink.
+symlink. An index built by an older version can still hold rows for linked
+paths; the next reconcile drops them, so call `vault.reconcile()` once after
+the upgrade if your vault has such links.
 
 An update writes a new file and renames it over the note, so a crash leaves
 the old note or the new one, never a cut-off one. The new file keeps the note's
-mode, and its owner and group where the OS lets the writer set them. Extended
-attributes (macOS Finder tags, for example) and hard links do not survive an
-update.
+mode, and its owner and group where the OS lets the writer set them, and so
+does a moved note. Extended attributes (macOS Finder tags, for example) and
+hard links do not survive an update.
 
 Everything else on the IO surface is `.md`-only — a non-markdown path throws
 `NOT_MARKDOWN`. The one exception is

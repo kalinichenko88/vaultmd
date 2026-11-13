@@ -7,10 +7,12 @@
 ## Decision
 
 An update writes the new text to a file next to the note, syncs it, and renames
-it over the note. The new file gets the note's mode, and its owner and group
-where the OS lets the writer set them. Extended attributes (macOS Finder tags,
-for example) and hard links stay with the old file: after an update the note
-has no extended attributes, and a hard link to it keeps the old text.
+it over the note. The new file gets the note's mode (set-id bits dropped), and
+its owner and group where the OS lets the writer set them, before the new text
+is written into it. A move gives the new note the mode and owner of the old one
+the same way. Extended attributes (macOS Finder tags, for example) and hard
+links stay with the old file: after an update the note has no extended
+attributes, and a hard link to it keeps the old text.
 
 ## Rests on
 
@@ -18,7 +20,8 @@ has no extended attributes, and a hard link to it keeps the old text.
   one, never a cut-off one (#41, #43). Agents write often and can be stopped at
   any time.
 - The mode keeps a note private: a `0600` note must not become `0644` after an
-  update (#46).
+  update or a move, and its new text must not sit in a wider file while it is
+  written (#46).
 
 ## Revisit when
 

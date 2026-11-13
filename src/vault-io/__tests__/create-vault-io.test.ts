@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import * as fsp from 'node:fs/promises';
 import {
   lstat,
   mkdir,
@@ -541,6 +542,22 @@ describe('enumeration skips symlinks', () => {
     await symlink(join(vault, 'real'), join(vault, 'alias'));
     expect(await io.listMarkdown('alias')).toEqual([]);
     expect(await io.listFolders('alias')).toEqual([]);
+  });
+
+  test('a hidden start folder is not walked at all', async () => {
+    const io = createVaultIo({
+      root: vault,
+      prefixes: { read: [''], write: [''] },
+    });
+    await mkdir(join(vault, '.git', 'objects', 'ab'), { recursive: true });
+    const readdirSpy = spyOn(fsp, 'readdir');
+    try {
+      expect(await io.listMarkdown('.git')).toEqual([]);
+      expect(await io.listFolders('.git')).toEqual([]);
+      expect(readdirSpy).not.toHaveBeenCalled();
+    } finally {
+      readdirSpy.mockRestore();
+    }
   });
 });
 

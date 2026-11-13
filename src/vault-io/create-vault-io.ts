@@ -83,7 +83,8 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
       );
     }
     // With no link on the path, the file is where the path says: inside the
-    // root, and visible, as the two checks above found.
+    // root, and visible, as the two checks above found. This holds at the
+    // check; a link swapped in before the IO is #59.
     if (passesSymlink(root, canonical)) {
       throw new MdVaultError(
         'ALLOWLIST_VIOLATION',
@@ -202,7 +203,7 @@ export function createVaultIo(config: VaultIoConfig): VaultIo {
     return ignoreRes.some((re) => re.test(rel));
   }
 
-  const enumerateDeps = { can, isIgnored, resolveVaultPath, toVaultRelative };
+  const enumerateDeps = { can, isIgnored, toVaultRelative };
 
   function listMarkdown(dir?: string): Promise<string[]> {
     return enumerateMarkdown(root, dir, enumerateDeps);

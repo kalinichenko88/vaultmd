@@ -2,12 +2,12 @@ import type { Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { isHidden } from './paths.ts';
 import { passesSymlink } from './symlink-guard.ts';
 
 type EnumerateDeps = {
   can(rel: string, access: 'read' | 'write'): boolean;
   isIgnored(rel: string): boolean;
-  resolveVaultPath(rel: string, access?: 'read' | 'write'): string;
   toVaultRelative(rel: string): string;
 };
 
@@ -46,15 +46,14 @@ async function walk(
       await walk(join(absDir, name), childRel, out, deps);
       continue;
     }
-    if (ent.isFile() && name.endsWith('.md')) {
-      if (deps.isIgnored(childRel)) {
-        continue;
-      }
-      try {
-        deps.resolveVaultPath(childRel, 'read');
-      } catch {
-        continue;
-      }
+    // The walk never follows a link and started on a path with none, so the
+    // read scope (with the hidden rule) is all that is left to check.
+    if (
+      ent.isFile() &&
+      name.endsWith('.md') &&
+      !deps.isIgnored(childRel) &&
+      deps.can(childRel, 'read')
+    ) {
       out.files.push(deps.toVaultRelative(childRel));
     }
   }
@@ -83,7 +82,13 @@ async function enumerate(
 ): Promise<Walked> {
   const out: Walked = { files: [], folders: [] };
   const startRel = dir === undefined ? '' : deps.toVaultRelative(dir);
-  if (passesSymlink(root, startRel)) {
+  // Nothing under a hidden folder can be listed, so it is not walked. A start
+  // that cannot be checked lists nothing, as an unreadable folder does.
+  try {
+    if (isHidden(startRel) || passesSymlink(root, startRel)) {
+      return out;
+    }
+  } catch {
     return out;
   }
   await walk(join(root, startRel), startRel, out, deps);

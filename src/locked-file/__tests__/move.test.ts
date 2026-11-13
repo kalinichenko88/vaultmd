@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -66,6 +73,13 @@ describe('withFileMove', () => {
     expect((err as MdVaultError).code).toBe('MTIME_CONFLICT');
     expect(await fsSig.statSig(to.full)).toBeNull();
     expect(await readFile(from.full, 'utf8')).toBe('hi');
+  });
+
+  test('the moved note keeps its mode (#46)', async () => {
+    await writeFile(from.full, 'private');
+    await chmod(from.full, 0o604); // no common umask gives a new file this
+    await withFileMove(from, to);
+    expect((await stat(to.full)).mode & 0o777).toBe(0o604);
   });
 });
 

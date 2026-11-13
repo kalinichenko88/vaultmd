@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -139,6 +146,21 @@ describe('withFileTransform', () => {
     });
     expect(res.outcome).toBe('updated');
     expect(await readFile(file, 'utf8')).toBe('base\nEXTERNAL\nA');
+  });
+
+  test('a symlinked path is refused, and the link and its target stay (#46)', async () => {
+    const real = join(dir, 'real.md');
+    await writeFile(real, 'old\n');
+    await symlink(real, file);
+    let err: unknown;
+    try {
+      await withFileTransform(file, KEY, REL, (c) => `${c}new`);
+    } catch (e) {
+      err = e;
+    }
+    expect((err as MdVaultError).code).toBe('ALLOWLIST_VIOLATION');
+    expect((await lstat(file)).isSymbolicLink()).toBe(true);
+    expect(await readFile(real, 'utf8')).toBe('old\n');
   });
 });
 

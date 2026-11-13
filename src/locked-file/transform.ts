@@ -15,6 +15,8 @@ import type { TransformResult } from './models/transform-result.ts';
  * optimistic-concurrency retry on mtime conflicts. The `transform` callback
  * receives the current file content (or `null` if the file is absent) and
  * must return the desired new content, or `null` to leave the file untouched.
+ * The write is atomic and keeps the file's mode and, where the OS allows, its
+ * owner. A `fullPath` that is a symlink is refused, never written through.
  *
  * @param fullPath     Absolute filesystem path to the target file.
  * @param lockKey      Canonical/case-folded serialization key — pass `VaultIo.toKey(rel)`.

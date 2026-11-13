@@ -63,8 +63,8 @@ export type NotesApi = {
    * @param path Vault-relative path to the `.md` file.
    * @returns `true` if a file is present, `false` if not.
    * @throws {@link MdVaultError} `NOT_MARKDOWN` if `path` is not a `.md` path,
-   * or `ALLOWLIST_VIOLATION` if it is outside the read scope — an unreadable
-   * path is a caller bug, not an absent note.
+   * or `ALLOWLIST_VIOLATION` if it is outside the read scope, hidden, or passes
+   * a symlink — an unreadable path is a caller bug, not an absent note.
    */
   exists(path: string): Promise<boolean>;
   /**
@@ -123,9 +123,9 @@ export type NotesApi = {
   deleteNote(path: string): Promise<boolean>;
   /**
    * Move a note to a new vault-relative path, byte-for-byte: the content and
-   * its frontmatter are carried over untouched, and the index row follows to
-   * the new path. Both ends are allowlist- and containment-checked; the
-   * destination is never clobbered. Runs under BOTH per-file locks, so a
+   * its frontmatter are carried over untouched, and so are the file's mode and
+   * owner; the index row follows to the new path. Both ends are allowlist-,
+   * hidden- and symlink-checked; the destination is never clobbered. Runs under BOTH per-file locks, so a
    * concurrent write to either end serializes against it.
    * @param from Vault-relative path of the note to move.
    * @param to Vault-relative destination path (must be a free `.md` path).

@@ -6,8 +6,9 @@ import { join } from 'node:path';
 // path is refused — and with no link on it, it can neither leave the root nor
 // reach hidden state under a visible name. The root is not judged: it may be a
 // link, and so may its parents. The walk stops at the first segment that does
-// not exist (or cannot be read): a write creates real directories below it, and
-// a read there finds nothing.
+// not exist, or that has a file above it: a write creates real directories
+// there, and a read finds nothing. Any other lstat error is thrown, not read as
+// "no symlink": the guard never fails open.
 export function passesSymlink(root: string, canonical: string): boolean {
   let probe = root;
   for (const segment of canonical.split('/').filter(Boolean)) {
@@ -16,8 +17,12 @@ export function passesSymlink(root: string, canonical: string): boolean {
       if (lstatSync(probe).isSymbolicLink()) {
         return true;
       }
-    } catch {
-      return false;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        return false;
+      }
+      throw err;
     }
   }
 

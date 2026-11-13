@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -46,4 +53,20 @@ describe('passesSymlink', () => {
     await writeFile(join(root, 'a.md'), 'x');
     expect(passesSymlink(root, 'a.md/b.md')).toBe(false);
   });
+
+  // Root reads every folder, so it gets no EACCES to test.
+  test.skipIf(process.getuid?.() === 0)(
+    'any other lstat error is thrown, not read as "no symlink"',
+    async () => {
+      await mkdir(join(root, 'locked'));
+      await chmod(join(root, 'locked'), 0o000);
+      try {
+        expect(() => {
+          return passesSymlink(root, 'locked/a.md');
+        }).toThrow();
+      } finally {
+        await chmod(join(root, 'locked'), 0o755);
+      }
+    },
+  );
 });
