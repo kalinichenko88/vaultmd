@@ -20,10 +20,11 @@ is written into it. When the group cannot be kept, the new file's group and
 its others both get only the permission bits that the note's group and its
 others both have: no user reads more than before, and the members of the new
 group read no less than every other user. The new file is created no wider
-than the note for any user but the writer, so when the OS refuses or ignores
-the mode, the update keeps the mode the new file was created with; it fails
-only when the mode the OS kept gives the group or the others more than the
-mode the file should get. When the owner cannot be kept, the writer becomes
+than the note for any user but the writer. When the OS creates it wider than
+asked, the update fails (`UNSAFE_MODE`) before any text is in it: a chmod after
+the open would not close a file that another user opened in time. Past that, a
+mode that the OS refuses or ignores leaves the new file as it was created.
+When the owner cannot be kept, the writer becomes
 the owner, and the old owner keeps only what the group or the others class
 gives them: no mode can give it back without widening the others. A move
 gives the new note the mode and owner of the old one the same way. A chmod or chown of the note

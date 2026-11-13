@@ -133,9 +133,10 @@ code** — only the API-freeze test (`src/__tests__/index.test.ts`) imports it.
   wider than the note for any user but the writer (its group and others get
   only the bits the note's group and others share) and takes the note's group
   and owner (where the OS allows; a group it cannot keep keeps those shared
-  bits) and mode (a refused or ignored chmod is no error while the tmp is no
-  wider) before any byte is written; a move copies them from its source. Never
-  trade this for a write in place.
+  bits) and mode (a refused or ignored chmod is no error; a tmp that the OS
+  creates wider than asked fails with `UNSAFE_MODE`) before any byte is
+  written; a move copies them from its source. Never trade this for a write in
+  place.
 - **Index db location.** The index `.db` and its `-wal`/`-shm` sidecars must live
   in a data dir, **not** the synced vault, and stay gitignored (`*.db*` already
   is).

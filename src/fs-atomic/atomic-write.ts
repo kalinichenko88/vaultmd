@@ -153,7 +153,7 @@ async function placeTemp(
 ): Promise<Sig> {
   const tmp = tempPath(fullPath);
   try {
-    await writeSynced(tmp, content, like);
+    await writeSynced(tmp, content, like, fullPath);
     await place(tmp);
   } finally {
     await unlink(tmp).catch(() => {});
@@ -175,7 +175,7 @@ function tempPath(fullPath: string): string {
 // The data must reach the disk before rename/link commits the name, or a crash
 // can leave the target empty or short; a writeback error surfaces only at the
 // sync. On macOS the sync stops at the drive cache (no F_FULLFSYNC, see #43).
-// A tmp that replaces a note is created no wider than the note for any other
+// A tmp that replaces `note` is created no wider than the note for any other
 // user (`safeMode`), and takes the note's ownership before any byte is written,
 // so the new text is never readable by more users than the old text was. `wx`:
 // a name that is already taken, or a link planted there, fails instead of being
@@ -184,11 +184,12 @@ async function writeSynced(
   file: string,
   content: string,
   like: Stats | null,
+  note: string,
 ): Promise<void> {
   const handle = await open(file, 'wx', like ? safeMode(like.mode) : 0o666);
   try {
     if (like) {
-      await keepOwnership(handle, like);
+      await keepOwnership(handle, like, note);
     }
     await writeFile(handle, content, 'utf8');
     await handle.datasync();
@@ -200,30 +201,36 @@ async function writeSynced(
   await handle.close();
 }
 
-// A new inode replaces the note: give it the note's group, mode and owner. The
-// group and the owner are best effort — the OS may refuse them, and giving a
-// file away takes root. A group it could not keep gets `sharedBits`. Set-id
-// bits are dropped. The mode is best effort while the tmp gives the group and
-// the others no more than it: a mount that refuses chmod leaves the tmp as
-// `safeMode` made it. The stat, not a call's result, says what the OS kept: a
-// mount can ignore a chown or a chmod with no error. The mode goes on before
-// the owner, while this process still owns the file. Extended attributes and
-// hard links stay with the old inode (docs/pdr/0002).
-async function keepOwnership(handle: FileHandle, like: Stats): Promise<void> {
+// A new inode replaces the note: give it the note's group, mode and owner. A
+// tmp that the OS created wider than `safeMode` is refused at once: a chmod
+// after the open would not close a file descriptor that another user opened
+// before it. Past that check the tmp gives the group and the others no more
+// than any mode below, so the group, the mode and the owner are best effort —
+// the OS may refuse or ignore them, and giving a file away takes root. The
+// stat, not the chown's result, says whether the group was kept. A group it
+// could not keep gets `sharedBits`. Set-id bits are dropped. The mode goes on
+// before the owner, while this process still owns the file. Extended
+// attributes and hard links stay with the old inode (docs/pdr/0002).
+async function keepOwnership(
+  handle: FileHandle,
+  like: Stats,
+  note: string,
+): Promise<void> {
   let own = await handle.stat();
+  const asked = safeMode(like.mode);
+  if ((own.mode & ~asked & 0o077) !== 0) {
+    throw new MdVaultError(
+      'UNSAFE_MODE',
+      `the OS created the tmp of ${note} with mode ${(own.mode & 0o777).toString(8)}, not ${asked.toString(8)}`,
+    );
+  }
   if (own.gid !== like.gid) {
     await handle.chown(-1, like.gid).catch(() => {});
     own = await handle.stat();
   }
   const mode = own.gid === like.gid ? like.mode & 0o777 : sharedBits(like.mode);
   if ((own.mode & 0o777) !== mode) {
-    const refused = await handle.chmod(mode).catch((err: unknown) => {
-      return err;
-    });
-    const kept = (await handle.stat()).mode & 0o777;
-    if ((kept & ~mode & 0o077) !== 0) {
-      throw refused ?? new Error(`the OS kept mode ${kept.toString(8)}`);
-    }
+    await handle.chmod(mode).catch(() => {});
   }
   if (own.uid !== like.uid) {
     await handle.chown(like.uid, -1).catch(() => {});

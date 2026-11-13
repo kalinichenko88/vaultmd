@@ -126,18 +126,17 @@ export type NotesApi = {
    * Move a note to a new vault-relative path, byte-for-byte: the content and
    * its frontmatter are carried over untouched, and so are the file's mode and,
    * where the OS allows, its group and owner (as on an update: where the OS
-   * refuses or ignores the mode, no other user gets more access than before,
-   * and the move fails when the mode the OS keeps is wider); the index
-   * row follows to the new
-   * path. Both ends are allowlist-,
-   * hidden- and symlink-checked; the destination is never clobbered. Runs under BOTH per-file locks, so a
-   * concurrent write to either end serializes against it.
+   * refuses or ignores the mode, no other user gets more access than before);
+   * the index row follows to the new path. Both ends are allowlist-, hidden-
+   * and symlink-checked; the destination is never clobbered. Runs under BOTH
+   * per-file locks, so a concurrent write to either end serializes against it.
    * @param from Vault-relative path of the note to move.
    * @param to Vault-relative destination path (must be a free `.md` path).
    * @throws {@link MdVaultError} `VALIDATION_ERROR` if `from` and `to` resolve
    * to the same note, `NOT_FOUND` if `from` does not exist, `ALREADY_EXISTS`
-   * if `to` is taken (the source is left in place), or `MTIME_CONFLICT` if the
-   * source changed mid-move (the destination is rolled back).
+   * if `to` is taken (the source is left in place), `MTIME_CONFLICT` if the
+   * source changed mid-move (the destination is rolled back), or `UNSAFE_MODE`
+   * if the OS creates the destination with a wider mode than asked.
    */
   moveNote(from: string, to: string): Promise<void>;
 };

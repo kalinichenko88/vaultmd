@@ -239,7 +239,7 @@ describe('the file a write replaces (#46)', () => {
 
     test(`${name} keeps a 644 note's mode when the OS refuses chmod (#66)`, async () => {
       const { file, sig } = await note(0o644);
-      refuseChmod();
+      fakeMount('refuses');
 
       await write(file, sig);
 
@@ -247,10 +247,10 @@ describe('the file a write replaces (#46)', () => {
       expect((await stat(result(file))).mode & 0o777).toBe(0o644);
     });
 
-    for (const silently of [false, true]) {
-      test(`${name} still writes a read-only note when the OS ${silently ? 'ignores' : 'refuses'} chmod`, async () => {
+    for (const chmod of ['refuses', 'ignores'] as const) {
+      test(`${name} still writes a read-only note when the OS ${chmod} chmod`, async () => {
         const { file, sig } = await note(0o444);
-        refuseChmod(undefined, silently);
+        fakeMount(chmod);
 
         await write(file, sig);
 
@@ -261,38 +261,51 @@ describe('the file a write replaces (#46)', () => {
       });
     }
 
-    for (const silently of [false, true]) {
-      test(`${name} fails when the OS ${silently ? 'ignores' : 'refuses'} chmod and the tmp is wider than the note`, async () => {
+    // Narrowed after the open, the tmp would still be readable through a file
+    // descriptor that another user opened before the chmod.
+    for (const chmod of ['obeys', 'refuses', 'ignores'] as const) {
+      test(`${name} fails before any text when the OS creates the tmp wider than asked and ${chmod} chmod`, async () => {
         const { file, sig } = await note(0o600);
-        refuseChmod(0o644, silently);
+        let written = false;
+        spyOn(fsp, 'writeFile').mockImplementationOnce(async (...args) => {
+          written = true;
+
+          return realWriteFile(...args);
+        });
+        fakeMount(chmod, 0o644);
 
         const error = await write(file, sig).catch((e: unknown) => {
           return e;
         });
 
-        expect(error).toBeInstanceOf(Error);
-        if (!silently) {
-          expect((error as NodeJS.ErrnoException).code).toBe('EPERM');
-        }
+        expect((error as MdVaultError).code).toBe('UNSAFE_MODE');
+        expect((error as MdVaultError).message).toContain(result(file));
+        expect(written).toBe(false);
         expect(await readFile(file, 'utf8')).toBe('old');
         expect(await readdir(dir)).toEqual(['note.md']);
       });
     }
   }
 
-  // A mount that refuses chmod, or ignores it with no error. `createdAs`
-  // stands for one that also ignores the mode a file is created with.
-  function refuseChmod(createdAs?: number, silently = false): void {
+  // A mount that refuses chmod, ignores it with no error, or obeys it.
+  // `createdAs` stands for one that also ignores the mode a file is created
+  // with.
+  function fakeMount(
+    chmod: 'obeys' | 'refuses' | 'ignores',
+    createdAs?: number,
+  ): void {
     spyOn(fsp, 'open').mockImplementationOnce(async (...args) => {
       const handle = await realOpen(...args);
       if (createdAs !== undefined) {
         await handle.chmod(createdAs);
       }
-      spyOn(handle, 'chmod').mockImplementation(async () => {
-        if (!silently) {
-          throw Object.assign(new Error('not permitted'), { code: 'EPERM' });
-        }
-      });
+      if (chmod !== 'obeys') {
+        spyOn(handle, 'chmod').mockImplementation(async () => {
+          if (chmod === 'refuses') {
+            throw Object.assign(new Error('not permitted'), { code: 'EPERM' });
+          }
+        });
+      }
 
       return handle;
     });

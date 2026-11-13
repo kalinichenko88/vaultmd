@@ -86,10 +86,10 @@ the old note or the new one, never a cut-off one. The new file keeps the note's
 mode, and its owner and group where the OS lets the writer set them, and so
 does a moved note. When the group cannot be kept, the new file's group and
 all other users get only the permission bits that both had on the note. On a
-mount that refuses to change a mode, the update keeps the mode the new file
-was created with, which gives no other user more access than before, and a
-chmod that the OS ignores is treated the same way; when the mode the OS keeps
-is wider than the note's, the update fails. When the owner cannot be kept, the
+mount that refuses or ignores a change of mode, the update keeps the mode the
+new file was created with, which gives no other user more access than before.
+When the OS creates the new file wider than asked, the update fails with
+`UNSAFE_MODE` before any text is written. When the owner cannot be kept, the
 writer becomes the owner. Extended attributes (macOS Finder tags or a POSIX
 ACL, for example) and hard links do not survive an update.
 
@@ -161,4 +161,5 @@ try {
 
 Codes: `ALLOWLIST_VIOLATION`, `NOT_MARKDOWN`, `NOT_FOUND`, `ALREADY_EXISTS`,
 `NO_MATCH`, `AMBIGUOUS_MATCH`, `MTIME_CONFLICT`, `REFUSE_CREATE`,
-`FRONTMATTER_INVALID`, `VALIDATION_ERROR`, `COMMIT_FAILED`, `INDEX_UNAVAILABLE`.
+`FRONTMATTER_INVALID`, `VALIDATION_ERROR`, `COMMIT_FAILED`, `INDEX_UNAVAILABLE`,
+`UNSAFE_MODE`.
