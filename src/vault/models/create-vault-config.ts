@@ -34,7 +34,9 @@ export type CreateVaultConfig = VaultIoConfig & {
   /**
    * When `true` (default), serialise writes via a cross-process advisory lock
    * stored next to the index file. Set to `false` for single-process scenarios
-   * to avoid the lock-file overhead.
+   * to avoid the lock-file overhead. A writer refreshes its lock while it
+   * holds it; a lock that a crashed writer left behind is taken over once
+   * nobody has refreshed it for 10 seconds.
    */
   crossProcessWriterLock?: boolean;
   /**
