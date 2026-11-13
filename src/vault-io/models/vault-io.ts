@@ -102,7 +102,8 @@ export type VaultIo = {
   /**
    * Atomically write `content` to a vault file, creating it if necessary. A
    * file it replaces keeps its mode, and its owner and group where the OS lets
-   * the writer set them; extended attributes and hard links do not carry over.
+   * the writer set them (a group it cannot keep loses its permission bits);
+   * extended attributes and hard links do not carry over.
    * @param rel Vault-relative `.md` path.
    * @param content New UTF-8 content.
    * @returns The {@link Sig} of the written file.

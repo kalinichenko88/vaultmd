@@ -188,7 +188,7 @@ async function writeSynced(
 // A new inode replaces the note: give it the note's group, mode and owner. The
 // group and the owner are best effort — the OS may refuse them, and giving a
 // file away takes root. A group it could not keep loses its bits, so they do
-// not reach the writer's group instead. Set-id bits are dropped. The mode goes
+// not reach the new file's group instead. Set-id bits are dropped. The mode goes
 // on before the owner, while this process still owns the file. Extended
 // attributes and hard links stay with the old inode (docs/pdr/0002).
 async function keepOwnership(handle: FileHandle, like: Stats): Promise<void> {
