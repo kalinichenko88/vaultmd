@@ -1,5 +1,81 @@
 # Changelog
 
+## 0.12.0 — 2026-11-14
+
+A safety release for the write path: symlinks inside the vault are refused, an
+update keeps a note's mode and owner, and a crashed writer's lock is taken over
+by its age alone. Three product decisions back these changes; they are recorded
+in `docs/pdr/`. One new error code, `UNSAFE_MODE`. Public API stays at 53
+names, no index rebuild. Bun floor unchanged at ≥ 1.3.14.
+
+### Breaking
+
+- **A path with a symlink under the vault root is refused.** `vault-io` used to
+  follow a link that stayed inside the vault. Now a read, a write, `stat` and
+  `readBinary` on a path with a link on any segment, dangling or not, throw
+  `ALLOWLIST_VIOLATION`, and `listMarkdown` / `listFolders` skip the link and
+  never follow it. `fs-atomic` also refuses to write onto a link, so the raw
+  `withFile*` primitives never replace one with a regular file. The vault root
+  itself, and the folders above it, may still be links. A note that was reached
+  only through a link is no longer readable, listed or indexed by that name:
+  use its real path.
+- **New error code `UNSAFE_MODE`.** `MdVaultCode` gains a member, so an
+  exhaustive `switch` on `.code` needs a new case. `createNote`, `updateNote`,
+  `editFrontmatter`, `transformNote`, `moveNote` and the `vault.io` writers
+  throw it when the OS gives the new file a mode that is wider for the group or
+  for others than the note allows. The write fails before any text is in the
+  file.
+- **A dead writer's lock is taken over by its age alone.** `locks` no longer
+  reads the pid or the host name in a lockfile: under one host name, a pid does
+  not tell a dead writer from a live one in another PID namespace (the
+  containers of one Kubernetes pod, for example), and two writers could be
+  inside the lock of one note. A lock is taken over once nobody has refreshed
+  it for 30 seconds and the waiting write has seen it stay so for 3 more. After
+  a writer dies inside its lock, writes to that note fail with `MTIME_CONFLICT`
+  for about 33 seconds; before, a waiter on the same host took the lock at
+  once. The lockfile has no `pid` or `host` key any more, so a process of an
+  older version does not take a live lock over by its pid.
+- **Keep `sqliteBusyTimeoutMs` below 20000 when `crossProcessWriterLock` is
+  on.** A writer refreshes its lock from the event loop, so a wait that blocks
+  the loop for about 30 seconds can let another process take the lock. A wait
+  that has begun to confirm a stale lock goes on for about 3 seconds past the
+  timeout.
+
+### Fixes
+
+- **An update keeps the note's mode, group and owner.** `fs-atomic` writes a
+  synced tmp and renames it over the note, and the tmp took the default mode,
+  so a `0600` note could become `0644` after an update or a move. The tmp is
+  now created no wider than the note for any user but the writer, and it gets
+  the note's mode, and its group and owner where the OS allows, before any
+  text is written. When the group cannot be kept, the group and others get
+  only the permission bits that both had. A refused or ignored chmod is no
+  error, so fixed-mode mounts still write. A move copies the mode and owner
+  from its source the same way. A chmod or chown of the note during an update
+  is a conflict: the note mutations read the note again and retry, and a
+  direct `rewriteIfUnchanged` caller gets `MTIME_CONFLICT`. Extended
+  attributes and hard links stay with the old file.
+- **A note that another writer creates during a transform is no longer
+  replaced.** `withFileTransform` read "no file" and then wrote blindly, so a
+  file that appeared after the read lost its text. The create now goes through
+  an exclusive create: a lost race reads the note again and retries, and
+  throws `MTIME_CONFLICT` past `maxRetries`.
+- **A lockfile left by a dead writer no longer blocks its note for good.**
+  A lockfile from another host, or one cut off mid-write, was never taken
+  over. Now a holder refreshes its lockfile every second, a cut-off lockfile is never
+  left behind, and only one waiter removes a stale one, after a second check.
+  A holder releases only its own lockfile, and an error that blocks a takeover
+  is thrown, not swallowed.
+- **A busy index write waits `sqliteBusyTimeoutMs` instead of failing at
+  once.** `note-index` now starts its transactions (`indexNote`, `dropNote`,
+  the rebuild swap) as immediate, so a second writer waits for the first.
+
+### Docs
+
+- The TSDoc of the note mutations, `vault.io` and the config options names
+  every error case above, and the guides describe the symlink rule and the
+  lock takeover.
+
 ## 0.11.1 — 2026-11-09
 
 A durability fix for every write. No API change, no index rebuild. Bun floor
