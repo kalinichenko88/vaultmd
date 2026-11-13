@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   mkdir,
   readFile,
@@ -24,10 +24,11 @@ export async function withCrossProcessLock<T>(
     lockDir,
     `${createHash('sha256').update(key).digest('hex')}.lock`,
   );
+  // `id` tells this holder's lockfile from the next one on the same key.
   const payload = JSON.stringify({
     pid: process.pid,
     host: hostname(),
-    createdAt: Date.now(),
+    id: randomUUID(),
   });
   const deadline = Date.now() + busyTimeoutMs;
 
@@ -62,14 +63,21 @@ export async function withCrossProcessLock<T>(
     return await fn();
   } finally {
     clearInterval(heartbeat);
-    await unlink(lockfile).catch(() => {});
+    // A holder that lost its lock by age must not remove the next holder's.
+    const current = await readFile(lockfile, 'utf8').catch(() => null);
+    if (current === payload) {
+      await unlink(lockfile).catch(() => {});
+    }
   }
 }
 
 // A lockfile that nobody refreshed for this long is stale, whatever it holds:
 // a payload that a failed write cut off, the name of a host that is gone, or a
 // pid that a new process got.
-// ponytail: a live holder whose event loop stalls past STALE_MS loses the lock.
+// ponytail: a live holder loses the lock when its event loop blocks for more
+// than 3/4 of STALE_MS (a sqliteBusyTimeoutMs above 7.5 s can do it), or when
+// the machine sleeps while another process waits; a waiter that confirms the
+// age on its own monotonic clock closes both, if they ever matter.
 export const STALE_MS = 10_000;
 
 // Two waiters that both read the dead holder's file would each remove it, and
@@ -85,7 +93,10 @@ async function removeIfStale(
   const guard = `${lockfile}.reclaim`;
   try {
     await writeFile(guard, '', { flag: 'wx' });
-  } catch {
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
+      throw err;
+    }
     // ponytail: a waiter that dies while it holds the guard leaves it; the
     // guard then ages out like a lockfile, and only after such a death can
     // two waiters race on it.
@@ -99,7 +110,11 @@ async function removeIfStale(
     if (!(await isStale(lockfile, staleMs))) {
       return false;
     }
-    await unlink(lockfile).catch(() => {});
+    await unlink(lockfile).catch((err: NodeJS.ErrnoException) => {
+      if (err.code !== 'ENOENT') {
+        throw err; // a lockfile that cannot be removed never frees the lock
+      }
+    });
 
     return true;
   } finally {

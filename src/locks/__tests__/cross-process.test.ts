@@ -9,7 +9,7 @@ import {
 } from 'bun:test';
 import { createHash } from 'node:crypto';
 import * as fsp from 'node:fs/promises';
-import { mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
 import * as path from 'node:path';
 
@@ -146,18 +146,23 @@ describe('withCrossProcessLock', () => {
     const key = 'note.md';
     const staleMs = 200;
     let holding = false;
+    let entered!: () => void;
+    const inside = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
     const first = withCrossProcessLock(
       dir,
       key,
       2000,
       async () => {
         holding = true;
+        entered();
         await Bun.sleep(staleMs * 3);
         holding = false;
       },
       staleMs,
     );
-    await Bun.sleep(20);
+    await inside;
 
     const overlapped = await withCrossProcessLock(
       dir,
@@ -209,4 +214,45 @@ describe('withCrossProcessLock', () => {
 
     expect(peak).toBe(1);
   });
+
+  test('clears a reclaim guard that a dead waiter left, once past the stale bound', async () => {
+    const key = 'note.md';
+    await writeFile(lockPath(dir, key), '{"pid":12');
+    await writeFile(`${lockPath(dir, key)}.reclaim`, '');
+    await pastStaleBound(lockPath(dir, key));
+    await pastStaleBound(`${lockPath(dir, key)}.reclaim`);
+
+    expect(await withCrossProcessLock(dir, key, 300, async () => 'ok')).toBe(
+      'ok',
+    );
+  });
+
+  test('leaves the lockfile on release when another holder has taken it over', async () => {
+    const key = 'note.md';
+    const next = JSON.stringify({ pid: 999999999, host: hostname() });
+
+    await withCrossProcessLock(dir, key, 300, async () => {
+      await writeFile(lockPath(dir, key), next);
+    });
+
+    expect(await readFile(lockPath(dir, key), 'utf8')).toBe(next);
+  });
+
+  test('throws the error of a stale lockfile it cannot remove', async () => {
+    const key = 'note.md';
+    await writeFile(lockPath(dir, key), '{"pid":12');
+    await pastStaleBound(lockPath(dir, key));
+    const real = fsp.unlink;
+    spyOn(fsp, 'unlink').mockImplementation((async (file) => {
+      if (file === lockPath(dir, key)) {
+        throw Object.assign(new Error('not permitted'), { code: 'EPERM' });
+      }
+
+      return real(file);
+    }) as typeof real);
+
+    await expect(
+      withCrossProcessLock(dir, key, 300, async () => 'never'),
+    ).rejects.toThrow('not permitted');
+  }, 2000);
 });
