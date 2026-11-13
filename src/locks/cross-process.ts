@@ -63,8 +63,14 @@ export async function withCrossProcessLock<T>(
     return await fn();
   } finally {
     clearInterval(heartbeat);
-    // A holder that lost its lock by age must not remove the next holder's.
-    const current = await readFile(lockfile, 'utf8').catch(() => null);
+    // Leave the lockfile of a holder that took the lock over after this one
+    // lost it by age; this narrows that race, it cannot close it. A lockfile
+    // that cannot be read (EMFILE) is taken as this holder's own.
+    const current = await readFile(lockfile, 'utf8').catch(
+      (err: NodeJS.ErrnoException) => {
+        return err.code === 'ENOENT' ? null : payload;
+      },
+    );
     if (current === payload) {
       await unlink(lockfile).catch(() => {});
     }

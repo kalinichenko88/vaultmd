@@ -238,6 +238,37 @@ describe('withCrossProcessLock', () => {
     expect(await readFile(lockPath(dir, key), 'utf8')).toBe(next);
   });
 
+  test('releases a lockfile it cannot read back, as it always did', async () => {
+    const key = 'note.md';
+    spyOn(fsp, 'readFile').mockImplementation(async () => {
+      throw Object.assign(new Error('too many open files'), {
+        code: 'EMFILE',
+      });
+    });
+
+    await withCrossProcessLock(dir, key, 300, async () => 'ok');
+
+    expect(await statSig(lockPath(dir, key))).toBeNull();
+  });
+
+  test('throws the error of a reclaim guard it cannot create', async () => {
+    const key = 'note.md';
+    await writeFile(lockPath(dir, key), '{"pid":12');
+    await pastStaleBound(lockPath(dir, key));
+    const real = fsp.writeFile;
+    spyOn(fsp, 'writeFile').mockImplementation((async (file, data, opts) => {
+      if (String(file).endsWith('.reclaim')) {
+        throw Object.assign(new Error('no space'), { code: 'ENOSPC' });
+      }
+
+      return real(file, data, opts);
+    }) as typeof real);
+
+    await expect(
+      withCrossProcessLock(dir, key, 300, async () => 'never'),
+    ).rejects.toThrow('no space');
+  });
+
   test('throws the error of a stale lockfile it cannot remove', async () => {
     const key = 'note.md';
     await writeFile(lockPath(dir, key), '{"pid":12');
