@@ -75,7 +75,11 @@ export function indexNote(
     }
   });
 
-  tx();
+  // IMMEDIATE takes the write lock before the first read, so busy_timeout
+  // applies. A deferred transaction that reads first gets SQLITE_BUSY at once in
+  // WAL when another process writes (#58). Nested in a transaction, it is a
+  // savepoint.
+  tx.immediate();
 }
 
 export function dropNote(db: Database, pathKey: string): void {
@@ -91,5 +95,5 @@ export function dropNote(db: Database, pathKey: string): void {
     db.query('DELETE FROM note_links WHERE src_key = ?').run(pathKey);
   });
 
-  tx();
+  tx.immediate(); // reads first: see indexNote
 }
