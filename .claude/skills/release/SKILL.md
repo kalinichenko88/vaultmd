@@ -51,12 +51,18 @@ stale tree produces a release that doesn't match what's reviewed.
 git rev-parse --abbrev-ref HEAD     # must be main
 git status --porcelain              # must be empty (clean tree)
 git fetch --tags origin             # so the "last tag" below is accurate
+git pull --ff-only origin main      # bring in the PRs merged on GitHub
 ```
 
 - **Not on `main`** → ask the user to switch or confirm they really want to release
   from this branch.
 - **Dirty tree** → stop. Uncommitted work must be committed or stashed first; the
   release commit should contain only the version bump + changelog.
+- **Pull refused** (`Not possible to fast-forward`) → stop. Local `main` has commits
+  that `origin/main` does not have. Show them with `git log --oneline origin/main..main`
+  and let the user decide. Do not merge or rebase them yourself. A stale `main`
+  leaves the merged commits out of the bump and the CHANGELOG, and Step 6 fails
+  its push after the files are written.
 - It's fine if `dist/` shows as modified after a build later — that's gitignored.
 
 ## Step 1 — Gather state
