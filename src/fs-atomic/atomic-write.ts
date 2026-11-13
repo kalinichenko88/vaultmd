@@ -61,7 +61,7 @@ export async function atomicWriteIfUnchanged(
     if (!sameOwnership(current, like)) {
       throw new MdVaultError(
         'MTIME_CONFLICT',
-        `mode or owner changed under write: ${fullPath}`,
+        `mode, owner or group changed under write: ${fullPath}`,
       );
     }
     await rename(tmp, fullPath);

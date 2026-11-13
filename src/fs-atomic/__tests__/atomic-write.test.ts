@@ -297,11 +297,13 @@ describe('the file a write replaces (#46)', () => {
     const away = path.join(dir, 'away.md');
     await fsp.rename(file, away);
     // A sync tool brings it back, same Sig, while the write would run.
-    spyOn(fsp, 'writeFile').mockImplementationOnce(async (...args) => {
-      await fsp.rename(away, file);
+    const writeSpy = spyOn(fsp, 'writeFile').mockImplementationOnce(
+      async (...args) => {
+        await fsp.rename(away, file);
 
-      return realWriteFile(...args);
-    });
+        return realWriteFile(...args);
+      },
+    );
 
     const error = await atomicWriteIfUnchanged(file, 'new', sig).catch(
       (e: unknown) => {
@@ -310,6 +312,9 @@ describe('the file a write replaces (#46)', () => {
     );
 
     expect((error as MdVaultError).code).toBe('MTIME_CONFLICT');
+    expect(writeSpy).not.toHaveBeenCalled();
+    expect(await readdir(dir)).toEqual(['away.md']);
+    expect(await readFile(away, 'utf8')).toBe('old');
   });
 
   test('a write onto a symlink is refused, and the link and its target stay', async () => {

@@ -114,6 +114,7 @@ export type VaultIo = {
    * `expected`. Throws {@link MdVaultError} `MTIME_CONFLICT` on mismatch, when
    * the file is absent, and also when its mode, owner or group changed during
    * the write (the Sig stays the same then; read the file again and retry).
+   * A change in the last moment before the rename is undone with no error.
    * The file keeps its mode and owner as {@link writeVaultFile} says.
    * @param rel Vault-relative `.md` path.
    * @param content New UTF-8 content.

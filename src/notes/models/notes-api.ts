@@ -108,7 +108,8 @@ export type NotesApi = {
    * A `null` or `undefined` return is a no-op; a return byte-identical to the
    * current content is also a no-op (no rewrite, no reindex) → `'unchanged'`.
    * @throws {@link MdVaultError} `REFUSE_CREATE` if asked to write a missing
-   * file, `MTIME_CONFLICT` if a concurrent writer keeps winning past the retry
+   * file, `MTIME_CONFLICT` if a concurrent writer, or a tool that keeps
+   * changing the note's mode, owner or group, keeps winning past the retry
    * budget, or `COMMIT_FAILED` if the write-through index update or the
    * `onCommit` hook throws.
    */
