@@ -84,18 +84,22 @@ export type NotesApi = {
    * @throws {@link MdVaultError} `NO_MATCH` / `AMBIGUOUS_MATCH` for
    * `editByMatch` and `setSection`, `REFUSE_CREATE` when `setBody` targets a
    * missing note, `VALIDATION_ERROR` when a `setSection` body would
-   * restructure the document outside its own section, or `UNSAFE_MODE` if the
-   * OS gives the new file a mode that gives the group or the others more
-   * access than the note's mode did.
+   * restructure the document outside its own section, `MTIME_CONFLICT` if
+   * other writers keep changing or creating the note through every retry,
+   * `UNSAFE_MODE` if the OS gives the new file a mode that gives the group or
+   * the others more access than the note's mode did, or `COMMIT_FAILED` if the
+   * write-through index update or the `onCommit` hook throws.
    */
   updateNote(path: string, op: UpdateOp): Promise<void>;
   /**
    * Edit a note's frontmatter in place via a mutator callback.
    * @returns Whether the frontmatter was `edited`, `unchanged`, or
    * `unverifiable`.
-   * @throws {@link MdVaultError} `UNSAFE_MODE` if the OS gives the new file a
-   * mode that gives the group or the others more access than the note's mode
-   * did.
+   * @throws {@link MdVaultError} `MTIME_CONFLICT` if other writers keep
+   * changing the note through every retry, `UNSAFE_MODE` if the OS gives the
+   * new file a mode that gives the group or the others more access than the
+   * note's mode did, or `COMMIT_FAILED` if the write-through index update or
+   * the `onCommit` hook throws.
    */
   editFrontmatter(
     path: string,

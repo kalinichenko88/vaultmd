@@ -7,7 +7,7 @@ import {
   spyOn,
   test,
 } from 'bun:test';
-import { writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import {
   chmod,
@@ -159,6 +159,101 @@ describe('withFileTransform', () => {
     expect(await readFile(file, 'utf8')).toBe('base\nEXTERNAL\nA');
   });
 
+  test('a file created by another writer after the read is kept: the create retries as an update (#45)', async () => {
+    const events: CommitSpy[] = [];
+    let injected = false;
+    const res = await withFileTransform(
+      file,
+      KEY,
+      REL,
+      (c) => {
+        if (!injected) {
+          injected = true;
+          // An editor or a sync client creates the note after our read, before our write.
+          writeFileSync(file, 'EXTERNAL\n');
+        }
+
+        return `${c ?? ''}A`;
+      },
+      {
+        allowCreate: true,
+        onCommit: (e) => {
+          events.push(e);
+        },
+      },
+    );
+    expect(res).toEqual({ content: 'EXTERNAL\nA', outcome: 'updated' });
+    expect(await readFile(file, 'utf8')).toBe('EXTERNAL\nA');
+    expect(events).toEqual([
+      { op: 'update', path: REL, content: 'EXTERNAL\nA' },
+    ]);
+  });
+
+  test('a file that appears at every create, past maxRetries → MTIME_CONFLICT, nothing left', async () => {
+    const realLink = fsp.link;
+    spyOn(fsp, 'link').mockImplementation(async (tmp, to) => {
+      // A sync client puts its file there at each link, and takes it away after.
+      writeFileSync(to, 'x');
+      try {
+        await realLink(tmp, to);
+      } finally {
+        rmSync(to);
+      }
+    });
+    let calls = 0;
+    let err: unknown;
+    try {
+      await withFileTransform(
+        file,
+        KEY,
+        REL,
+        () => {
+          calls++;
+
+          return 'A';
+        },
+        { allowCreate: true, maxRetries: 1 },
+      );
+    } catch (e) {
+      err = e;
+    } finally {
+      mock.restore();
+    }
+    expect(err).toBeInstanceOf(MdVaultError);
+    expect((err as MdVaultError).code).toBe('MTIME_CONFLICT');
+    expect(((err as MdVaultError).cause as MdVaultError).code).toBe(
+      'ALREADY_EXISTS',
+    );
+    expect(calls).toBe(2);
+    expect(await fsp.readdir(dir)).toEqual([]); // no note, no tmp
+  });
+
+  test('a file that changes under every update, past maxRetries → MTIME_CONFLICT', async () => {
+    await writeFile(file, 'base');
+    let calls = 0;
+    let err: unknown;
+    try {
+      await withFileTransform(
+        file,
+        KEY,
+        REL,
+        (c) => {
+          calls++;
+          writeFileSync(file, `${c}X`); // another writer, after each read
+
+          return `${c}A`;
+        },
+        { maxRetries: 1 },
+      );
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(MdVaultError);
+    expect((err as MdVaultError).code).toBe('MTIME_CONFLICT');
+    expect(calls).toBe(2);
+    expect(await readFile(file, 'utf8')).toBe('baseXX');
+  });
+
   test('a symlinked path is refused, and the link and its target stay (#46)', async () => {
     const real = join(dir, 'real.md');
     await writeFile(real, 'old\n');
@@ -172,6 +267,21 @@ describe('withFileTransform', () => {
     expect((err as MdVaultError).code).toBe('ALLOWLIST_VIOLATION');
     expect((await lstat(file)).isSymbolicLink()).toBe(true);
     expect(await readFile(real, 'utf8')).toBe('old\n');
+  });
+
+  test('a dangling symlink at the path is refused on create, and the link stays', async () => {
+    await symlink(join(dir, 'gone.md'), file);
+    let err: unknown;
+    try {
+      await withFileTransform(file, KEY, REL, () => 'new', {
+        allowCreate: true,
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect((err as MdVaultError).code).toBe('ALLOWLIST_VIOLATION');
+    expect((await lstat(file)).isSymbolicLink()).toBe(true);
+    expect(await statSig(join(dir, 'gone.md'))).toBeNull();
   });
 
   test('a chmod made during the write is kept: the update retries on it (#46)', async () => {

@@ -83,7 +83,14 @@ export async function exclusiveCreate(
     try {
       await link(tmp, fullPath); // O_EXCL via hardlink: fails EEXIST if target present
     } catch (err) {
+      // ponytail: on NFS a link() that took effect can still fail with
+      // EEXIST, so a create that happened is reported as ALREADY_EXISTS. The
+      // tmp's link count is no proof (another tool can hard-link the tmp);
+      // the fix compares the inodes, #76.
       if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+        // A link there, dangling or not, is refused as every write refuses
+        // it (docs/pdr/0001), not reported as a file that is there.
+        await fileAt(fullPath);
         throw new MdVaultError(
           'ALREADY_EXISTS',
           `already exists: ${fullPath}`,

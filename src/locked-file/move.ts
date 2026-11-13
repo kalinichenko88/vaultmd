@@ -29,7 +29,8 @@ import type { MoveTarget } from './models/move-target.ts';
  * @param opts Optional `onCommit` callback and cross-process lock config.
  * @throws {@link MdVaultError} `VALIDATION_ERROR` if both keys are identical
  * (the lock is serializing, not reentrant), `NOT_FOUND` if the source is
- * absent, `ALREADY_EXISTS` if the destination is taken, `MTIME_CONFLICT` if
+ * absent, `ALREADY_EXISTS` if the destination is taken (`ALLOWLIST_VIOLATION`
+ * if a symlink takes it), `MTIME_CONFLICT` if
  * the source changed under the move, or `UNSAFE_MODE` if the OS gives the
  * destination a mode that gives the group or the others more access than the
  * source's mode did.

@@ -4,6 +4,10 @@
 - Level: project
 - Date: 2026-11-13
 
+## Updates
+
+- 2026-11-14 #45: Options considered. Was: "two writers in one lock, with no CAS for a create (#45)."
+
 ## Decision
 
 A cross-process writer lock is taken over only when nobody has refreshed it
@@ -44,8 +48,7 @@ lock gets a liveness check that does not depend on the pid.
 - Keep the pid check, and record the PID namespace (`boot_id` and the inode of
   `/proc/self/ns/pid` on Linux) beside the pid; check the pid only when both
   match. Keeps the instant takeover; adds Linux-only code that only CI runs.
-- Keep the pid check as it was: two writers in one lock, with no CAS for a
-  create (#45).
+- Keep the pid check as it was: two writers in one lock.
 - A lock that the kernel holds (`flock` or `fcntl` through `bun:ffi`): freed
   at once when its holder dies, in any PID namespace of one kernel. Needs
   native calls for each OS, and a network filesystem may not carry the lock.
