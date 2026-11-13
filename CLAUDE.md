@@ -138,6 +138,13 @@ code** — only the API-freeze test (`src/__tests__/index.test.ts`) imports it.
   than the note's mode (in the note's group) or the shared bits (in another
   group; a fixed-mode mount needs the first) fails with `UNSAFE_MODE`. A move
   copies them from its source. Never trade this for a write in place.
+- **A writer's lock is stale by its age alone — a product decision, do not
+  undo it** ([PDR 0003](docs/pdr/0003-a-lock-is-stale-by-its-age-alone.md)).
+  `withCrossProcessLock` (`src/locks/cross-process.ts`) takes a lockfile over
+  only when nobody refreshed it for `STALE_MS` and its mtime stays the same
+  for three heartbeats. It reads neither a pid nor a host name: under one host
+  name, a pid does not tell a dead writer from a live one in another PID
+  namespace. Do not add a pid check back.
 - **Index db location.** The index `.db` and its `-wal`/`-shm` sidecars must live
   in a data dir, **not** the synced vault, and stay gitignored (`*.db*` already
   is).

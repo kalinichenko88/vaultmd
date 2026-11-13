@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  lstat,
   mkdir,
   open,
   readFile,
@@ -26,16 +27,24 @@ export async function withCrossProcessLock<T>(
     `${createHash('sha256').update(key).digest('hex')}.lock`,
   );
   // `id` tells this holder's lockfile from the next one on the same key.
+  // `holder` is for a person who reads a stuck lockfile, and no code reads it.
+  // It is not `pid` and `host`: versions before #62 read those to take a lock
+  // over at once, and would take a live one from another PID namespace.
   const payload = JSON.stringify({
-    pid: process.pid,
-    host: hostname(),
+    holder: `${process.pid}@${hostname()}`,
     id: randomUUID(),
   });
   const beatMs = Math.min(1000, staleMs / 4);
-  const watch: Watch = { mtimeMs: Number.NaN, since: 0, lengthMs: beatMs * 3 };
-  const deadline = performance.now() + busyTimeoutMs;
+  const watch: Watch = {
+    mtimeMs: Number.NaN,
+    since: 0,
+    begun: 0,
+    lengthMs: beatMs * 3,
+  };
+  const start = performance.now();
+  const deadline = start + busyTimeoutMs;
 
-  for (;;) {
+  for (let poll = start; ; poll = performance.now()) {
     try {
       await createLockfile(lockfile, payload);
       break; // acquired
@@ -43,13 +52,13 @@ export async function withCrossProcessLock<T>(
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
         throw err;
       }
-      const next = await reclaim(lockfile, staleMs, watch);
+      const next = await reclaim(lockfile, staleMs, watch, poll);
       if (next === 'retry') {
         continue;
       }
-      // A watch that began before the deadline runs to its end, so that any
-      // busyTimeoutMs can take a stale lock over.
-      const watching = next === 'watching' && watch.since < deadline;
+      // A watch begun in a poll that started by the deadline runs to its end,
+      // so that a busyTimeoutMs of 0 or more can take a stale lock over.
+      const watching = next === 'watching' && watch.begun <= deadline;
       if (performance.now() >= deadline && !watching) {
         throw new MdVaultError(
           'MTIME_CONFLICT',
@@ -85,20 +94,31 @@ export async function withCrossProcessLock<T>(
   }
 }
 
-// A lockfile that nobody refreshed for this long is stale, whatever it holds:
-// the name of a host that is gone, a pid that a new process got, or a payload
-// that a crash cut off.
+// A lockfile that nobody refreshed for this long is stale. Only the age tells:
+// a pid says nothing to a waiter in another PID namespace, even under the same
+// host name (#62, PDR 0003), so a dead holder's lock waits out the bound.
 // ponytail: a live holder loses the lock when its event loop blocks for about
 // STALE_MS, or for longer than the 3 s watch just after the machine wakes or
 // the clock steps; a heartbeat off the main thread would close both, if they
-// ever matter.
+// ever matter. A dead holder's lockfile whose mtime is in the future, after
+// the clock was stepped back, waits until the clock passes its mtime by
+// STALE_MS, plus the watch: taking it sooner would take a live holder's lock
+// whose heartbeat waits on SQLite.
 export const STALE_MS = 30_000;
 
 // The age is read on the wall clock, which jumps forward when the machine
 // wakes from sleep or the clock is stepped, before the holder's heartbeat has
 // run again. So a waiter takes a lockfile as aged only once it has also seen
-// the same mtime for three heartbeats (lengthMs) on its own monotonic clock.
-type Watch = { mtimeMs: number; since: number; lengthMs: number };
+// the same mtime for three heartbeats (lengthMs) on its own monotonic clock:
+// from after the stat that first saw it (since) to before the stat that sees
+// it again. `begun` is the start of the poll in which the watch began, which
+// the deadline reads.
+type Watch = {
+  mtimeMs: number;
+  since: number;
+  begun: number;
+  lengthMs: number;
+};
 
 // The exclusive create makes this process the file's only writer, so a write
 // that fails leaves no cut-off lockfile to block the key: the file goes.
@@ -117,15 +137,16 @@ async function createLockfile(
   }
 }
 
-// Two waiters that both read the dead holder's file would each remove it, and
-// the second would remove the lock the first had just taken. So only the
-// waiter that holds the guard removes it, after it checks the lockfile again.
+// Two waiters that both find the lockfile stale would each remove it, and the
+// second would remove the lock the first had just taken. So only the waiter
+// that holds the guard removes it, after it checks the lockfile again.
 async function reclaim(
   lockfile: string,
   staleMs: number,
   watch: Watch,
+  poll: number,
 ): Promise<'retry' | 'watching' | 'busy'> {
-  const before = await staleness(lockfile, staleMs, watch);
+  const before = await staleness(lockfile, staleMs, watch, poll);
   if (before !== 'stale') {
     return outcomeOf(before);
   }
@@ -150,7 +171,7 @@ async function reclaim(
     );
   }
   try {
-    const now = await staleness(lockfile, staleMs, watch);
+    const now = await staleness(lockfile, staleMs, watch, poll);
     if (now !== 'stale') {
       return outcomeOf(now);
     }
@@ -180,47 +201,34 @@ async function staleness(
   lockfile: string,
   staleMs: number,
   watch: Watch,
+  poll: number,
 ): Promise<'gone' | 'live' | 'watching' | 'stale'> {
-  const info = await stat(lockfile).catch(() => null);
+  const asked = performance.now();
+  // lstat, so that a link at the path is judged as a file: stat would fail on
+  // a dangling one, and any error but ENOENT read as 'gone' spins the poll.
+  const info = await lstat(lockfile).catch((err: NodeJS.ErrnoException) => {
+    if (err.code === 'ENOENT') {
+      return null;
+    }
+    throw err;
+  });
   if (!info) {
     return 'gone';
   }
-  const old = isOld(info.mtimeMs, staleMs);
-  if (old) {
-    if (watch.mtimeMs !== info.mtimeMs) {
-      watch.mtimeMs = info.mtimeMs;
-      watch.since = performance.now();
-    } else if (performance.now() - watch.since >= watch.lengthMs) {
-      return 'stale';
-    }
+  if (!isOld(info.mtimeMs, staleMs)) {
+    return 'live';
   }
-  if (await holderIsDead(lockfile)) {
+  if (watch.mtimeMs !== info.mtimeMs) {
+    watch.mtimeMs = info.mtimeMs;
+    watch.since = performance.now();
+    watch.begun = poll;
+  } else if (asked - watch.since >= watch.lengthMs) {
     return 'stale';
   }
 
-  return old ? 'watching' : 'live';
+  return 'watching';
 }
 
 function isOld(mtimeMs: number, staleMs: number): boolean {
   return Date.now() - mtimeMs > staleMs;
-}
-
-// A same-host pid tells at once that the holder is dead.
-async function holderIsDead(lockfile: string): Promise<boolean> {
-  let holder: { pid?: unknown; host?: unknown };
-  try {
-    holder = { ...JSON.parse(await readFile(lockfile, 'utf8')) };
-  } catch {
-    return false; // gone, or not written in full yet
-  }
-  if (holder.host !== hostname() || typeof holder.pid !== 'number') {
-    return false;
-  }
-  try {
-    process.kill(holder.pid, 0);
-
-    return false; // alive, or the pid is reused: the age tells later
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'ESRCH'; // EPERM: alive
-  }
 }
