@@ -29,10 +29,11 @@ export type CreateVaultConfig = VaultIoConfig & {
   /**
    * Milliseconds to wait for a busy SQLite lock before throwing (default 5000).
    * Applies to both read and write operations, and is also how long a write
-   * waits for the cross-process lock. With `crossProcessWriterLock` on, keep
-   * it below 20000: a writer refreshes its lock from the event loop, so a
-   * SQLite wait or other synchronous work that blocks the loop for about 30
-   * seconds can let another process take the writer's lock.
+   * waits for the cross-process lock (see `crossProcessWriterLock` for the 3
+   * seconds more that a stale lock can take). With `crossProcessWriterLock`
+   * on, keep it below 20000: a writer refreshes its lock from the event loop,
+   * so a SQLite wait or other synchronous work that blocks the loop for about
+   * 30 seconds can let another process take the writer's lock.
    */
   sqliteBusyTimeoutMs?: number;
   /**

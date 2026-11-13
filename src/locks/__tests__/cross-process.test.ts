@@ -50,7 +50,8 @@ describe('withCrossProcessLock', () => {
     await utimes(file, past, past);
   };
 
-  // A short stale bound, so that a waiter confirms an old mtime in 100 ms.
+  // A short stale bound: heartbeats every 50 ms, an old mtime confirmed in
+  // 150 ms.
   const STALE = 200;
 
   test('runs fn, creating lockDir if missing, then releases the lockfile', async () => {
@@ -156,6 +157,7 @@ describe('withCrossProcessLock', () => {
       JSON.stringify({ pid: process.pid, host: hostname() }),
     ],
     ['a payload that a crash cut off', '{"pid":12'],
+    ['a payload that is not an object', 'null'],
   ])(
     'reclaims a lockfile of %s, once past the stale bound',
     async (_, content) => {
@@ -224,9 +226,10 @@ describe('withCrossProcessLock', () => {
   test('keeps the lock of a live holder when the wall clock jumps past the stale bound', async () => {
     const key = 'note.md';
     // The holder's first heartbeat comes 200 ms in, well after the waiter's
-    // second poll: only the wait on the waiter's own clock keeps it out.
+    // second poll, and the hold outlasts the 600 ms watch: only the watch,
+    // reset by that heartbeat, keeps the waiter out.
     const staleMs = 800;
-    const { state, done } = await holdLock(key, 600, staleMs);
+    const { state, done } = await holdLock(key, 1000, staleMs);
     await pastStaleBound(lockPath(dir, key)); // as the machine waking from sleep
 
     const overlapped = await withCrossProcessLock(
@@ -322,9 +325,50 @@ describe('withCrossProcessLock', () => {
     await pastStaleBound(lockPath(dir, key));
     await pastStaleBound(guard);
 
+    // The call waits 50 ms; the watch alone takes 225 ms.
     expect(
-      await withCrossProcessLock(dir, key, 1000, async () => 'ok', STALE),
+      await withCrossProcessLock(dir, key, 50, async () => 'ok', 300),
     ).toBe('ok');
+  });
+
+  test('takes a stale lockfile over when a slow read outlasts the watch', async () => {
+    const key = 'note.md';
+    await writeFile(lockPath(dir, key), '{"pid":12');
+    await pastStaleBound(lockPath(dir, key));
+    const real = fsp.readFile;
+    spyOn(fsp, 'readFile').mockImplementation((async (file, options) => {
+      await Bun.sleep(100);
+
+      return real(file, options);
+    }) as typeof real);
+
+    expect(
+      await withCrossProcessLock(dir, key, 50, async () => 'ok', 300),
+    ).toBe('ok');
+  });
+
+  test('stops waiting at the deadline when an old mtime keeps changing', async () => {
+    const key = 'note.md';
+    await writeFile(lockPath(dir, key), '{"pid":12');
+    // A holder whose clock lags a minute: each heartbeat writes an old mtime.
+    let lag = 60_000;
+    const beat = setInterval(() => {
+      lag -= 1;
+      const old = new Date(Date.now() - lag);
+      utimes(lockPath(dir, key), old, old).catch(() => {});
+    }, 20);
+
+    const start = performance.now();
+    try {
+      await expect(
+        withCrossProcessLock(dir, key, 100, async () => 'never', 300),
+      ).rejects.toThrow('cross-process lock busy');
+    } finally {
+      clearInterval(beat);
+    }
+
+    // The deadline, plus at most one watch (225 ms) begun before it.
+    expect(performance.now() - start).toBeLessThan(600);
   });
 
   test('keeps the reclaim guard of a live waiter', async () => {

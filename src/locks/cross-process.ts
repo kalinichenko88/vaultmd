@@ -32,7 +32,7 @@ export async function withCrossProcessLock<T>(
     id: randomUUID(),
   });
   const beatMs = Math.min(1000, staleMs / 4);
-  const watch: Watch = { mtimeMs: Number.NaN, since: -Infinity, beatMs };
+  const watch: Watch = { mtimeMs: Number.NaN, since: 0, lengthMs: beatMs * 3 };
   const deadline = performance.now() + busyTimeoutMs;
 
   for (;;) {
@@ -43,12 +43,13 @@ export async function withCrossProcessLock<T>(
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
         throw err;
       }
-      if (await removeIfStale(lockfile, staleMs, watch)) {
-        continue; // the stale lockfile is gone: take the lock now
+      const next = await reclaim(lockfile, staleMs, watch);
+      if (next === 'retry') {
+        continue;
       }
-      // A watch that has begun runs to its end, past the deadline if it must,
-      // so that any busyTimeoutMs can take a stale lock over.
-      const watching = performance.now() - watch.since < watch.beatMs * 3;
+      // A watch that began before the deadline runs to its end, so that any
+      // busyTimeoutMs can take a stale lock over.
+      const watching = next === 'watching' && watch.since < deadline;
       if (performance.now() >= deadline && !watching) {
         throw new MdVaultError(
           'MTIME_CONFLICT',
@@ -88,14 +89,16 @@ export async function withCrossProcessLock<T>(
 // the name of a host that is gone, a pid that a new process got, or a payload
 // that a crash cut off.
 // ponytail: a live holder loses the lock when its event loop blocks for about
-// STALE_MS; a heartbeat off the main thread would close that, if it matters.
+// STALE_MS, or for longer than the 3 s watch just after the machine wakes or
+// the clock steps; a heartbeat off the main thread would close both, if they
+// ever matter.
 export const STALE_MS = 30_000;
 
 // The age is read on the wall clock, which jumps forward when the machine
 // wakes from sleep or the clock is stepped, before the holder's heartbeat has
 // run again. So a waiter takes a lockfile as aged only once it has also seen
-// the same mtime for three heartbeats on its own monotonic clock.
-type Watch = { mtimeMs: number; since: number; beatMs: number };
+// the same mtime for three heartbeats (lengthMs) on its own monotonic clock.
+type Watch = { mtimeMs: number; since: number; lengthMs: number };
 
 // The exclusive create makes this process the file's only writer, so a write
 // that fails leaves no cut-off lockfile to block the key: the file goes.
@@ -117,13 +120,14 @@ async function createLockfile(
 // Two waiters that both read the dead holder's file would each remove it, and
 // the second would remove the lock the first had just taken. So only the
 // waiter that holds the guard removes it, after it checks the lockfile again.
-async function removeIfStale(
+async function reclaim(
   lockfile: string,
   staleMs: number,
   watch: Watch,
-): Promise<boolean> {
-  if (!(await isStale(lockfile, staleMs, watch))) {
-    return false;
+): Promise<'retry' | 'watching' | 'busy'> {
+  const before = await staleness(lockfile, staleMs, watch);
+  if (before !== 'stale') {
+    return outcomeOf(before);
   }
   const guard = `${lockfile}.reclaim`;
   try {
@@ -132,19 +136,23 @@ async function removeIfStale(
     if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
       throw err;
     }
-    // ponytail: a waiter that dies while it holds the guard leaves it; the
-    // guard then ages out by its mtime alone, and only after such a death can
-    // two waiters race on it.
+    // ponytail: a guard left by a waiter that died while it held it, or seen
+    // across a clock jump, is judged by its mtime alone; only then can two
+    // waiters race on it.
     const info = await stat(guard).catch(() => null);
-    if (info && Date.now() - info.mtimeMs > staleMs) {
-      await unlink(guard).catch(() => {});
+    if (!info || !isOld(info.mtimeMs, staleMs)) {
+      return 'busy';
     }
 
-    return false;
+    return unlink(guard).then(
+      () => 'retry',
+      (e: NodeJS.ErrnoException) => (e.code === 'ENOENT' ? 'retry' : 'busy'),
+    );
   }
   try {
-    if (!(await isStale(lockfile, staleMs, watch))) {
-      return false;
+    const now = await staleness(lockfile, staleMs, watch);
+    if (now !== 'stale') {
+      return outcomeOf(now);
     }
     await unlink(lockfile).catch((err: NodeJS.ErrnoException) => {
       if (err.code !== 'ENOENT') {
@@ -152,28 +160,56 @@ async function removeIfStale(
       }
     });
 
-    return true;
+    return 'retry';
   } finally {
     await unlink(guard).catch(() => {});
   }
 }
 
-async function isStale(
+function outcomeOf(
+  state: 'gone' | 'live' | 'watching',
+): 'retry' | 'watching' | 'busy' {
+  if (state === 'gone') {
+    return 'retry';
+  }
+
+  return state === 'watching' ? 'watching' : 'busy';
+}
+
+async function staleness(
   lockfile: string,
   staleMs: number,
   watch: Watch,
-): Promise<boolean> {
+): Promise<'gone' | 'live' | 'watching' | 'stale'> {
   const info = await stat(lockfile).catch(() => null);
   if (!info) {
-    return false; // gone: the caller polls again
+    return 'gone';
   }
-  if (hasAged(info.mtimeMs, staleMs, watch)) {
-    return true;
+  const old = isOld(info.mtimeMs, staleMs);
+  if (old) {
+    if (watch.mtimeMs !== info.mtimeMs) {
+      watch.mtimeMs = info.mtimeMs;
+      watch.since = performance.now();
+    } else if (performance.now() - watch.since >= watch.lengthMs) {
+      return 'stale';
+    }
   }
-  // Fresh, but its holder can be dead already: a same-host pid tells at once.
+  if (await holderIsDead(lockfile)) {
+    return 'stale';
+  }
+
+  return old ? 'watching' : 'live';
+}
+
+function isOld(mtimeMs: number, staleMs: number): boolean {
+  return Date.now() - mtimeMs > staleMs;
+}
+
+// A same-host pid tells at once that the holder is dead.
+async function holderIsDead(lockfile: string): Promise<boolean> {
   let holder: { pid?: unknown; host?: unknown };
   try {
-    holder = JSON.parse(await readFile(lockfile, 'utf8'));
+    holder = { ...JSON.parse(await readFile(lockfile, 'utf8')) };
   } catch {
     return false; // gone, or not written in full yet
   }
@@ -187,18 +223,4 @@ async function isStale(
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === 'ESRCH'; // EPERM: alive
   }
-}
-
-function hasAged(mtimeMs: number, staleMs: number, watch: Watch): boolean {
-  if (Date.now() - mtimeMs <= staleMs) {
-    return false;
-  }
-  if (watch.mtimeMs !== mtimeMs) {
-    watch.mtimeMs = mtimeMs;
-    watch.since = performance.now();
-
-    return false;
-  }
-
-  return performance.now() - watch.since >= watch.beatMs * 3;
 }

@@ -8,6 +8,10 @@
 export type CrossLock = {
   /** Absolute path to the directory where lock files are stored. */
   lockDir: string;
-  /** Milliseconds to wait for the lock before throwing a busy error. */
+  /**
+   * Milliseconds to wait for the lock before throwing a busy error. A wait
+   * that has begun to confirm that a lock file is stale goes on for up to 3
+   * seconds more, until it knows.
+   */
   busyTimeoutMs: number;
 };
